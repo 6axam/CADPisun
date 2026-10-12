@@ -18,3 +18,12 @@ uv sync --python 3.12.12 --extra dev
 uv run pytest
 ```
 
+## I-01 — завершён 2026-10-12
+
+- Добавлен immutable directed IR для Line, Quadratic, Cubic, Stroke и StrokeSet.
+- Реализованы строгая canonical JSON-сериализация, запрет duplicate keys и
+  нечисловых значений, именованные frames и явный Affine2.
+- Bounds вычисляют внутренние экстремумы Q/C; flattening использует De Casteljau,
+  предел ошибки, предел длины хорды, глубины и общего числа сегментов.
+- T-G01…T-G06 и дополнительные serialization tests: 13/13 успешно.
+

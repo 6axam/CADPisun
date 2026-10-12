@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "extensions": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "format": { "minLength": 1, "type": "string" },
+    "id": { "minLength": 1, "type": "string" },
+    "payload": { "additionalProperties": true, "type": "object" },
+    "schema_version": { "pattern": "^\\d+\\.\\d+$", "type": "string" }
+  },
+  "required": ["format", "schema_version", "id", "payload"],
+  "title": "Envelope",
+  "type": "object"
+}
+
