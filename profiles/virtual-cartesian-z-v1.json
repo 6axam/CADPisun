@@ -1,0 +1,33 @@
+{
+  "axes": {
+    "X": {"maximum": 210.0, "minimum": 0.0},
+    "Y": {"maximum": 297.0, "minimum": 0.0},
+    "Z": {"maximum": 10.0, "minimum": 0.0}
+  },
+  "dialect_id": "virtual-gcode-v1",
+  "feeds": {"actuate_mm_s": 5.0, "draw_mm_s": 10.0, "travel_mm_s": 30.0},
+  "flatten_tolerance_mm": 0.02,
+  "format": "hp-machine-profile",
+  "initial_pen_state": "UP",
+  "initial_position_mm": [0.0, 0.0, 5.0],
+  "kinematics_kind": "cartesian",
+  "max_segments": 2000000,
+  "nominal_acceleration_mm_s2": 100.0,
+  "page_height_mm": 297.0,
+  "page_y_reflected": true,
+  "pen": {
+    "actuator_kind": "z_axis",
+    "down_z_mm": 0.0,
+    "settle_down_s": 0.1,
+    "settle_up_s": 0.1,
+    "up_z_mm": 5.0
+  },
+  "pen_width_mm": 0.35,
+  "profile_id": "virtual-cartesian-z-v1",
+  "quantization_mm": 0.001,
+  "revision": "1.0.0",
+  "schema_version": "1.0",
+  "simulation_only": true,
+  "transport_kind": "none"
+}
+

@@ -94,3 +94,17 @@ uv run pytest
   добавляет пунктирные travels и номера.
 - T-P01…T-P03/T-E01…T-E03 и накопленный набор: 48/48 успешно.
 
+## I-08 — завершён 2026-10-12
+
+- Добавлен единственный профиль `virtual-cartesian-z-v1`, строго
+  `simulation_only=true`, с XYZ limits, известным start state, Page→Work
+  `(x, 297-y)`, Z pen macro, feeds и settle из DATA_MODELS §6.
+- Планировщик выполняет transform→flatten≤0.02 mm→quantize 0.001 mm→повторную
+  bounds/state проверку; общий численный budget≤0.05 mm. Схлопнувшийся целиком
+  semantic stroke отклоняется.
+- Virtual dialect выдаёт только G21/G90/G94, G1 с явным F и G4 P; XY и Z не
+  смешиваются. Независимый parser отвергает G0/M-коды, control injection,
+  неизвестные axes/слова и сравнивает decoded geometry с раскрытым MotionPlan.
+- T-M01…T-M07 и накопленный набор: 58/58 успешно. Реального machine profile,
+  transport или sender нет.
+
