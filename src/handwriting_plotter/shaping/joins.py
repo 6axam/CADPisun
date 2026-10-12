@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 
 from handwriting_plotter.geometry.curves import Cubic, Point2, Stroke
+from handwriting_plotter.geometry.collision import point_segment_distance
+from handwriting_plotter.geometry.flatten import FlattenLimits, flatten_segment
 from handwriting_plotter.text.breaks import script_of
 
 from .placement import PlacedGlyph
@@ -21,7 +23,41 @@ def _angle(a: Point2, b: Point2) -> float:
     return math.degrees(math.acos(dot))
 
 
-def connect(left: PlacedGlyph, right: PlacedGlyph) -> Stroke | RejectedJoin:
+def _clearance_ok(
+    connector: Cubic,
+    left: PlacedGlyph,
+    right: PlacedGlyph,
+    pen_width_mm: float,
+) -> bool:
+    connector_lines, _ = flatten_segment(connector, 0.01, FlattenLimits(max_chord_length=0.25))
+    obstacles = []
+    for glyph, adjacent_id, adjacent_end in (
+        (left, left.body_stroke_id, "end"),
+        (right, right.body_stroke_id, "start"),
+    ):
+        for stroke in glyph.strokes:
+            for segment_index, segment in enumerate(stroke.segments):
+                if stroke.id == adjacent_id:
+                    if adjacent_end == "end" and segment_index == len(stroke.segments) - 1:
+                        continue
+                    if adjacent_end == "start" and segment_index == 0:
+                        continue
+                lines, _ = flatten_segment(segment, 0.01, FlattenLimits(max_chord_length=0.25))
+                obstacles.extend(lines)
+    clearance = pen_width_mm + 0.05 + 0.02
+    for line in connector_lines:
+        midpoint = line.p0.lerp(line.p1, 0.5)
+        if any(point_segment_distance(midpoint, obstacle) < clearance for obstacle in obstacles):
+            return False
+    return True
+
+
+def connect(
+    left: PlacedGlyph,
+    right: PlacedGlyph,
+    *,
+    pen_width_mm: float = 0.35,
+) -> Stroke | RejectedJoin:
     if left.join_mode != "single_body_deferred_marks" or right.join_mode != "single_body_deferred_marks":
         return RejectedJoin("JOIN_MODE_NONE")
     if left.exit is None or right.entry is None:
@@ -55,9 +91,12 @@ def connect(left: PlacedGlyph, right: PlacedGlyph) -> Stroke | RejectedJoin:
     )
     if min(c1.x, c2.x, right.entry.point.x) < left.exit.point.x - 1e-9:
         return RejectedJoin("BACKWARD_X")
+    connector = Cubic(left.exit.point, c1, c2, right.entry.point)
+    if not _clearance_ok(connector, left, right, pen_width_mm):
+        return RejectedJoin("CLEARANCE_COLLISION")
     return Stroke(
         f"join:{left.match.occurrence_id}:{right.match.occurrence_id}",
-        (Cubic(left.exit.point, c1, c2, right.entry.point),),
+        (connector,),
         tuple(item.id for item in (*left.match.graphemes, *right.match.graphemes)),
         "connector",
         "authored",

@@ -122,7 +122,14 @@ def _split_word(
     chosen: ShapedWord | None = None
     chosen_length = 0
     for length in range(1, len(graphemes) + 1):
-        candidate = shaper.shape(graphemes[:length], style, seed=seed, x_height_mm=spec.x_height_mm, variation=variation)
+        candidate = shaper.shape(
+            graphemes[:length],
+            style,
+            seed=seed,
+            x_height_mm=spec.x_height_mm,
+            pen_width_mm=spec.pen_width_mm,
+            variation=variation,
+        )
         if _occupied(candidate, spec.pen_width_mm)[2] <= spec.printable_width:
             chosen = candidate
             chosen_length = length
@@ -250,10 +257,72 @@ def layout_document(
                 diagnostics.append("EXPLICIT_PAGE_BREAK")
             index += 1
             continue
+        block_words: list[tuple[tuple[Grapheme, ...], Token]] = [(graphemes, token)]
+        block_spaces: list[tuple[Grapheme, ...]] = []
+        scan = index
+        while scan + 2 < len(queue):
+            next_kind, next_graphemes, next_token = queue[scan + 1]
+            following_kind, following_graphemes, following_token = queue[scan + 2]
+            if (
+                next_kind != "space"
+                or next_token is None
+                or next_token.break_policy != "nonbreakable"
+                or following_kind != "word"
+                or following_token is None
+            ):
+                break
+            block_spaces.append(next_graphemes)
+            block_words.append((following_graphemes, following_token))
+            scan += 2
+        if len(block_words) > 1:
+            nominal = style.manifest.metrics.space_advance_gu * page_spec.x_height_mm / 1000
+            relative_words: list[_LineWord] = []
+            block_x = 0.0
+            for word_index, (word_graphemes, _) in enumerate(block_words):
+                shaping_operations += 1
+                if shaping_operations > 1_000_000:
+                    raise ValueError("RESOURCE_LIMIT:shaping-operations")
+                block_shape = shaper.shape(
+                    word_graphemes,
+                    style,
+                    seed=seed,
+                    x_height_mm=page_spec.x_height_mm,
+                    pen_width_mm=page_spec.pen_width_mm,
+                    variation=variation,
+                )
+                left, _, width = _occupied(block_shape, page_spec.pen_width_mm)
+                relative_words.append(_LineWord(block_shape, block_x - left))
+                block_x += width
+                if word_index < len(block_words) - 1:
+                    space_text = "".join(item.nfc for item in block_spaces[word_index])
+                    block_x += nominal * (0.5 if space_text == "\u202f" else 1.0)
+            if block_x > page_spec.printable_width + 1e-9:
+                raise ValueError("NONBREAKABLE_OVERFLOW")
+            if current and current_x + pending_gap + block_x > page_spec.printable_width + 1e-9:
+                finish_line()
+                continue
+            base_x = current_x + pending_gap
+            current.extend(_LineWord(item.shape, base_x + item.x) for item in relative_words)
+            current_x += pending_gap + block_x
+            pending_gap = 0
+            pending_nonbreakable = False
+            for word_graphemes, _ in block_words:
+                coverage.extend(item.id for item in word_graphemes)
+            for space_graphemes in block_spaces:
+                coverage.extend(item.id for item in space_graphemes)
+            index = scan + 1
+            continue
         shaping_operations += 1
         if shaping_operations > 1_000_000:
             raise ValueError("RESOURCE_LIMIT:shaping-operations")
-        shape = shaper.shape(graphemes, style, seed=seed, x_height_mm=page_spec.x_height_mm, variation=variation)
+        shape = shaper.shape(
+            graphemes,
+            style,
+            seed=seed,
+            x_height_mm=page_spec.x_height_mm,
+            pen_width_mm=page_spec.pen_width_mm,
+            variation=variation,
+        )
         left, _, width = _occupied(shape, page_spec.pen_width_mm)
         required = pending_gap + width
         if current and current_x + required > page_spec.printable_width + 1e-9:

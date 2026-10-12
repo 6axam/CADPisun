@@ -1,6 +1,6 @@
 # Технологический стек и политика зависимостей
 
-Срез 2026-10-12. Ни установка, ни разрешение transitive dependencies здесь не выполнялись. Зафиксированные версии — конкретные кандидаты для стартового lock, а не сертификат совместимости. Проверка в чистом Linux venv — пакет I-00 в [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Не заменять эти версии свежими автоматически.
+Срез 2026-10-12. Pins ниже разрешены и проверены в I-00 на CPython 3.12.12/Linux x86_64; точные transitive версии и hashes находятся в `uv.lock`, отчёт — в `docs/implementation-status.md`. Не заменять эти версии свежими автоматически.
 
 ## 1. Основное окружение
 
@@ -81,4 +81,4 @@ InkSight Small-p допускается только после E-07 из RISKS.
 
 I-00 создаёт base lock с exact transitive versions и hashes из выбранных distributions, фиксирует Python patch и architecture. Каждый adapter тестируется на golden fixtures upstream и наших контрактов. Обновление dependency — отдельное изменение lock + relevant contract tests. Если upstream прекращает сопровождение, immutable data schema и port позволяют заменить один adapter; собственный Stroke IR остаётся рабочим.
 
-Network нужен при явной установке/загрузке проверенных весов; generated pages и styles не отправляются наружу. Ни один указанный здесь пакет сейчас не установлен в рамках этой задачи.
+Network нужен при первоначальной установке зависимостей или явной загрузке будущих проверенных весов; generated pages и styles не отправляются наружу. Base/dev/import-svg зависимости установлены в отдельное `.venv`; vision/HTR/serial не устанавливались.

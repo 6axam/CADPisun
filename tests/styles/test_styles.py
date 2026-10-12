@@ -78,7 +78,7 @@ def test_t_s03_rejects_duplicate_variant_id(tmp_path: Path) -> None:
 
 
 def test_t_s04_svg_import_preserves_subpath_order() -> None:
-    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><path fill="none" d="M0 0 L10 0 Q15 5 20 0 M30 0 C35 0 35 10 40 10"/></svg>'
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path fill="none" d="M0 0 L10 0 Q15 5 20 0 M30 0 C35 0 35 10 40 10"/></svg>'
     strokes = import_centerline_svg(svg)
     assert [stroke.id for stroke in strokes] == ["svg-1-0", "svg-1-1"]
     assert [segment.kind for segment in strokes[0].segments] == ["line", "quadratic"]
@@ -88,7 +88,16 @@ def test_t_s05_svg_import_rejects_entities_arcs_and_filled_paths() -> None:
     with pytest.raises(Exception):
         import_centerline_svg(b'<!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg>&x;</svg>')
     with pytest.raises(ValueError, match="UNSUPPORTED_PATH_COMMAND"):
-        import_centerline_svg(b'<svg><path fill="none" d="M0 0 A2 2 0 0 0 4 4"/></svg>')
+        import_centerline_svg(b'<svg width="10" height="10" viewBox="0 0 10 10"><path fill="none" d="M0 0 A2 2 0 0 0 4 4"/></svg>')
     with pytest.raises(ValueError, match="filled-path"):
-        import_centerline_svg(b'<svg><path fill="black" d="M0 0 L1 1"/></svg>')
+        import_centerline_svg(b'<svg width="10" height="10" viewBox="0 0 10 10"><path fill="black" d="M0 0 L1 1"/></svg>')
+
+
+def test_svg_group_rotation_and_inherited_fill() -> None:
+    svg = b'<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><g transform="translate(2 3)"><path transform="rotate(90)" d="M0 0 L1 0"/></g></svg>'
+    stroke = import_centerline_svg(svg)[0]
+    assert stroke.start.x == pytest.approx(2)
+    assert stroke.start.y == pytest.approx(3)
+    assert stroke.end.x == pytest.approx(2)
+    assert stroke.end.y == pytest.approx(4)
 

@@ -59,6 +59,10 @@ def decode_virtual_gcode(content: bytes, profile: MachineProfile) -> DecodedProg
         if has_xy == has_z or (has_xy and not {"X", "Y"}.issubset(values)):
             raise ValueError("MIXED_OR_INCOMPLETE_AXES")
         target = Point3(values.get("X", position.x), values.get("Y", position.y), values.get("Z", position.z))
+        for axis, value in zip(("X", "Y", "Z"), (target.x, target.y, target.z), strict=True):
+            limits = profile.axes[axis]
+            if not limits.minimum <= value <= limits.maximum:
+                raise ValueError(f"MOVE_OUT_OF_BOUNDS:{axis}")
         mode = "actuate" if has_z else ("draw" if target.z == profile.pen.down_z_mm else "travel")
         moves.append(MoveLinear(target, values["F"] / 60, mode, f"line-{line_number}"))
         position = target

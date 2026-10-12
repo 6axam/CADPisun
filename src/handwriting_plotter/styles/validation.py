@@ -22,13 +22,19 @@ class StyleValidationReport:
 def validate_style(manifest: StyleManifest, variants: tuple[GlyphVariant, ...]) -> StyleValidationReport:
     errors: list[str] = []
     warnings: list[str] = []
-    if manifest.schema_version.split(".", 1)[0] != "1":
+    if manifest.schema_version != "1.0":
         errors.append("UNSUPPORTED_SCHEMA_VERSION")
     variant_ids = [variant.variant_id for variant in variants]
     if len(variant_ids) != len(set(variant_ids)):
         errors.append("DUPLICATE_VARIANT_ID")
-    if any("isolated" not in variant.context_tags for variant in variants):
-        errors.append("MISSING_ISOLATED_CONTEXT")
+    keys = {variant.key for variant in variants}
+    for key in keys:
+        if not any(variant.key == key and "isolated" in variant.context_tags for variant in variants):
+            errors.append(f"MISSING_ISOLATED_CONTEXT:{key}")
+    if len(manifest.coverage) != len(set(manifest.coverage)):
+        errors.append("DUPLICATE_COVERAGE_KEY")
+    if len(manifest.glyph_files) != len(set(manifest.glyph_files)):
+        errors.append("DUPLICATE_GLYPH_FILE")
     coverage = compare_coverage(manifest.coverage, {variant.key for variant in variants})
     if not manifest.license_record.redistribution_allowed:
         warnings.append("LICENSE_RESTRICTS_REDISTRIBUTION")

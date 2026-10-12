@@ -11,6 +11,7 @@ from pathlib import Path
 from .application.service import GenerationRequest, HandwritingPlotterService, read_utf8_text
 from .domain.errors import ExitCode
 from .domain.models import canonical_json_bytes, strict_json_loads
+from .layout.pages import PageSpec
 from .styles.models import StyleManifest
 from .styles.repository import FileStyleRepository
 from .version import __version__
@@ -27,6 +28,13 @@ def _generation_arguments(parser: argparse.ArgumentParser, *, output: bool) -> N
     parser.add_argument("--realism", type=float, default=0.35, help="bounded variation in [0,1]")
     parser.add_argument("--style-root", type=Path, help="explicit StylePack repository root")
     parser.add_argument("--profile", type=Path, help="explicit virtual profile JSON")
+    parser.add_argument("--page-width-mm", type=float, default=210.0)
+    parser.add_argument("--page-height-mm", type=float, default=297.0)
+    parser.add_argument("--margin-mm", type=float, default=15.0, help="uniform page margin")
+    parser.add_argument("--x-height-mm", type=float, default=3.5)
+    parser.add_argument("--line-pitch-mm", type=float, default=9.0)
+    parser.add_argument("--paragraph-gap-mm", type=float, default=4.0)
+    parser.add_argument("--pen-width-mm", type=float, default=0.35)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +61,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _request(args: argparse.Namespace) -> GenerationRequest:
-    return GenerationRequest(args.style, args.style_revision, args.seed, args.realism)
+    page = PageSpec(
+        width_mm=args.page_width_mm,
+        height_mm=args.page_height_mm,
+        margin_left_mm=args.margin_mm,
+        margin_right_mm=args.margin_mm,
+        margin_top_mm=args.margin_mm,
+        margin_bottom_mm=args.margin_mm,
+        x_height_mm=args.x_height_mm,
+        line_pitch_mm=args.line_pitch_mm,
+        paragraph_gap_mm=args.paragraph_gap_mm,
+        pen_width_mm=args.pen_width_mm,
+    )
+    return GenerationRequest(args.style, args.style_revision, args.seed, args.realism, page)
 
 
 def _service(args: argparse.Namespace) -> HandwritingPlotterService:

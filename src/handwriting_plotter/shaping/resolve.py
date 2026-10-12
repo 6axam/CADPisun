@@ -38,6 +38,13 @@ def resolve(graphemes: tuple[Grapheme, ...], style: StyleSnapshot) -> tuple[Glyp
         matches: list[tuple[int, str]] = []
         for length in range(1, min(8, len(graphemes) - index) + 1):
             key = "".join(item.nfc for item in graphemes[index:index + length])
+            candidate_scripts = scripts[index:index + length]
+            if length > 1 and (
+                len(set(candidate_scripts)) != 1
+                or candidate_scripts[0] not in {"Latin", "Cyrillic"}
+                or not all(item.nfc.isalpha() for item in graphemes[index:index + length])
+            ):
+                continue
             if key in style.variants_by_key:
                 matches.append((length, key))
         if not matches:

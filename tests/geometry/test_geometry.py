@@ -10,6 +10,7 @@ from handwriting_plotter.domain.models import canonical_json_bytes, strict_json_
 from handwriting_plotter.geometry.bounds import curve_bounds
 from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic, Stroke, StrokeSet, evaluate
 from handwriting_plotter.geometry.flatten import FlattenLimits, flatten_segment
+from handwriting_plotter.geometry.collision import segment_distance, segments_intersect
 from handwriting_plotter.geometry.transforms import Affine2, transform_strokes
 
 
@@ -78,4 +79,13 @@ def test_cubic_evaluation_endpoints() -> None:
     curve = Cubic(Point2(1, 2), Point2(3, 4), Point2(5, 6), Point2(7, 8))
     assert evaluate(curve, 0) == curve.p0
     assert evaluate(curve, 1) == curve.p1
+
+
+def test_t_g06_collinear_disjoint_segments_are_not_collisions() -> None:
+    first = Line(Point2(0, 0), Point2(1, 0))
+    disjoint = Line(Point2(2, 0), Point2(3, 0))
+    crossing = Line(Point2(0.5, -1), Point2(0.5, 1))
+    assert not segments_intersect(first, disjoint)
+    assert segment_distance(first, disjoint) == pytest.approx(1.0)
+    assert segments_intersect(first, crossing)
 

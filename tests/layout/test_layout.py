@@ -74,6 +74,23 @@ def test_t_l06_nbsp_overflow_is_not_silently_split() -> None:
         layout_document(normalize("hello\u00a0world"), _style(), seed=1, page_spec=spec, variation=VariationSpec(0))
 
 
+def test_nbsp_group_moves_to_next_line_as_one_unit() -> None:
+    spec = PageSpec(
+        width_mm=35,
+        height_mm=100,
+        margin_left_mm=5,
+        margin_right_mm=5,
+        margin_top_mm=5,
+        margin_bottom_mm=5,
+        x_height_mm=3.5,
+        line_pitch_mm=7,
+    )
+    result = layout_document(normalize("a hello\u00a0world"), _style(), seed=1, page_spec=spec, variation=VariationSpec(0))
+    assert len(result.pages[0].lines) == 2
+    assert len(result.pages[0].lines[0].words) == 1
+    assert len(result.pages[0].lines[1].words) == 2
+
+
 def test_t_l07_negative_bearing_is_accounted_for() -> None:
     result = layout_document(normalize("a"), _style(), seed=1, variation=VariationSpec(0))
     assert result.pages[0].ink_bounds.min_x >= 15

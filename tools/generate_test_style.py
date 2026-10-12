@@ -201,6 +201,27 @@ def main() -> None:
     coverage_raw = (json.dumps(coverage_report, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
     (TARGET / "review" / "coverage.json").write_bytes(coverage_raw)
     file_hashes["review/coverage.json"] = hashlib.sha256(coverage_raw).hexdigest()
+    pairs = {
+        "style_id": "test-technical-v1",
+        "revision": "1.0.0",
+        "join_mode": "none",
+        "tested_pairs": [],
+        "warning": "No joins are authored or claimed by this engineering fixture.",
+    }
+    pairs_raw = (json.dumps(pairs, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    (TARGET / "review" / "pairs.json").write_bytes(pairs_raw)
+    file_hashes["review/pairs.json"] = hashlib.sha256(pairs_raw).hexdigest()
+    provenance = {
+        "style_id": "test-technical-v1",
+        "revision": "1.0.0",
+        "source_method": "manual_vector",
+        "generator": "tools/generate_test_style.py",
+        "test_only": True,
+        "not_product_style": "ua-school-v1",
+    }
+    provenance_raw = (json.dumps(provenance, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    (TARGET / "provenance.json").write_bytes(provenance_raw)
+    file_hashes["provenance.json"] = hashlib.sha256(provenance_raw).hexdigest()
     file_hashes["licenses/fixture-mit.txt"] = hashlib.sha256(license_text.encode()).hexdigest()
     manifest = {
         "format": "hp-style", "schema_version": "1.0", "style_id": "test-technical-v1", "revision": "1.0.0",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from handwriting_plotter.domain.models import StrictModel, canonical_hash, canonical_json_bytes, strict_json_loads
 
@@ -50,6 +50,23 @@ class MachineProfile(StrictModel):
     flatten_tolerance_mm: float = Field(gt=0, le=0.02)
     quantization_mm: float = Field(gt=0, le=0.001)
     max_segments: int = Field(gt=0, le=2_000_000)
+
+    @model_validator(mode="after")
+    def exact_virtual_contract(self) -> MachineProfile:
+        if set(self.axes) != {"X", "Y", "Z"}:
+            raise ValueError("virtual profile must define exactly XYZ axes")
+        for name, axis in self.axes.items():
+            if axis.minimum >= axis.maximum:
+                raise ValueError(f"invalid {name} axis range")
+        if not (
+            self.axes["X"].minimum <= self.initial_position_mm[0] <= self.axes["X"].maximum
+            and self.axes["Y"].minimum <= self.initial_position_mm[1] <= self.axes["Y"].maximum
+            and self.axes["Z"].minimum <= self.initial_position_mm[2] <= self.axes["Z"].maximum
+        ):
+            raise ValueError("initial position is out of bounds")
+        if self.pen.up_z_mm == self.pen.down_z_mm:
+            raise ValueError("pen up and down positions must differ")
+        return self
 
     @property
     def revision_hash(self) -> str:

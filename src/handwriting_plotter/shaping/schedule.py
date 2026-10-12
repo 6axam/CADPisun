@@ -41,6 +41,7 @@ class WordShaper:
         *,
         seed: int,
         x_height_mm: float,
+        pen_width_mm: float = 0.35,
         variation: VariationSpec = VariationSpec(),
     ) -> ShapedWord:
         if not graphemes:
@@ -76,7 +77,7 @@ class WordShaper:
             marks: list[Stroke] = [next(stroke for stroke in glyph.strokes if stroke.id == mark) for mark in glyph.deferred_marks]
             run_end = index
             while run_end + 1 < len(placed):
-                connector = connect(placed[run_end], placed[run_end + 1])
+                connector = connect(placed[run_end], placed[run_end + 1], pen_width_mm=pen_width_mm)
                 if isinstance(connector, RejectedJoin):
                     diagnostics.append(
                         f"JOIN_REJECTED:{placed[run_end].match.key}:{placed[run_end + 1].match.key}:{connector.reason}"

@@ -20,6 +20,11 @@ uv run hplot generate examples/first-mvp/input.txt examples/first-mvp/bundle \
   --style test-technical-v1 --style-revision 1.0.0 --seed 20261012
 ```
 
+Размер страницы, единое поле, x-height, line pitch, paragraph gap и ширина пера
+задаются параметрами `--page-width-mm`, `--page-height-mm`, `--margin-mm`,
+`--x-height-mm`, `--line-pitch-mm`, `--paragraph-gap-mm` и `--pen-width-mm`.
+Virtual profile v1 требует ширину пера 0.35 mm.
+
 В bundle находятся исходный текст и request, pinned style manifest, PenPlan,
 production/diagnostic SVG, MotionPlan, virtual G-code, отчёт и manifest с
 SHA-256 каждого артефакта. `page-*.gcode` предназначен только для виртуального

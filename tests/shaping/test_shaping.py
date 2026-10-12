@@ -79,6 +79,40 @@ def test_t_j03_pathological_gap_uses_lifted_fallback() -> None:
     assert any("GAP_TOO_LARGE" in item for item in word.diagnostics)
 
 
+def test_t_j03_connector_clearance_collision_uses_lift() -> None:
+    style = _style()
+    base = style.variants_by_key["a"][0]
+    obstacle = Stroke(
+        "mark",
+        (Line(Point2(500, -100), Point2(500, 100)),),
+        role="mark",
+        direction_provenance="authored",
+    )
+    blocked = GlyphVariant(
+        "a-blocked",
+        "a",
+        (*base.strokes, obstacle),
+        base.advance_gu,
+        base.context_tags,
+        JoinSpec(
+            "single_body_deferred_marks", "body", ("mark",),
+            base.join_spec.entry, base.join_spec.exit, False, False,
+        ),
+        ("mark",),
+    )
+    mapping = dict(style.variants_by_key)
+    mapping["a"] = (blocked,)
+    word = WordShaper().shape(
+        _graphemes("aa"),
+        StyleSnapshot(style.manifest, MappingProxyType(mapping), style.revision_hash),
+        seed=1,
+        x_height_mm=3.5,
+        variation=VariationSpec(0),
+    )
+    assert not any(stroke.role == "connector" for group in word.execution_groups for stroke in group.strokes)
+    assert any("CLEARANCE_COLLISION" in item for item in word.diagnostics)
+
+
 def test_t_j04_deferred_marks_follow_connected_body() -> None:
     word = WordShaper().shape(_graphemes("її"), _style(), seed=2, x_height_mm=3.5, variation=VariationSpec(0))
     assert [group.strokes[0].role for group in word.execution_groups] == ["body", "mark", "mark", "mark", "mark"]

@@ -383,7 +383,9 @@
     "glyphs/u-2264.json": "4fb6df44f169f58371c70fca9fd2a1914db315a29b30ddc32e9f2ddb4a1734f3",
     "glyphs/u-2265.json": "369ae726befeb1a6c465a88644b310c836292ea8b48ec631dfd2a19f9d61b39e",
     "licenses/fixture-mit.txt": "6c9b15e6fbf6c73fa99805b1b5c375459c4728b0674194205db363f19f758134",
-    "review/coverage.json": "971be5be7bd884c4388901065a14fad271ebc32f027b920b896a84fb988bb874"
+    "provenance.json": "f4fe75e74e81610747f9c5186fd17e603c0d2756a7556243c9c8e1594492d912",
+    "review/coverage.json": "971be5be7bd884c4388901065a14fad271ebc32f027b920b896a84fb988bb874",
+    "review/pairs.json": "e4a7ca535a149761986b266bb7ab81ced9bf4a027cfc8156fe1b6198de9a15ff"
   },
   "format": "hp-style",
   "glyph_files": [

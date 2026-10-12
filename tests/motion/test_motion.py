@@ -100,3 +100,9 @@ def test_t_m07_profile_is_explicitly_simulation_only() -> None:
     profile = load_profile(PROFILE_PATH)
     assert profile.simulation_only and profile.transport_kind == "none"
 
+
+def test_decoder_rejects_out_of_bounds_move() -> None:
+    payload = b"G21\nG90\nG94\nG1 X999 Y1 F10\n"
+    with pytest.raises(ValueError, match="OUT_OF_BOUNDS"):
+        decode_virtual_gcode(payload, load_profile(PROFILE_PATH))
+

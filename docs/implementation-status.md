@@ -124,7 +124,9 @@ uv run pytest
   serial/SVG/ML.
 - Benchmark на AMD Ryzen 5 PRO 4650U: 19 999 графем, 10 страниц, 17.401 s,
   peak RSS 277 996 KiB; цель ≤30 s/≤512 MiB выполнена.
-- Накопленный автоматический набор после добавления E2E: 64 tests. Финальное
+- После негативного архитектурного аудита усилены nested SVG transforms/depth,
+  StylePack review/hash/envelope checks, connector clearance, NBSP grouping,
+  exact XYZ profile и decoded bounds; накопленный набор: 69 tests. Финальное
   имя release остаётся «software validated with test-only style; hardware
   unverified». Продуктовый I-09 не закрывается до BLK-STYLE-001.
 
