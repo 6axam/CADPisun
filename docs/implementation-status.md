@@ -108,3 +108,23 @@ uv run pytest
 - T-M01…T-M07 и накопленный набор: 58/58 успешно. Реального machine profile,
   transport или sender нет.
 
+## I-09 — программная реализация завершена, продуктовый gate заблокирован I-03
+
+- CLI предоставляет `inspect`, `generate`, `export`, `simulate` и
+  `styles validate`; библиотека и CLI вызывают один application service.
+- `test-technical-v1` содержит 189 явно test-only glyph keys и полный
+  обязательный набор UA/RU/EN/цифр/пунктуации. Это читаемый технический
+  single-line small-caps fixture, не заявка на школьную скоропись.
+- Bundle публикуется через staging/atomic rename и содержит input/request,
+  pinned style, PenPlan, production/preview SVG, MotionPlan, virtual G-code,
+  report и SHA-256 manifest. Ошибка покрытия на последней графеме не создаёт
+  output; одинаковые pinned inputs дают byte-identical artifacts.
+- Wheel установлен в чистое CPython 3.12.12 окружение; после установки полный
+  `inspect` и `simulate` выполнены без сетевых обращений и без imports
+  serial/SVG/ML.
+- Benchmark на AMD Ryzen 5 PRO 4650U: 19 999 графем, 10 страниц, 17.401 s,
+  peak RSS 277 996 KiB; цель ≤30 s/≤512 MiB выполнена.
+- Накопленный автоматический набор после добавления E2E: 64 tests. Финальное
+  имя release остаётся «software validated with test-only style; hardware
+  unverified». Продуктовый I-09 не закрывается до BLK-STYLE-001.
+

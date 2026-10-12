@@ -31,6 +31,10 @@ hplot = "handwriting_plotter.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/handwriting_plotter"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"assets/styles" = "handwriting_plotter/assets/styles"
+"profiles/virtual-cartesian-z-v1.json" = "handwriting_plotter/assets/profiles/virtual-cartesian-z-v1.json"
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

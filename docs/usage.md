@@ -1,0 +1,32 @@
+# Использование программного MVP
+
+Установка проверенной среды и тесты:
+
+```sh
+uv sync --python 3.12.12 --extra dev --extra import-svg
+uv run pytest
+```
+
+Проверка покрытия без создания файлов:
+
+```sh
+uv run hplot inspect examples/first-mvp/input.txt
+```
+
+Создание атомарного bundle:
+
+```sh
+uv run hplot generate examples/first-mvp/input.txt examples/first-mvp/bundle \
+  --style test-technical-v1 --style-revision 1.0.0 --seed 20261012
+```
+
+В bundle находятся исходный текст и request, pinned style manifest, PenPlan,
+production/diagnostic SVG, MotionPlan, virtual G-code, отчёт и manifest с
+SHA-256 каждого артефакта. `page-*.gcode` предназначен только для виртуального
+профиля и не может отправляться реальному оборудованию.
+
+`test-technical-v1` — читаемый инженерный single-line fixture для проверки
+конвейера. Это малые технические прописные формы, не школьная скоропись. Он
+имеет `test_only=true` и `production_eligible=false`; условия появления
+настоящего `ua-school-v1` описаны в `docs/blockers.md`.
+
