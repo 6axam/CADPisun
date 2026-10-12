@@ -27,3 +27,14 @@ uv run pytest
   предел ошибки, предел длины хорды, глубины и общего числа сегментов.
 - T-G01…T-G06 и дополнительные serialization tests: 13/13 успешно.
 
+## I-02 — завершён 2026-10-12
+
+- Реализована загрузка immutable StylePack v1 из каталога с безопасными путями,
+  полными SHA-256, точным coverage, license record и cross-reference validation.
+- Публикация новой revision проходит validation в staging и атомарно обновляет
+  immutable каталог/latest; конфликт ревизий не перезаписывает данные.
+- SVG authoring importer принимает только `svg/g/path`, centerline `fill=none`,
+  M/L/H/V/Q/T/C/S/Z и ограниченные transforms; DTD/entities, arcs, CSS и внешние
+  ссылки отвергаются.
+- T-S01…T-S05 вместе с предыдущими тестами: 18/18 успешно.
+

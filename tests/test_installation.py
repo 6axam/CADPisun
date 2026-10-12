@@ -11,9 +11,14 @@ from handwriting_plotter.domain.errors import Diagnostic, ExitCode
 
 def test_base_import_has_no_optional_dependency() -> None:
     assert handwriting_plotter.__version__ == "0.1.0"
-    assert "torch" not in sys.modules
-    assert "serial" not in sys.modules
-    assert "svg.path" not in sys.modules
+    completed = subprocess.run(
+        [sys.executable, "-c", "import handwriting_plotter,sys; print(','.join(sys.modules))"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    imported = set(completed.stdout.strip().split(","))
+    assert not {"torch", "serial", "svg.path"} & imported
 
 
 def test_cli_help_and_version(capsys) -> None:
