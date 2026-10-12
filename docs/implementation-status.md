@@ -68,3 +68,17 @@ uv run pytest
 - T-J01…T-J06/T-R01…T-R03 и накопленный набор: 35/35 успешно. T-J07 остаётся
   частью заблокированного pair review настоящего `ua-school-v1`.
 
+## I-06 — завершён 2026-10-12
+
+- PageSpec валидирует физическую область; строки измеряются по реальным
+  ink bounds с шириной пера, включая отрицательные bearings и marks.
+- Greedy layout повторяет слово на следующей строке без нового occurrence ID;
+  oversized token перебирается по grapheme prefixes и reshaping, один слишком
+  широкий glyph даёт явную ошибку.
+- Реализованы spaces/tab stops, hard/page breaks, NBSP overflow, пустые строки,
+  paragraph gap, effective pitch по реальной высоте и многостраничная A4
+  пагинация.
+- Финальная проверка требует 100% source coverage и bounds внутри printable
+  region; никакого clipping или скрытого scale.
+- T-L01…T-L07 и накопленный набор: 42/42 успешно.
+
