@@ -82,3 +82,15 @@ uv run pytest
   region; никакого clipping или скрытого scale.
 - T-L01…T-L07 и накопленный набор: 42/42 успешно.
 
+## I-07 — завершён 2026-10-12
+
+- PenPlan начинается EnsurePenUp; каждая authored execution group компилируется
+  как TravelTo→PenDown→Draw→PenUp, word/page checkpoints разрешены только при UP.
+- Отдельный state-machine validator проверяет position continuity, pen state,
+  уникальные op IDs и финальный page checkpoint; логический симулятор считает
+  длины, lifts и flattened segments без физических заявлений.
+- Production SVG имеет физический размер A4, viewBox в mm и ровно один path на
+  непрерывный контакт, без `<text>`/travel/CSS/font. Preview явно diagnostic и
+  добавляет пунктирные travels и номера.
+- T-P01…T-P03/T-E01…T-E03 и накопленный набор: 48/48 успешно.
+
