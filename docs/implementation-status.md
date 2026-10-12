@@ -53,3 +53,18 @@ uv run pytest
   code points и исходные spans до layout/export.
 - T-U01…T-U06 и весь накопленный набор: 26/26 успешно.
 
+## I-05 — завершён 2026-10-12 для test-only styles
+
+- Longest-match ограничен восемью графемами; source ranges и occurrence IDs
+  основаны на исходных grapheme IDs.
+- Variant choice и bounded scale/shear/baseline variation получаются из SHA-256,
+  не используют `random`, время или Python hash; соседний повтор избегает того же
+  variant при наличии альтернативы.
+- GlyphFrame преобразуется целиком в WordFrame mm вместе с anchors. Разрешённый
+  join строится прямым cubic; script/punctuation/class/gap/vertical/tangent и
+  backward-X проверки дают объяснимый pen-lift fallback.
+- Body chain выполняется до deferred marks; critical marks не переупорядочиваются
+  между словами.
+- T-J01…T-J06/T-R01…T-R03 и накопленный набор: 35/35 успешно. T-J07 остаётся
+  частью заблокированного pair review настоящего `ua-school-v1`.
+
