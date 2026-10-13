@@ -20,6 +20,13 @@ import-svg = [
   "defusedxml==0.7.1",
   "svg.path==7.1",
 ]
+gui = [
+  "PySide6==6.12.0",
+]
+gui-dev = [
+  "PySide6==6.12.0",
+  "pytest-qt==4.5.0",
+]
 dev = [
   "hypothesis==6.169.0",
   "pytest==9.1.1",
@@ -27,6 +34,7 @@ dev = [
 
 [project.scripts]
 hplot = "handwriting_plotter.cli:main"
+hplot-gui = "handwriting_plotter.gui.application:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/handwriting_plotter"]
