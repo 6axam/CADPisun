@@ -26,6 +26,7 @@ LICENSE_ID = "ua-pilot-authored-mit"
 SOURCE_REF = "UA-PILOT-AUTHORING-002"
 ALL_CONTEXTS = ("isolated", "initial", "medial", "final")
 RUN_CONTEXTS = ("isolated", "initial", "medial")
+BREAK_BEFORE = frozenset({"п", "м", "т", "ш", "щ"})
 
 Point = tuple[float, float]
 CubicSpec = tuple[Point, Point, Point, Point]
@@ -192,13 +193,27 @@ def _variants() -> dict[str, tuple[VariantDesign, ...]]:
     for character in BASE:
         if character in REDRAWN:
             design = REDRAWN[character]
-            variants[character] = (
-                VariantDesign(design, "run", RUN_CONTEXTS),
-                VariantDesign(
-                    _terminal(design), "final", ("final",), no_join_after=True,
-                    exit_anchor=False, transform_note="manually authored body with compact final terminal",
-                ),
-            )
+            if character in BREAK_BEFORE:
+                variants[character] = (
+                    VariantDesign(design, "initial", ("isolated", "initial")),
+                    VariantDesign(
+                        design, "medial", ("medial",), no_join_before=True,
+                        transform_note="manually authored medial form with deliberate pen lift before the characteristic entry",
+                    ),
+                    VariantDesign(
+                        _terminal(design), "final", ("final",), no_join_before=True,
+                        no_join_after=True, exit_anchor=False,
+                        transform_note="manually authored final form with deliberate entry lift and compact terminal",
+                    ),
+                )
+            else:
+                variants[character] = (
+                    VariantDesign(design, "run", RUN_CONTEXTS),
+                    VariantDesign(
+                        _terminal(design), "final", ("final",), no_join_after=True,
+                        exit_anchor=False, transform_note="manually authored body with compact final terminal",
+                    ),
+                )
         else:
             design = _scaled_base(character)
             variants[character] = (VariantDesign(
