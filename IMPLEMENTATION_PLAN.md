@@ -205,7 +205,22 @@ Tests T-C03…T-C07: crossings, dots, retracing ambiguity, два порядка
 | III-02: contextual ligature selection | Данные показали необходимость сверх longest-match | Новый shaping algorithm_id, corpus compare, сохраняется ShapedWord |
 | III-03: другой формат страницы/станок | Есть конкретный запрос и профиль | PageSpec/Backend contract suites; новые units/kinematics explicit |
 | III-04: генеративный trajectory model | Собран достаточный online корпус | Backend выдаёт тот же IR, coverage/text fidelity и geometry validators обязательны |
-| III-05: UI | Отдельное задание на интерфейс | Только Application/Correction/Machine services, экран сейчас не проектируется |
+| III-05: UI | Заменён текущим планом GUI-00…GUI-06 по ADR-18 | Только Application/Correction/Machine services |
+
+## 5A. Desktop GUI — приоритет до этапа II
+
+Порядок изменён ADR-18. Пакеты выполняются после I-09 и до capture/OCR:
+
+1. **GUI-00:** аудит application API, Qt compatibility/license, composition и persistence contracts.
+2. **GUI-01:** optional PySide6 dependency, entrypoint, QMainWindow, меню, docks и централизованная dark theme.
+3. **GUI-02:** A4 QGraphics canvas в mm, backend SVG, zoom/pan/fit и diagnostic overlays.
+4. **GUI-03:** versioned ProjectDocument, text objects, explorer, properties, undo/redo и atomic persistence.
+5. **GUI-04:** application composition adapter, single-flight background generation, stale-result guard, coverage/errors и canvas refresh.
+6. **GUI-05:** export production SVG, diagnostic SVG, virtual G-code и reports; toolpath statistics, без machine send.
+7. **GUI-06:** shortcuts, dirty-close UX, QSettings dock layout, HiDPI/Wayland smoke tests, visual QA и user documentation.
+
+Каждый пакет завершается tests и отдельным commit. OCR, ML, hardware transport,
+capture и glyph-node editor остаются вне этого плана.
 
 ## 6. Ворота передачи между пакетами
 

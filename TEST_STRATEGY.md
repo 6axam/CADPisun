@@ -222,7 +222,7 @@ H-A: pen-up dry run и контрольные точки; H-B: цикл100 по�
 | R49 | Улучшение по новым samples | Revision publish, explicit retrain | II-05 | T-D04/T-D05 |
 | R50 | Несколько user profiles | Namespaced IDs/catalog/revisions | II/III-01 | No cross-profile sample leak |
 | R51 | Persistent storage | Files I, SQLite+blobs II | I-09/II-00 | T-A02/T-D02 |
-| R52 | GUI позже, API сейчас | Application/Correction services | I-09/III-05 | Контракты без экранов и toolkit |
+| R52 | GUI как optional слой после I-09 | Application/GUI contract tests | GUI-00…GUI-06 | Core/CLI без Qt; widgets используют только application API |
 | R53 | Изоляция ML | Отдельные envs/jobs | II-02/03/06 | Base import без torch/TF |
 | R54 | Reuse вместо переписывания | Parsers/CV/HTR/serial + domain core | Все | RESEARCH table/TECH_STACK |
 | R55 | Реальный анализ пяти кандидатов | Code/commit/license review | Архитектура | RESEARCH §1, source permalinks |
@@ -259,7 +259,7 @@ H-A: pen-up dry run и контрольные точки; H-B: цикл100 по�
 | G-code precision уничтожает короткие marks | Ї превращается в І | Post-quantization semantic validation; resolution failure |
 | SVG preview может уйти на плоттер | Диагностические линии станут чернилами | Разные artifact roles/types и suffix |
 | Bbox endpoints недостаточен для кривых | Выход дуги за границы | Экстремумы производных/conservative hull |
-| «Без UI» противоречит ручной коррекции | Попытка построить GUI сейчас | Correction API/typed request files; UI отдельный III пакет |
+| GUI не должен втянуть Qt в core | Импорт CLI без GUI extra; отдельные UI tests | Optional dependency и запрет Qt imports вне `gui/` |
 
 Покрытие областей пользователя: все21 функциональные области сведены в9 модульных групп и12 разделов contracts; нет циклической зависимости layout↔shaping (WordShaper port в domain). Standard/personal сходятся на StylePack, все exports на PenPlan, hardware отделён после registration. Изолированная разработка возможна на own test fixtures и virtual target; окончательная визуальная приёмка без настоящего стиля невозможна и явно выделена.
 

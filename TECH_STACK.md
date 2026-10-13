@@ -19,6 +19,17 @@ Pydantic используется только для validation, без обл�
 
 Размер base dependency graph невелик, но это не «полностью pure Python»: regex и pydantic-core имеют native части. Если нет wheel для выбранной платформы, I-00 фиксирует проблему и выбирает доступную совместимую версию, а не молча ставит toolchain в систему.
 
+### Desktop GUI extra
+
+| Pin | Назначение | Лицензия / границы |
+|---|---|---|
+| PySide6 6.12.0 — extra `gui` | Официальные Qt 6 bindings; Qt Widgets, QMainWindow/QDockWidget, QGraphicsView, QtSvg; wheel поддерживает Python 3.12 | Community LGPLv3/GPL или commercial; не импортируется core/CLI |
+| pytest-qt 4.5.0 — extra `gui-dev` | Event-loop aware widget tests | MIT; только development/test environment |
+
+Первичная платформа — Linux Wayland. Qt сам выбирает platform plugin; код GUI
+не вызывает Xlib и не принуждает XWayland. `QT_QPA_PLATFORM=offscreen`
+разрешён только для CI/визуального render smoke test.
+
 ## 2. Тестовые зависимости
 
 | Pin | Роль | Лицензия / граница |

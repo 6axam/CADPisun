@@ -40,7 +40,7 @@ v1.0 · 2026-10-12. Программные части E-03/E-04 выполнен
 | K13 | Данные автора/конспекты утрачены или смешаны — высокий | Content hashes, backups/migrations, transactional corrections, profile namespaces | T-D02/T-D04 |
 | K14 | Установка одинакового seed не даёт равного output — средний | Hash-based choices, versioned algorithm, pinned artifacts/lock | T-R01 |
 | K15 | Quantization/слишком много segments — высокий | Error budget, limit checks, no silent dropped marks | T-G02/T-M04/T-A04 |
-| K16 | Объём scope растёт до GUI/ML до работающего письма — высокий | Последовательные I gates, отдельные II/III, отсутствие GUI package | План пакетов и release checklist |
+| K16 | GUI разрастается до CAD/ML/hardware функций — высокий | GUI-00…06 после рабочей I-вертикали; только text/page objects, без OCR и machine send | GUI acceptance checklist и ADR-18 |
 
 ## 3. Проверочные эксперименты для следующего этапа
 
