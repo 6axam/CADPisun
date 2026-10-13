@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .canvas import PageCanvas
+
 
 class MainWindow(QMainWindow):
     """Dockable engineering workspace; functional surfaces are added by stages."""
@@ -27,17 +29,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Handwriting Plotter")
         self.resize(1440, 900)
         self.setDockNestingEnabled(True)
-        self._build_central_message()
+        self._build_canvas()
         self._build_docks()
         self._build_menus()
+        self._build_toolbar()
         self.statusBar().showMessage("Ready")
 
-    def _build_central_message(self) -> None:
-        label = QLabel("No generated page\n\nCreate a text object and run Generate.")
-        label.setObjectName("empty-canvas-message")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("color: #7f8998; font-size: 13pt;")
-        self.setCentralWidget(label)
+    def _build_canvas(self) -> None:
+        self.canvas = PageCanvas(self)
+        self.setCentralWidget(self.canvas)
 
     def _build_docks(self) -> None:
         self.project_tree = QTreeWidget()
@@ -103,6 +103,18 @@ class MainWindow(QMainWindow):
         self.menuBar().addMenu("&Machine")
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction(self._action("&About", self._about))
+
+    def _build_toolbar(self) -> None:
+        toolbar = self.addToolBar("Canvas")
+        toolbar.setObjectName("canvas-toolbar")
+        toolbar.addAction(self._action("Fit Page", self.canvas.zoom_to_fit, "F"))
+        toolbar.addSeparator()
+        travel = self._action("Travel", self.canvas.set_show_travel)
+        travel.setCheckable(True)
+        toolbar.addAction(travel)
+        markers = self._action("Start / End", self.canvas.set_show_markers)
+        markers.setCheckable(True)
+        toolbar.addAction(markers)
 
     def _action(self, text: str, callback, shortcut=None) -> QAction:
         action = QAction(text, self)
