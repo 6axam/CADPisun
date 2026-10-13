@@ -60,13 +60,18 @@ def connect(
 ) -> Stroke | RejectedJoin:
     if left.join_mode != "single_body_deferred_marks" or right.join_mode != "single_body_deferred_marks":
         return RejectedJoin("JOIN_MODE_NONE")
+    if left.no_join_after or right.no_join_before:
+        return RejectedJoin("JOIN_FORBIDDEN")
     if left.exit is None or right.entry is None:
         return RejectedJoin("MISSING_ANCHOR")
     if script_of(left.match.key) != script_of(right.match.key) or script_of(left.match.key) not in {"Latin", "Cyrillic"}:
         return RejectedJoin("SCRIPT_BOUNDARY")
     if not left.match.key[-1].isalpha() or not right.match.key[0].isalpha():
         return RejectedJoin("PUNCTUATION_BOUNDARY")
-    if right.entry.class_id not in left.exit.allowed_partner_classes:
+    if (
+        right.entry.class_id not in left.exit.allowed_partner_classes
+        or left.exit.class_id not in right.entry.allowed_partner_classes
+    ):
         return RejectedJoin("ANCHOR_CLASS_DENIED")
     vector = Point2(right.entry.point.x - left.exit.point.x, right.entry.point.y - left.exit.point.y)
     distance = math.hypot(vector.x, vector.y)

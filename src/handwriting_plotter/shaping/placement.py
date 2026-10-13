@@ -34,6 +34,8 @@ class PlacedGlyph:
     body_stroke_id: str | None
     deferred_marks: tuple[str, ...]
     join_mode: str
+    no_join_before: bool
+    no_join_after: bool
 
 
 def _convert(point: Point2, x_offset: float, factor: float, variation: EffectiveVariation) -> Point2:
@@ -120,5 +122,7 @@ def place_glyph(
         f"{prefix}/{spec.body_stroke_id}" if spec.body_stroke_id else None,
         tuple(f"{prefix}/{item}" for item in spec.deferred_marks),
         spec.mode,
+        spec.no_join_before,
+        spec.no_join_after,
     )
 

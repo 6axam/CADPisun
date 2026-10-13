@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from handwriting_plotter.adapters.importers.svg_paths import import_centerline_svg
+from handwriting_plotter.styles.models import GlyphVariantFile, to_variant
 from handwriting_plotter.styles.repository import FileStyleRepository
 
 
@@ -100,4 +101,45 @@ def test_svg_group_rotation_and_inherited_fill() -> None:
     assert stroke.start.y == pytest.approx(3)
     assert stroke.end.x == pytest.approx(2)
     assert stroke.end.y == pytest.approx(4)
+
+
+def test_anchor_tangent_must_match_authored_stroke_geometry() -> None:
+    glyph = GlyphVariantFile.model_validate_json(json.dumps({
+        "format": "hp-glyph",
+        "schema_version": "1.0",
+        "variant_id": "bad-anchor",
+        "key": "а",
+        "strokes": [{
+            "id": "body",
+            "role": "body",
+            "direction_provenance": "authored",
+            "segments": [{
+                "kind": "cubic",
+                "p0": {"x": 0.0, "y": 0.0},
+                "c1": {"x": 100.0, "y": 0.0},
+                "c2": {"x": 400.0, "y": 0.0},
+                "p1": {"x": 500.0, "y": 0.0},
+            }],
+        }],
+        "advance_gu": 600.0,
+        "context_tags": ["isolated"],
+        "join_spec": {
+            "mode": "single_body_deferred_marks",
+            "body_stroke_id": "body",
+            "entry": {
+                "stroke_id": "body", "endpoint": "start", "tangent": {"x": 0.0, "y": 1.0},
+                "class_id": "entry", "allowed_partner_classes": ["exit"],
+                "max_gap_gu": 200.0, "max_vertical_delta_gu": 50.0, "max_angle_deg": 30.0,
+            },
+            "exit": {
+                "stroke_id": "body", "endpoint": "end", "tangent": {"x": 1.0, "y": 0.0},
+                "class_id": "exit", "allowed_partner_classes": ["entry"],
+                "max_gap_gu": 200.0, "max_vertical_delta_gu": 50.0, "max_angle_deg": 30.0,
+            },
+        },
+        "provenance": {"license_id": "test", "source_method": "manual_vector"},
+        "review_status": "approved",
+    }))
+    with pytest.raises(ValueError, match="anchor tangent disagrees"):
+        to_variant(glyph)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Annotated, Literal, Mapping, Union
@@ -9,7 +10,7 @@ from typing import Annotated, Literal, Mapping, Union
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator
 
 from handwriting_plotter.domain.models import StrictModel
-from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic, Segment, Stroke
+from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic, Segment, Stroke, tangent as segment_tangent
 
 
 class PointModel(StrictModel):
@@ -255,6 +256,12 @@ def to_variant(value: GlyphVariantFile) -> GlyphVariant:
         length = (item.tangent.x**2 + item.tangent.y**2) ** 0.5
         if not 0.999 <= length <= 1.001:
             raise ValueError("anchor tangent must be unit length")
+        stroke = next(stroke for stroke in strokes if stroke.id == item.stroke_id)
+        segment = stroke.segments[0] if item.endpoint == "start" else stroke.segments[-1]
+        actual = segment_tangent(segment, 0.0 if item.endpoint == "start" else 1.0)
+        dot = max(-1.0, min(1.0, actual.x * item.tangent.x + actual.y * item.tangent.y))
+        if math.degrees(math.acos(dot)) > 1.0:
+            raise ValueError("anchor tangent disagrees with stroke geometry")
         return EndpointAnchor(
             item.stroke_id,
             item.endpoint,

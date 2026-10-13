@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MappingProxyType
 
 from handwriting_plotter.geometry.curves import Line, Point2, Stroke
@@ -111,6 +112,23 @@ def test_t_j03_connector_clearance_collision_uses_lift() -> None:
     )
     assert not any(stroke.role == "connector" for group in word.execution_groups for stroke in group.strokes)
     assert any("CLEARANCE_COLLISION" in item for item in word.diagnostics)
+
+
+def test_explicit_no_join_flag_uses_lifted_fallback() -> None:
+    style = _style()
+    base = style.variants_by_key["a"][0]
+    blocked = replace(base, join_spec=replace(base.join_spec, no_join_after=True))
+    mapping = dict(style.variants_by_key)
+    mapping["a"] = (blocked,)
+    word = WordShaper().shape(
+        _graphemes("aa"),
+        StyleSnapshot(style.manifest, MappingProxyType(mapping), style.revision_hash),
+        seed=1,
+        x_height_mm=3.5,
+        variation=VariationSpec(0),
+    )
+    assert not any(stroke.role == "connector" for group in word.execution_groups for stroke in group.strokes)
+    assert any("JOIN_FORBIDDEN" in item for item in word.diagnostics)
 
 
 def test_t_j04_deferred_marks_follow_connected_body() -> None:
