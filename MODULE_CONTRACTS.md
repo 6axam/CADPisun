@@ -78,6 +78,8 @@ GenerationContext: engine/algorithm IDs, seed, pinned variation config, original
 - resolve возвращает consumed grapheme ranges и eligible variants; ranges точно покрывают fragment без overlap.
 - vary преобразует whole variant + anchors и записывает effective parameters; не меняет source strokes.
 - connect возвращает accepted connector или RejectedJoin(reason), а не исключение на любую неподходящую пару.
+- connect требует взаимного разрешения anchor classes с обеих сторон и
+  исполняет `no_join_after`/`no_join_before` до построения кривой.
 - schedule выдаёт executable groups с body chain/deferred marks, покрывающие каждый обязательный stroke один раз.
 
 Зависимости: domain/geometry, не storage/layout/export. Готового cursive движка не используется по RESEARCH. Перестановка/разворот исходных strokes допускаются только как явная correction stage II, не shaping optimization.

@@ -46,6 +46,7 @@ Fixtures собственные, с разрешёнными данными. Gol
 | T-S03 | SVG M/subpaths/Z/Q/C/transforms | Stroke direction/order/units не потеряны; unsupported A/CSS/use rejected |
 | T-S04 | DTD/entities/external refs/path traversal | Нет network read/выхода из package; контролируемый отказ |
 | T-S05 | Publish interruption/stale parent/unknown major | Старая revision работоспособна, новая либо полная, либо отсутствует |
+| T-S06 | `ua-school-v1-pilot` frozen word corpus | 26 keys/32 variants, test-only gate, exact seven-word coverage, full SVG→virtual G-code build |
 
 ### Shaping, соединения и случайность
 
@@ -58,6 +59,7 @@ Fixtures собственные, с разрешёнными данными. Gol
 | T-J05 | Лигатура longest match и context eligibility | Покрытие source ranges точное, при split возможна корректная de-ligation |
 | T-J06 | Оптимизация forbidden order/reversal | Запрос неподдерживаемой reorder политики отклонён, stroke IDs сохраняют порядок |
 | T-J07 | Pair corpus всех anchor classes/исключений | Все approved pairs проходят geometry; rejected/exception объяснены и визуально приняты |
+| T-J08 | Anchor metadata против производной path, asymmetric classes, no-join flags | Неверный tangent отвергнут при load; class pair требует взаимного allow; явный запрет даёт lift |
 | T-R01 | Одинаковый seed/input/lock в двух независимых процессах | Canonical plan/SVG/G-code bytes идентичны; audit timestamps исключены |
 | T-R02 | Разные seed и repeated letters | Варианты различаются при наличии выбора, никогда нет чтения global random state |
 | T-R03 | Повторное measurement, изменение полей, fragmentation | Исходные glyph occurrence choices стабильны, boundary variants меняются только по правилам context |

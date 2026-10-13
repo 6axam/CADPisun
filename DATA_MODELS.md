@@ -62,6 +62,9 @@ Polyline — представление Stroke как последователь
 - Для `single_body_deferred_marks` ровно один body stroke, `body_stroke_id`; остальные stroke IDs перечислены в `deferred_marks` с фиксированным порядком. Автор явно разрешает откладывание этих marks до конца connected run внутри слова.
 - `entry`/`exit`: nullable EndpointAnchor. Anchor содержит stroke_id, endpoint=start/end, tangent (единичный ненулевой вектор), class_id, allowed_partner_classes, max_gap_gu, max_vertical_delta_gu, max_angle_deg.
 - Entry = начало body; exit = конец body. Anchor в середине пути не поддерживается v1, поскольку потребовал бы trimming и новую семантику. Direction tangent задаёт движение **по пути**, включая tangent входа в следующий body.
+- Опубликованный anchor tangent обязан совпадать с фактической производной
+  первого/последнего segment с допуском 1°. Значение из metadata не может
+  подменять геометрию пути.
 - `no_join_before/after`, script boundary policy, контекстные ограничения. При отсутствии anchors соединение запрещено.
 
 `critical_features`: refs на точки/надстрочные/различающие элементы (например две marks у ї), обязательные stroke IDs. Validator проверяет их существование и сохранность после преобразований; смысловую правильность подтверждает автор.
