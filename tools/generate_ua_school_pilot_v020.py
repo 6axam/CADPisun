@@ -71,6 +71,25 @@ def _terminal(design: Design) -> Design:
     return Design(design.body + (terminal,), design.advance, design.marks, design.joinable, design.critical_features)
 
 
+def _ensure_exit_clearance(design: Design, minimum_run_gu: float = 180.0) -> Design:
+    """Keep the connector clear of the penultimate body segment at 3 mm."""
+    if not design.joinable:
+        return design
+    p0, c1, c2, p1 = design.body[-1]
+    horizontal_run = p1[0] - p0[0]
+    if horizontal_run >= minimum_run_gu:
+        return design
+    delta = minimum_run_gu - horizontal_run
+    replacement = c(p0, c1, (c2[0] + delta, c2[1]), (p1[0] + delta, p1[1]))
+    return Design(
+        design.body[:-1] + (replacement,),
+        design.advance + delta,
+        design.marks,
+        design.joinable,
+        design.critical_features,
+    )
+
+
 # Seven ambiguous letters are redrawn from different movement skeletons.
 # Their similar dimensions are deliberate; their upper/lower phase and the
 # position of the characteristic turn carry identity.
@@ -192,7 +211,7 @@ def _variants() -> dict[str, tuple[VariantDesign, ...]]:
     variants: dict[str, tuple[VariantDesign, ...]] = {}
     for character in BASE:
         if character in REDRAWN:
-            design = REDRAWN[character]
+            design = _ensure_exit_clearance(REDRAWN[character])
             if character in BREAK_BEFORE:
                 variants[character] = (
                     VariantDesign(design, "initial", ("isolated", "initial")),
@@ -215,7 +234,7 @@ def _variants() -> dict[str, tuple[VariantDesign, ...]]:
                     ),
                 )
         else:
-            design = _scaled_base(character)
+            design = _ensure_exit_clearance(_scaled_base(character))
             variants[character] = (VariantDesign(
                 design,
                 "metric",
