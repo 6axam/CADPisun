@@ -1,5 +1,19 @@
 # Состояние реализации
 
+## GUI-05 — завершён 2026-10-13
+
+- File → Export сохраняет exact bytes принятого production SVG,
+  diagnostic SVG, virtual G-code или validation report через системный диалог
+  и атомарную замену файла.
+- Export доступен только когда generation revision совпадает с текущей
+  document revision; после любого изменения действия блокируются до новой
+  генерации.
+- Diagnostics показывает реальные style/profile/round-trip статусы, Toolpath —
+  длины, pen lifts, segment count и нижнюю оценку виртуального времени. G-code
+  в интерфейсе везде обозначен `simulation only`; sender отсутствует.
+- Проверены все четыре экспорта, запрет внутренних artifacts и lifecycle
+  доступности действий; накопленный набор: 98/98 tests.
+
 ## GUI-04 — завершён 2026-10-13
 
 - Добавлен application-level DesktopApplicationAdapter: видимые текстовые

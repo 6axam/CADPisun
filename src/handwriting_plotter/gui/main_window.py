@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from .canvas import PageCanvas
 from .backend import GuiBackend
 from .document import DocumentController, ProjectSnapshot, default_project, load_project, save_project
+from .exporting import export_artifact
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .workers import GenerationWorker
@@ -105,10 +106,20 @@ class MainWindow(QMainWindow):
         self.add_text_action = self._action("Add &Text Object", self.add_text_object, QKeySequence("Insert"))
         self.delete_action = self._action("&Delete Object", self.remove_selected_object, QKeySequence.StandardKey.Delete)
         self.generate_action = self._action("&Generate Page", self.generate_page, QKeySequence("Ctrl+Return"))
+        self.export_svg_action = self._action("Production SVG…", lambda: self._export("page-0001.svg"))
+        self.export_preview_action = self._action("Diagnostic SVG…", lambda: self._export("page-0001.preview.svg"))
+        self.export_gcode_action = self._action("Virtual G-code (simulation only)…", lambda: self._export("page-0001.gcode"))
+        self.export_report_action = self._action("Validation Report…", lambda: self._export("report.json"))
+        self.export_actions = (
+            self.export_svg_action, self.export_preview_action, self.export_gcode_action, self.export_report_action,
+        )
+        self._update_export_actions()
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        export_menu = file_menu.addMenu("&Export")
+        export_menu.addActions(self.export_actions)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
         edit = self.menuBar().addMenu("&Edit")
@@ -121,6 +132,7 @@ class MainWindow(QMainWindow):
         self.tools_menu = self.menuBar().addMenu("&Tools")
         self.tools_menu.addAction(self.generate_action)
         self.machine_menu = self.menuBar().addMenu("&Machine")
+        self.machine_menu.addAction(self._action("Virtual Profile Information…", self._virtual_profile_info))
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction(self._action("&About", self._about))
 
@@ -218,6 +230,7 @@ class MainWindow(QMainWindow):
             self._show_selected_properties()
         self._update_title()
         if self.generated_revision is not None and self.generated_revision != revision:
+            self._update_export_actions()
             self.statusBar().showMessage("Project changed · generated preview is stale", 4000)
             return
         self.statusBar().showMessage(f"Project changed · revision {revision}", 2500)
@@ -278,6 +291,7 @@ class MainWindow(QMainWindow):
         self.canvas.clear_artifacts()
         self.generated_result = None
         self.generated_revision = None
+        self._update_export_actions()
         self.console.setPlainText("New project created.")
 
     def open_project(self) -> None:
@@ -289,6 +303,7 @@ class MainWindow(QMainWindow):
             self.canvas.clear_artifacts()
             self.generated_result = None
             self.generated_revision = None
+            self._update_export_actions()
             self.console.setPlainText(f"Opened {filename}")
         except Exception as exc:
             QMessageBox.critical(self, "Could not open project", str(exc))
@@ -344,11 +359,23 @@ class MainWindow(QMainWindow):
             return
         self.generated_result = result
         self.generated_revision = revision
+        self._update_export_actions()
         files = result.files
         self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
                                   files["page-0001.plan.json"])
         diagnostics = result.report.get("diagnostics", [])
-        self.diagnostics.setPlainText("\n".join(diagnostics) if diagnostics else "No diagnostics.")
+        styles = result.report.get("styles", [])
+        validation_lines = [
+            "Validation passed",
+            "G-code round trip: passed",
+            "Machine profile: virtual simulation only",
+            "Hardware verified: no",
+            *(f"Style: {item['style_id']}@{item['revision']} · "
+              f"{'test only' if item['test_only'] else 'production eligible'}" for item in styles),
+        ]
+        if diagnostics:
+            validation_lines.extend(("", "Warnings:", *diagnostics))
+        self.diagnostics.setPlainText("\n".join(validation_lines))
         page = result.report["pages"][0]
         logical = page["logical"]
         motion = page["motion"]
@@ -381,6 +408,40 @@ class MainWindow(QMainWindow):
         self.console.setPlainText(details)
         self.output_tabs.setCurrentWidget(self.diagnostics)
         self.statusBar().showMessage("Generation failed — see Diagnostics", 7000)
+
+    def _update_export_actions(self) -> None:
+        current = self.generated_result is not None and self.generated_revision == self.controller.revision
+        for action in getattr(self, "export_actions", ()):
+            action.setEnabled(current)
+
+    def _export(self, artifact: str) -> None:
+        if self.generated_result is None or self.generated_revision != self.controller.revision:
+            QMessageBox.information(self, "Generate first", "Generate the current project before exporting.")
+            return
+        specifications = {
+            "page-0001.svg": ("Export Production SVG", "page.svg", "SVG (*.svg)"),
+            "page-0001.preview.svg": ("Export Diagnostic SVG", "page.preview.svg", "SVG (*.svg)"),
+            "page-0001.gcode": ("Export Virtual G-code — Simulation Only", "page.virtual.gcode", "G-code (*.gcode *.nc)"),
+            "report.json": ("Export Validation Report", "validation-report.json", "JSON (*.json)"),
+        }
+        title, suggestion, file_filter = specifications[artifact]
+        filename, _ = QFileDialog.getSaveFileName(self, title, suggestion, file_filter)
+        if not filename:
+            return
+        try:
+            export_artifact(self.generated_result, artifact, Path(filename))
+            self.statusBar().showMessage(f"Exported {filename}", 5000)
+            self.console.appendPlainText(f"Exported {artifact} to {filename}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+
+    def _virtual_profile_info(self) -> None:
+        QMessageBox.information(
+            self,
+            "Virtual machine profile",
+            "virtual-cartesian-z-v1 is a deterministic simulation profile.\n\n"
+            "Generated G-code is for validation and simulation only. No hardware sender is included.",
+        )
 
     def _action(self, text: str, callback, shortcut=None) -> QAction:  # noqa: ANN001
         action = QAction(text, self)
