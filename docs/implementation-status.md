@@ -1,5 +1,20 @@
 # Состояние реализации
 
+## GUI-04 — завершён 2026-10-13
+
+- Добавлен application-level DesktopApplicationAdapter: видимые текстовые
+  объекты с собственными pinned style/seed/realism и координатами объединяются
+  в один Page, PenPlan, MotionPlan, production/preview SVG и virtual G-code.
+- Идентификаторы strokes/source refs namespaced по object ID; слишком длинный
+  объект явно отклоняется, пересечение bounds попадает в diagnostics, а
+  simulation-only и hardware-unverified сохраняются в отчёте.
+- Генерация выполняется через QThreadPool/QRunnable. Одновременно допускается
+  одна задача; snapshot и revision захватываются до запуска, устаревший успех
+  или ошибка отбрасываются без замены принятого результата.
+- Проверены два позиционированных объекта, настоящий background success,
+  missing-glyph failure с сохранением холста и stale-result guard; накопленный
+  набор: 92/92 tests.
+
 ## GUI-03 — завершён 2026-10-13
 
 - Реализован строгий переносимый `hp-desktop-project/1.0`: A4 settings,

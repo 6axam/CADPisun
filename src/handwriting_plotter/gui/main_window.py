@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
+    QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from .canvas import PageCanvas
+from .backend import GuiBackend
 from .document import DocumentController, ProjectSnapshot, default_project, load_project, save_project
 from .properties import PropertiesPanel
 from .styles import discover_styles
+from .workers import GenerationWorker
 
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
@@ -32,6 +34,11 @@ class MainWindow(QMainWindow):
         self.setDockNestingEnabled(True)
         self.styles = discover_styles()
         self.controller = DocumentController(default_project(), self)
+        self.backend = GuiBackend()
+        self.thread_pool = QThreadPool.globalInstance()
+        self.generated_result = None
+        self.generated_revision: int | None = None
+        self._generation_worker: GenerationWorker | None = None
         self._selected_kind = "page"
         self._selected_value: object = None
         self._refreshing_tree = False
@@ -97,6 +104,7 @@ class MainWindow(QMainWindow):
         self.redo_action.setShortcuts([QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Shift+Z")])
         self.add_text_action = self._action("Add &Text Object", self.add_text_object, QKeySequence("Insert"))
         self.delete_action = self._action("&Delete Object", self.remove_selected_object, QKeySequence.StandardKey.Delete)
+        self.generate_action = self._action("&Generate Page", self.generate_page, QKeySequence("Ctrl+Return"))
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -111,6 +119,7 @@ class MainWindow(QMainWindow):
         for dock in (self.project_dock, self.properties_dock, self.output_dock):
             view.addAction(dock.toggleViewAction())
         self.tools_menu = self.menuBar().addMenu("&Tools")
+        self.tools_menu.addAction(self.generate_action)
         self.machine_menu = self.menuBar().addMenu("&Machine")
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.addAction(self._action("&About", self._about))
@@ -121,6 +130,8 @@ class MainWindow(QMainWindow):
         toolbar.addActions([self.new_action, self.open_action, self.save_action])
         toolbar.addSeparator()
         toolbar.addActions([self.add_text_action, self.delete_action])
+        toolbar.addSeparator()
+        toolbar.addAction(self.generate_action)
         toolbar.addSeparator()
         toolbar.addAction(self._action("Fit Page", self.canvas.zoom_to_fit, "F"))
         travel = self._action("Travel", self.canvas.set_show_travel)
@@ -202,12 +213,17 @@ class MainWindow(QMainWindow):
         self._refresh_tree(snapshot)
         page = snapshot.page
         self.canvas.set_margins(page.margin_left_mm, page.margin_top_mm, page.margin_right_mm, page.margin_bottom_mm)
-        self._show_selected_properties()
+        focus = QApplication.focusWidget()
+        if focus is None or not self.properties.isAncestorOf(focus):
+            self._show_selected_properties()
         self._update_title()
+        if self.generated_revision is not None and self.generated_revision != revision:
+            self.statusBar().showMessage("Project changed · generated preview is stale", 4000)
+            return
         self.statusBar().showMessage(f"Project changed · revision {revision}", 2500)
 
     def _on_selection_changed(self, current: QTreeWidgetItem | None, previous=None) -> None:  # noqa: ANN001
-        if current is None:
+        if current is None or self._refreshing_tree:
             return
         self._selected_kind = current.data(0, ROLE_KIND) or "project"
         self._selected_value = current.data(0, ROLE_VALUE)
@@ -260,6 +276,8 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         self.controller.reset(default_project())
         self.canvas.clear_artifacts()
+        self.generated_result = None
+        self.generated_revision = None
         self.console.setPlainText("New project created.")
 
     def open_project(self) -> None:
@@ -269,6 +287,8 @@ class MainWindow(QMainWindow):
         try:
             self.controller.reset(load_project(Path(filename)), Path(filename))
             self.canvas.clear_artifacts()
+            self.generated_result = None
+            self.generated_revision = None
             self.console.setPlainText(f"Opened {filename}")
         except Exception as exc:
             QMessageBox.critical(self, "Could not open project", str(exc))
@@ -299,6 +319,68 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         name = self.controller.path.name if self.controller.path else self.controller.snapshot.name
         self.setWindowTitle(f"{name}{' *' if self.controller.dirty else ''} — Handwriting Plotter")
+
+    def generate_page(self) -> None:
+        if self._generation_worker is not None:
+            return
+        revision = self.controller.revision
+        worker = GenerationWorker(self.backend, self.controller.snapshot, revision)
+        worker.signals.succeeded.connect(self._generation_succeeded)
+        worker.signals.failed.connect(self._generation_failed)
+        self._generation_worker = worker
+        self.generate_action.setEnabled(False)
+        self.statusBar().showMessage("Generating page…")
+        self.console.setPlainText(f"Generation started for revision {revision}.")
+        self.thread_pool.start(worker)
+
+    def _generation_succeeded(self, revision: int, result) -> None:  # noqa: ANN001
+        self._generation_worker = None
+        self.generate_action.setEnabled(True)
+        if revision != self.controller.revision:
+            self.console.appendPlainText(
+                f"Discarded stale result for revision {revision}; current revision is {self.controller.revision}."
+            )
+            self.statusBar().showMessage("Discarded stale generation result", 5000)
+            return
+        self.generated_result = result
+        self.generated_revision = revision
+        files = result.files
+        self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
+                                  files["page-0001.plan.json"])
+        diagnostics = result.report.get("diagnostics", [])
+        self.diagnostics.setPlainText("\n".join(diagnostics) if diagnostics else "No diagnostics.")
+        page = result.report["pages"][0]
+        logical = page["logical"]
+        motion = page["motion"]
+        self.toolpath.setPlainText(
+            "Virtual toolpath · simulation only\n"
+            f"Pen lifts: {logical['pen_lifts']}\n"
+            f"Draw length: {logical['drawn_length_mm']:.2f} mm\n"
+            f"Travel length: {logical['travel_length_mm']:.2f} mm\n"
+            f"Logical segments: {logical['segment_count']}\n"
+            f"Flattened segments: {motion['segment_count']}\n"
+            f"Lower-bound time: {motion['lower_bound_time_s']:.2f} s"
+        )
+        self.console.setPlainText(
+            f"Generated {result.document_id}\n"
+            f"Page count: {result.page_count}\n"
+            f"Style status: {'test only' if result.test_only_style else 'production eligible'}\n"
+            "Machine status: virtual simulation only; hardware unverified."
+        )
+        self.canvas.zoom_to_fit()
+        self.statusBar().showMessage("Generation complete", 5000)
+
+    def _generation_failed(self, revision: int, message: str, details: str) -> None:
+        self._generation_worker = None
+        self.generate_action.setEnabled(True)
+        if revision != self.controller.revision:
+            self.console.appendPlainText(f"Ignored error from stale revision {revision}: {message}")
+            return
+        friendly = message.replace("MISSING_GLYPH:", "The selected style is missing: ")
+        self.diagnostics.setPlainText(friendly)
+        self.console.setPlainText(details)
+        self.output_tabs.setCurrentWidget(self.diagnostics)
+        self.statusBar().showMessage("Generation failed — see Diagnostics", 7000)
 
     def _action(self, text: str, callback, shortcut=None) -> QAction:  # noqa: ANN001
         action = QAction(text, self)
