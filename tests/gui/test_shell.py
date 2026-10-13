@@ -11,7 +11,7 @@ def test_main_window_has_engineering_workspace(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     window.show()
-    assert window.windowTitle() == "Handwriting Plotter"
+    assert window.windowTitle().endswith("— Handwriting Plotter")
     assert window.centralWidget().objectName() == "page-canvas"
     assert window.project_dock.isVisible()
     assert window.properties_dock.isVisible()

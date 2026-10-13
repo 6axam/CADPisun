@@ -1,5 +1,19 @@
 # Состояние реализации
 
+## GUI-03 — завершён 2026-10-13
+
+- Реализован строгий переносимый `hp-desktop-project/1.0`: A4 settings,
+  ordered text objects, pinned StylePack revisions, seed/realism и display
+  settings. JSON пишется канонически через fsync + atomic replace.
+- DocumentController хранит immutable snapshots, монотонную revision, dirty
+  state и QUndoStack. Project Explorer действительно добавляет, удаляет,
+  переименовывает и скрывает текстовые объекты.
+- Properties редактирует текст, позицию в mm, x-height, line pitch, style,
+  seed/realism и поля страницы. Все установленные StylePack отображаются как
+  проверяемые ресурсы, включая test-only status.
+- Round trip Unicode-проекта, неизвестная версия, undo/redo и GUI model actions
+  проверены; накопленный набор: 89/89 tests.
+
 ## GUI-02 — завершён 2026-10-13
 
 - Центральная сцена использует миллиметры и показывает A4 210×297 с полями,
