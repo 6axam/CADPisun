@@ -52,6 +52,7 @@ def test_missing_glyph_fails_before_replacing_gui_result(qtbot) -> None:
     assert window.generated_result is accepted
     assert window.canvas.has_artifact
     assert "missing" in window.diagnostics.toPlainText().lower()
+    window.controller.reset(window.controller.snapshot)
 
 
 def test_stale_generation_result_is_discarded(qtbot) -> None:

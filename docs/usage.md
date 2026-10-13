@@ -1,5 +1,13 @@
 # Использование программного MVP
 
+Интерактивный desktop workflow описан отдельно в
+[`docs/gui-usage.md`](gui-usage.md). Быстрый запуск:
+
+```sh
+uv sync --python 3.12.12 --extra gui
+uv run hplot-gui
+```
+
 Установка проверенной среды и тесты:
 
 ```sh

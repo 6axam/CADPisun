@@ -59,7 +59,7 @@ class PageCanvas(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setBackgroundBrush(QColor(COLORS["window"]))
-        self._has_fitted = False
+        self._fit_mode = True
         self._production_item: SvgPageItem | None = None
         self._preview_item: SvgPageItem | None = None
         self._marker_items: list[QGraphicsItem] = []
@@ -169,7 +169,7 @@ class PageCanvas(QGraphicsView):
 
     def zoom_to_fit(self) -> None:
         self.fitInView(self._page_rect.adjusted(-8.0, -8.0, 8.0, 8.0), Qt.AspectRatioMode.KeepAspectRatio)
-        self._has_fitted = True
+        self._fit_mode = True
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 - Qt API
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -177,6 +177,7 @@ class PageCanvas(QGraphicsView):
             candidate = self.zoom_factor * factor
             if 0.25 <= candidate <= 20.0:
                 self.scale(factor, factor)
+                self._fit_mode = False
             event.accept()
             return
         super().wheelEvent(event)
@@ -197,5 +198,5 @@ class PageCanvas(QGraphicsView):
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001, N802
         super().resizeEvent(event)
-        if not self._has_fitted:
+        if self._fit_mode:
             self.zoom_to_fit()

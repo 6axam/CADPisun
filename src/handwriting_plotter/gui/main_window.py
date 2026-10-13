@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, Qt
+from PySide6.QtCore import QSettings, QThreadPool, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
@@ -28,12 +28,13 @@ ROLE_VALUE = ROLE_KIND + 1
 class MainWindow(QMainWindow):
     """Dockable engineering workspace backed by an undoable project model."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
         self.setObjectName("main-window")
         self.resize(1440, 900)
         self.setDockNestingEnabled(True)
         self.styles = discover_styles()
+        self.settings = settings or QSettings("Handwriting Plotter", "Handwriting Plotter")
         self.controller = DocumentController(default_project(), self)
         self.backend = GuiBackend()
         self.thread_pool = QThreadPool.globalInstance()
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
         self.properties.show_page(self.controller.snapshot.page)
+        self._restore_window_state()
         self._update_title()
         self.statusBar().showMessage("Ready")
 
@@ -146,12 +148,12 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.generate_action)
         toolbar.addSeparator()
         toolbar.addAction(self._action("Fit Page", self.canvas.zoom_to_fit, "F"))
-        travel = self._action("Travel", self.canvas.set_show_travel)
-        travel.setCheckable(True)
-        toolbar.addAction(travel)
-        markers = self._action("Start / End", self.canvas.set_show_markers)
-        markers.setCheckable(True)
-        toolbar.addAction(markers)
+        self.travel_action = self._action("Travel", self.canvas.set_show_travel)
+        self.travel_action.setCheckable(True)
+        toolbar.addAction(self.travel_action)
+        self.markers_action = self._action("Start / End", self.canvas.set_show_markers)
+        self.markers_action.setCheckable(True)
+        toolbar.addAction(self.markers_action)
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -442,6 +444,49 @@ class MainWindow(QMainWindow):
             "virtual-cartesian-z-v1 is a deterministic simulation profile.\n\n"
             "Generated G-code is for validation and simulation only. No hardware sender is included.",
         )
+
+    def _restore_window_state(self) -> None:
+        geometry = self.settings.value("main/geometry")
+        state = self.settings.value("main/state")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+        if state is not None:
+            self.restoreState(state, 1)
+        show_travel = self.settings.value("canvas/show_travel", False, type=bool)
+        show_markers = self.settings.value("canvas/show_markers", False, type=bool)
+        self.travel_action.setChecked(show_travel)
+        self.markers_action.setChecked(show_markers)
+        self.canvas.set_show_travel(show_travel)
+        self.canvas.set_show_markers(show_markers)
+
+    def _save_window_state(self) -> None:
+        self.settings.setValue("main/geometry", self.saveGeometry())
+        self.settings.setValue("main/state", self.saveState(1))
+        self.settings.setValue("canvas/show_travel", self.travel_action.isChecked())
+        self.settings.setValue("canvas/show_markers", self.markers_action.isChecked())
+        self.settings.sync()
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt API
+        if self.controller.dirty:
+            choice = QMessageBox.question(
+                self,
+                "Unsaved project",
+                "Save changes before closing?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save,
+            )
+            if choice == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if choice == QMessageBox.StandardButton.Save:
+                self.save_project()
+                if self.controller.dirty:
+                    event.ignore()
+                    return
+        self._save_window_state()
+        event.accept()
 
     def _action(self, text: str, callback, shortcut=None) -> QAction:  # noqa: ANN001
         action = QAction(text, self)

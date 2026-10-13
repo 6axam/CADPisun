@@ -1,5 +1,20 @@
 # Состояние реализации
 
+## GUI-06 — завершён 2026-10-13
+
+- Добавлены стандартные shortcuts, dirty-close Save/Discard/Cancel, сохранение
+  geometry/dock state и canvas diagnostics в QSettings. Fit-to-page теперь
+  корректно пересчитывается при resize/dock layout, ручной zoom отключает
+  автоматический fit.
+- Исправлены найденные при визуальной проверке ошибки выбора StylePack и
+  каталога validation. Реальное окно запущено через Wayland platform plugin;
+  сохранены production/toolpath и diagnostic/validation screenshots.
+- Wheel установлен в чистое CPython 3.12.12 окружение без PySide6: `hplot
+  --help` и импорт CLI успешны, Qt отсутствует. GUI entrypoint отдельно прошёл
+  Wayland startup smoke test.
+- README, desktop guide, DATA_MODELS и screenshot provenance синхронизированы.
+  Финальный накопленный набор: 102/102 tests.
+
 ## GUI-05 — завершён 2026-10-13
 
 - File → Export сохраняет exact bytes принятого production SVG,

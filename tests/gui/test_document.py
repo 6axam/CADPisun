@@ -69,3 +69,21 @@ def test_main_window_object_actions_update_real_model(qtbot) -> None:
     assert window.controller.dirty
     window.remove_selected_object()
     assert len(window.controller.snapshot.objects) == original
+
+
+def test_style_catalog_and_property_selection_match_valid_revision(qtbot) -> None:
+    from handwriting_plotter.gui.properties import PropertiesPanel
+    from handwriting_plotter.gui.styles import discover_styles
+
+    styles = discover_styles()
+    assert styles and all(item.valid for item in styles)
+    panel = PropertiesPanel(styles)
+    qtbot.addWidget(panel)
+    item = TextObject(
+        object_id="pilot",
+        name="Pilot",
+        style_id="ua-school-v1-pilot",
+        style_revision="0.2.0",
+    )
+    panel.show_text_object(item)
+    assert panel.style_field.currentData().split("\0") == ["ua-school-v1-pilot", "0.2.0"]

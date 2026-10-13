@@ -45,3 +45,4 @@ def test_export_actions_require_current_revision(qtbot) -> None:
     assert all(not action.isEnabled() for action in window.export_actions)
     machine_labels = [action.text() for action in window.machine_menu.actions()]
     assert not any("send" in label.lower() for label in machine_labels)
+    window.controller.reset(window.controller.snapshot)

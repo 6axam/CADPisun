@@ -48,3 +48,7 @@ def test_zoom_to_fit_is_stable(qtbot) -> None:
     canvas.show()
     canvas.zoom_to_fit()
     assert 0.25 <= canvas.zoom_factor <= 20.0
+    first = canvas.zoom_factor
+    canvas.resize(500, 500)
+    qtbot.wait(1)
+    assert canvas.zoom_factor != first

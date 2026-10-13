@@ -40,7 +40,7 @@ def discover_styles() -> tuple[StyleSummary, ...]:
                 test_only=manifest.test_only,
                 production_eligible=manifest.production_eligible,
                 valid=True,
-                detail=f"Validated · {len(snapshot.by_key)} glyph keys",
+                detail=f"Validated · {len(snapshot.variants_by_key)} glyph keys",
             ))
         except Exception as exc:  # catalog must expose broken packs instead of hiding them
             result.append(StyleSummary(style_id, revision, style_id, True, False, False, str(exc)))

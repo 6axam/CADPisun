@@ -88,7 +88,7 @@ class PropertiesPanel(QWidget):
         self.style_field = QComboBox()
         for style in self._styles:
             label = f"{style.display_name} · {style.revision}"
-            self.style_field.addItem(label, style.reference)
+            self.style_field.addItem(label, f"{style.style_id}\0{style.revision}")
         self.seed_field = QDoubleSpinBox()
         self.seed_field.setDecimals(0)
         self.seed_field.setRange(-2_147_483_648, 2_147_483_647)
@@ -144,7 +144,7 @@ class PropertiesPanel(QWidget):
         self.y_field.setValue(item.y_mm)
         self.x_height_field.setValue(item.x_height_mm)
         self.line_pitch_field.setValue(item.line_pitch_mm)
-        index = self.style_field.findData((item.style_id, item.style_revision))
+        index = self.style_field.findData(f"{item.style_id}\0{item.style_revision}")
         self.style_field.setCurrentIndex(max(index, 0))
         self.seed_field.setValue(item.seed)
         self.realism_field.setValue(item.realism)
@@ -168,7 +168,7 @@ class PropertiesPanel(QWidget):
     def _emit_text(self) -> None:
         if self._loading or self._object_id is None or self.style_field.currentIndex() < 0:
             return
-        style_id, revision = self.style_field.currentData()
+        style_id, revision = self.style_field.currentData().split("\0", 1)
         self.text_object_changed.emit(self._object_id, {
             "name": self.name_field.text().strip() or "Text",
             "text": self.text_field.toPlainText(),
