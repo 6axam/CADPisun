@@ -708,6 +708,8 @@ class MainWindow(QMainWindow):
         self._on_canvas_selection_changed(())
 
     def new_project(self) -> None:
+        if not self._confirm_project_replacement("creating a new project"):
+            return
         self._regeneration_timer.stop()
         self._regeneration_pending = False
         self._selected_object_ids.clear()
@@ -722,6 +724,8 @@ class MainWindow(QMainWindow):
     def open_project(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(self, "Open Handwriting Plotter Project", "", "Plotter Project (*.hplot.json)")
         if not filename:
+            return
+        if not self._confirm_project_replacement("opening another project"):
             return
         try:
             self._regeneration_timer.stop()
@@ -919,26 +923,32 @@ class MainWindow(QMainWindow):
         self.settings.sync()
 
     def closeEvent(self, event) -> None:  # noqa: ANN001, N802 - Qt API
-        if self.controller.dirty:
-            choice = QMessageBox.question(
-                self,
-                "Unsaved project",
-                "Save changes before closing?",
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Save,
-            )
-            if choice == QMessageBox.StandardButton.Cancel:
-                event.ignore()
-                return
-            if choice == QMessageBox.StandardButton.Save:
-                self.save_project()
-                if self.controller.dirty:
-                    event.ignore()
-                    return
+        if not self._confirm_project_replacement("closing"):
+            event.ignore()
+            return
         self._save_window_state()
         event.accept()
+
+    def _confirm_project_replacement(self, action: str) -> bool:
+        """Offer to save a dirty project before an action replaces it."""
+
+        if not self.controller.dirty:
+            return True
+        choice = QMessageBox.question(
+            self,
+            "Unsaved project",
+            f"Save changes before {action}?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if choice == QMessageBox.StandardButton.Cancel:
+            return False
+        if choice == QMessageBox.StandardButton.Save:
+            self.save_project()
+            return not self.controller.dirty
+        return True
 
     def _action(self, text: str, callback, shortcut=None) -> QAction:  # noqa: ANN001
         action = QAction(text, self)
