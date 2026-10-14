@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
-from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
+from handwriting_plotter.gui.document import GridObject, ProjectSnapshot, TextObject
 
 
 def composition_project() -> ProjectSnapshot:
@@ -50,6 +50,50 @@ def test_text_frame_geometry_does_not_change_generated_artifacts() -> None:
     changed = GuiBackend().build(ProjectSnapshot.model_validate(moved_frames.model_dump(), strict=True))
     assert changed.document_id == baseline.document_id
     assert changed.files == baseline.files
+
+
+def test_layout_grid_is_strictly_excluded_from_all_generated_artifacts() -> None:
+    baseline_project = composition_project()
+    with_grid = baseline_project.model_copy(update={
+        "objects": baseline_project.objects + (
+            GridObject(
+                object_id="layout-grid",
+                name="Blue grid",
+                cell_width_mm=7,
+                cell_height_mm=9,
+                line_style="dashed",
+                color="#2277AA",
+            ),
+        ),
+    })
+
+    baseline = GuiBackend().build(baseline_project)
+    changed = GuiBackend().build(ProjectSnapshot.model_validate(with_grid.model_dump(), strict=True))
+
+    assert changed.document_id == baseline.document_id
+    assert changed.files == baseline.files
+
+
+def test_grid_edits_preserve_current_generated_result(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.controller.reset(composition_project())
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    generated = window.generated_result
+
+    try:
+        window.add_grid_object()
+        grid = window.controller.snapshot.objects[-1]
+        window._update_grid_object(grid.object_id, {"cell_width_mm": 8.0, "color": "#445566"})
+
+        assert window.generated_result is generated
+        assert window.generated_revision == window.controller.revision
+        assert all(action.isEnabled() for action in window.export_actions)
+    finally:
+        window.controller.reset(window.controller.snapshot)
 
 
 def test_missing_glyph_fails_before_replacing_gui_result(qtbot) -> None:
@@ -113,7 +157,7 @@ def test_open_restores_saved_generation_without_running_backend(qtbot, tmp_path,
 
 
 def test_visibility_toggle_clears_and_regenerates_the_rendered_page(qtbot) -> None:
-    from handwriting_plotter.gui.main_window import MainWindow, ROLE_KIND
+    from handwriting_plotter.gui.main_window import ROLE_KIND, MainWindow
 
     window = MainWindow()
     qtbot.addWidget(window)

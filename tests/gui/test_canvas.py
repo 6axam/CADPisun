@@ -6,9 +6,12 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 
-from handwriting_plotter.application.service import GenerationRequest, HandwritingPlotterService
+from handwriting_plotter.application.service import (
+    GenerationRequest,
+    HandwritingPlotterService,
+)
 from handwriting_plotter.gui.canvas import PageCanvas
-from handwriting_plotter.gui.document import TextObject
+from handwriting_plotter.gui.document import GridObject, TextObject
 
 
 @pytest.fixture(scope="module")
@@ -132,3 +135,24 @@ def test_dragging_selected_object_emits_physical_move(qtbot) -> None:
     assert emitted[-1][0] == ("move",)
     assert emitted[-1][1] == pytest.approx(10, abs=0.5)
     assert emitted[-1][2] == pytest.approx(15, abs=0.5)
+
+
+def test_grid_is_rendered_and_snap_can_apply_to_one_axis(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    grid = GridObject(
+        object_id="grid", x_mm=10, y_mm=10, width_mm=100, height_mm=100,
+        cell_width_mm=10, cell_height_mm=10, line_style="dash_dot", color="#123456",
+    )
+    text = TextObject(
+        object_id="text", name="Text", x_mm=21.2, y_mm=23,
+        frame_x_mm=21.2, frame_y_mm=23, frame_width_mm=13, frame_height_mm=9,
+    )
+    canvas.set_object_frames((grid, text), {text.object_id})
+
+    snapped = canvas._snap_move_delta({text.object_id}, QPointF())
+
+    assert canvas._grid_items[grid.object_id].grid.line_style == "dash_dot"
+    assert canvas._grid_items[grid.object_id].grid.color == "#123456"
+    assert snapped.x() == pytest.approx(-1.2)
+    assert snapped.y() == 0

@@ -9,15 +9,16 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
 from shiboken6 import isValid
 
+from handwriting_plotter.gui import document as document_module
 from handwriting_plotter.gui.document import (
     DocumentController,
+    GridObject,
     ProjectSnapshot,
     TextObject,
     load_project,
     load_project_file,
     save_project,
 )
-from handwriting_plotter.gui import document as document_module
 
 
 def sample_project() -> ProjectSnapshot:
@@ -59,25 +60,50 @@ def test_project_rejects_unknown_schema(tmp_path) -> None:
         load_project(path)
 
 
-@pytest.mark.parametrize("schema_version", ["1.0", "1.1"])
+@pytest.mark.parametrize("schema_version", ["1.0", "1.1", "1.2"])
 def test_legacy_project_is_loaded_with_text_frames(tmp_path, schema_version) -> None:
     path = tmp_path / "legacy.hplot.json"
     data = sample_project().model_dump(mode="json")
     data["schema_version"] = schema_version
     data["objects"][0]["x_mm"] = 42.0
     data["objects"][0]["y_mm"] = 53.0
+    data["objects"][0].pop("kind")
     for key in ("frame_x_mm", "frame_y_mm", "frame_width_mm", "frame_height_mm"):
         data["objects"][0].pop(key)
     path.write_text(json.dumps(data), encoding="utf-8")
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.2"
+    assert loaded.schema_version == "1.3"
     assert loaded.project_id == sample_project().project_id
     assert loaded.objects[0].frame_x_mm == 42.0
     assert loaded.objects[0].frame_y_mm == 53.0
     assert loaded.objects[0].frame_width_mm == 60.0
     assert loaded.objects[0].frame_height_mm == 30.0
+    assert loaded.objects[0].kind == "text"
+
+
+def test_grid_object_round_trips_with_validated_geometry(tmp_path) -> None:
+    path = tmp_path / "grid.hplot.json"
+    grid = GridObject(
+        object_id="grid-1",
+        name="Notebook grid",
+        x_mm=10,
+        y_mm=12,
+        width_mm=180,
+        height_mm=260,
+        cell_width_mm=7,
+        cell_height_mm=9,
+        line_style="dash_dot",
+        color="#336699",
+    )
+    snapshot = ProjectSnapshot(project_id="grid-project", objects=(grid,))
+
+    save_project(path, snapshot)
+
+    assert load_project(path) == snapshot
+    with pytest.raises(ValueError, match="grid exceeds page width"):
+        GridObject(object_id="outside", x_mm=100, width_mm=120)
 
 
 def test_generated_result_round_trips_with_verified_artifacts(tmp_path) -> None:
@@ -193,7 +219,7 @@ def test_main_window_object_actions_update_real_model(qtbot) -> None:
 
 
 def test_tree_visibility_change_does_not_destroy_signal_sender(qtbot) -> None:
-    from handwriting_plotter.gui.main_window import MainWindow, ROLE_KIND
+    from handwriting_plotter.gui.main_window import ROLE_KIND, MainWindow
 
     window = MainWindow()
     qtbot.addWidget(window)
@@ -278,3 +304,27 @@ def test_text_properties_group_pairs_and_edit_independent_frame(qtbot) -> None:
     assert x_position[1] != y_position[1]
     assert emitted[-1]["frame_width_mm"] == 65
     assert emitted[-1]["x_mm"] == 12
+
+
+def test_grid_properties_edit_cells_line_style_color_and_snap(qtbot) -> None:
+    from handwriting_plotter.gui.properties import PropertiesPanel
+    from handwriting_plotter.gui.styles import discover_styles
+
+    panel = PropertiesPanel(discover_styles(), language="uk")
+    qtbot.addWidget(panel)
+    grid = GridObject(object_id="grid-properties", line_style="solid", color="#112233")
+    emitted: list[dict] = []
+    panel.grid_object_changed.connect(lambda _object_id, changes: emitted.append(changes))
+
+    panel.show_grid_object(grid)
+    panel.cell_width_field.setValue(8)
+    panel.grid_line_style_field.setCurrentIndex(panel.grid_line_style_field.findData("dash_dot"))
+    panel.grid_color_field.setText("#AABBCC")
+    panel.grid_color_field.editingFinished.emit()
+    panel.grid_snap_field.setChecked(False)
+
+    assert emitted[-1]["cell_width_mm"] == 8
+    assert emitted[-1]["line_style"] == "dash_dot"
+    assert emitted[-1]["color"] == "#AABBCC"
+    assert emitted[-1]["snap_enabled"] is False
+    assert panel.grid_line_style_field.currentText() == "Штрих-пунктирна"

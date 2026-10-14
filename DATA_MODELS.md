@@ -194,9 +194,9 @@ Correction operations: set_transcript, adjust_polygon, split_region, merge_regio
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.2`. Корень содержит `project_id`, пользовательское `name`,
+`schema_version=1.3`. Корень содержит `project_id`, пользовательское `name`,
 `page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
-Версии 1.0 и 1.1 читаются и мигрируют в памяти в 1.2; неизвестная версия или
+Версии 1.0–1.2 читаются и мигрируют в памяти в 1.3; неизвестная версия или
 лишнее поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
@@ -206,6 +206,13 @@ line_pitch_mm, pinned style_id/style_revision, seed и realism, а также
 Изменение поля само по себе не меняет layout, SVG, PenPlan или G-code. `display` v1
 содержит show_travel/show_markers. Object IDs уникальны; абсолютные пути и
 QSettings layout в JSON не встраиваются.
+
+Каждый элемент `objects[]` имеет discriminator `kind`. `kind=text` обозначает
+`TextObject`. `kind=grid` обозначает `GridObject`: object_id, name, visible,
+x_mm/y_mm, width_mm/height_mm, cell_width_mm/cell_height_mm, line_style
+(`solid|dashed|dash_dot`), цвет `#RRGGBB` и snap_enabled. Сетка хранится в
+проекте и рисуется GUI, но composition adapter обязан исключать её из layout,
+PenPlan, production/diagnostic SVG, MotionPlan и G-code.
 
 Файл кодируется canonical UTF-8 JSON с LF и записывается temp + fsync + atomic
 replace в том же каталоге. `generation_cache` хранит base64 артефакты

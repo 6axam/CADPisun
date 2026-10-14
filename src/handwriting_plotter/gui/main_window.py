@@ -4,23 +4,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThreadPool, QTimer, Qt
+from PySide6.QtCore import QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QApplication,
+    QDockWidget,
+    QFileDialog,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .canvas import PageCanvas
 from .backend import GuiBackend
-from .document import DocumentController, ProjectSnapshot, default_project, load_project_file, save_project
+from .canvas import PageCanvas
+from .document import (
+    DocumentController,
+    GridObject,
+    ProjectSnapshot,
+    TextObject,
+    default_project,
+    load_project_file,
+    save_project,
+)
 from .exporting import export_artifact
 from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .workers import GenerationWorker
-
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
 ROLE_VALUE = ROLE_KIND + 1
@@ -78,8 +96,10 @@ class MainWindow(QMainWindow):
         project_layout.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
         self.add_text_button = QPushButton(self._t("button.add_text"))
+        self.add_grid_button = QPushButton(self._t("button.add_grid"))
         self.remove_text_button = QPushButton(self._t("button.remove"))
         controls.addWidget(self.add_text_button)
+        controls.addWidget(self.add_grid_button)
         controls.addWidget(self.remove_text_button)
         project_layout.addLayout(controls)
         self.project_tree = QTreeWidget()
@@ -119,6 +139,7 @@ class MainWindow(QMainWindow):
         self.redo_action = self.controller.undo_stack.createRedoAction(self, self._t("action.redo"))
         self.redo_action.setShortcuts([QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Shift+Z")])
         self.add_text_action = self._action(self._t("action.add_text"), self.add_text_object, QKeySequence("Insert"))
+        self.add_grid_action = self._action(self._t("action.add_grid"), self.add_grid_object)
         self.delete_action = self._action(self._t("action.delete"), self.remove_selected_object, QKeySequence.StandardKey.Delete)
         self.generate_action = self._action(self._t("action.generate"), self.generate_page, QKeySequence("Ctrl+Return"))
         self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
@@ -140,7 +161,7 @@ class MainWindow(QMainWindow):
         self.edit_menu = self.menuBar().addMenu(self._t("menu.edit"))
         self.edit_menu.addActions([self.undo_action, self.redo_action])
         self.edit_menu.addSeparator()
-        self.edit_menu.addActions([self.add_text_action, self.delete_action])
+        self.edit_menu.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
         self.view_menu = self.menuBar().addMenu(self._t("menu.view"))
         for dock in (self.project_dock, self.properties_dock, self.output_dock):
             self.view_menu.addAction(dock.toggleViewAction())
@@ -164,7 +185,7 @@ class MainWindow(QMainWindow):
         self.workspace_toolbar.setObjectName("workspace-toolbar")
         self.workspace_toolbar.addActions([self.new_action, self.open_action, self.save_action])
         self.workspace_toolbar.addSeparator()
-        self.workspace_toolbar.addActions([self.add_text_action, self.delete_action])
+        self.workspace_toolbar.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
         self.workspace_toolbar.addSeparator()
         self.workspace_toolbar.addAction(self.generate_action)
         self.workspace_toolbar.addSeparator()
@@ -213,6 +234,7 @@ class MainWindow(QMainWindow):
             self.undo_action: "action.undo",
             self.redo_action: "action.redo",
             self.add_text_action: "action.add_text",
+            self.add_grid_action: "action.add_grid",
             self.delete_action: "action.delete",
             self.generate_action: "action.generate",
             self.export_svg_action: "action.export_svg",
@@ -235,6 +257,7 @@ class MainWindow(QMainWindow):
         self.properties_dock.setWindowTitle(self._t("dock.properties"))
         self.output_dock.setWindowTitle(self._t("dock.output"))
         self.add_text_button.setText(self._t("button.add_text"))
+        self.add_grid_button.setText(self._t("button.add_grid"))
         self.remove_text_button.setText(self._t("button.remove"))
         self.output_tabs.setTabText(0, self._t("tab.console"))
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
@@ -254,8 +277,10 @@ class MainWindow(QMainWindow):
         self.canvas.objects_moved.connect(self._on_canvas_objects_moved)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
         self.properties.text_object_changed.connect(self._update_text_object)
+        self.properties.grid_object_changed.connect(self._update_grid_object)
         self.properties.page_changed.connect(self._update_page)
         self.add_text_button.clicked.connect(self.add_text_object)
+        self.add_grid_button.clicked.connect(self.add_grid_object)
         self.remove_text_button.clicked.connect(self.remove_selected_object)
 
     def _dock(self, title: str, name: str, widget: QWidget) -> QDockWidget:
@@ -288,7 +313,7 @@ class MainWindow(QMainWindow):
         project.addChild(document)
         for item in snapshot.objects:
             node = QTreeWidgetItem([item.name])
-            node.setData(0, ROLE_KIND, "text")
+            node.setData(0, ROLE_KIND, item.kind)
             node.setData(0, ROLE_VALUE, item.object_id)
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsUserCheckable)
             node.setCheckState(0, Qt.CheckState.Checked if item.visible else Qt.CheckState.Unchecked)
@@ -305,7 +330,7 @@ class MainWindow(QMainWindow):
         self.project_tree.expandAll()
         self.project_tree.setCurrentItem(self._find_tree_item(*selected) or page)
         for object_id in selected_object_ids:
-            node = self._find_tree_item("text", object_id)
+            node = self._find_object_tree_item(object_id)
             if node is not None:
                 node.setSelected(True)
         self._refreshing_tree = False
@@ -320,11 +345,18 @@ class MainWindow(QMainWindow):
             pending.extend(item.child(i) for i in range(item.childCount()))
         return None
 
+    def _find_object_tree_item(self, object_id: str) -> QTreeWidgetItem | None:
+        for kind in ("text", "grid"):
+            item = self._find_tree_item(kind, object_id)
+            if item is not None:
+                return item
+        return None
+
     def _on_snapshot_changed(self, snapshot: ProjectSnapshot, revision: int) -> None:
         self._refresh_tree(snapshot)
         page = snapshot.page
         self.canvas.set_margins(page.margin_left_mm, page.margin_top_mm, page.margin_right_mm, page.margin_bottom_mm)
-        self.canvas.set_object_frames(snapshot.objects, self._selected_text_ids())
+        self.canvas.set_object_frames(snapshot.objects, self._selected_object_ids_copy())
         focus = QApplication.focusWidget()
         if focus is None or not self.properties.isAncestorOf(focus):
             self._show_selected_properties()
@@ -351,24 +383,24 @@ class MainWindow(QMainWindow):
         selected_ids = {
             item.data(0, ROLE_VALUE)
             for item in self.project_tree.selectedItems()
-            if item.data(0, ROLE_KIND) == "text" and isinstance(item.data(0, ROLE_VALUE), str)
+            if item.data(0, ROLE_KIND) in {"text", "grid"} and isinstance(item.data(0, ROLE_VALUE), str)
         }
         current = self.project_tree.currentItem()
-        if current is not None and current.data(0, ROLE_KIND) == "text":
-            self._selected_kind = "text"
+        if current is not None and current.data(0, ROLE_KIND) in {"text", "grid"}:
+            self._selected_kind = current.data(0, ROLE_KIND)
             self._selected_value = current.data(0, ROLE_VALUE)
             selected_ids.add(self._selected_value)
         elif not selected_ids and current is not None:
             self._selected_kind = current.data(0, ROLE_KIND) or "project"
             self._selected_value = current.data(0, ROLE_VALUE)
         self._selected_object_ids = selected_ids
-        self.canvas.set_selected_objects(self._selected_text_ids())
+        self.canvas.set_selected_objects(self._selected_object_ids_copy())
         self._show_selected_properties()
         enabled = bool(selected_ids)
         self.delete_action.setEnabled(enabled)
         self.remove_text_button.setEnabled(enabled)
 
-    def _selected_text_ids(self) -> set[str]:
+    def _selected_object_ids_copy(self) -> set[str]:
         return set(self._selected_object_ids)
 
     def _on_canvas_selection_changed(self, object_ids) -> None:  # noqa: ANN001
@@ -382,12 +414,13 @@ class MainWindow(QMainWindow):
         self.project_tree.clearSelection()
         if valid:
             primary = sorted(valid)[0]
-            self._selected_kind, self._selected_value = "text", primary
-            node = self._find_tree_item("text", primary)
+            model = next(item for item in self.controller.snapshot.objects if item.object_id == primary)
+            self._selected_kind, self._selected_value = model.kind, primary
+            node = self._find_object_tree_item(primary)
             if node is not None:
                 self.project_tree.setCurrentItem(node)
             for object_id in sorted(valid):
-                selected_node = self._find_tree_item("text", object_id)
+                selected_node = self._find_object_tree_item(object_id)
                 if selected_node is not None:
                     selected_node.setSelected(True)
         else:
@@ -407,18 +440,23 @@ class MainWindow(QMainWindow):
             self.properties.show_page(self.controller.snapshot.page)
         elif self._selected_kind == "text":
             item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
-            if item:
+            if isinstance(item, TextObject):
                 self.properties.show_text_object(item)
+        elif self._selected_kind == "grid":
+            item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
+            if isinstance(item, GridObject):
+                self.properties.show_grid_object(item)
         elif self._selected_kind == "style":
             style = next((obj for obj in self.styles if obj.reference == self._selected_value), None)
             if style:
                 self.properties.show_style(style)
 
     def _on_tree_item_changed(self, node: QTreeWidgetItem, column: int) -> None:
-        if self._refreshing_tree or node.data(0, ROLE_KIND) != "text":
+        if self._refreshing_tree or node.data(0, ROLE_KIND) not in {"text", "grid"}:
             return
         object_id = node.data(0, ROLE_VALUE)
-        name = node.text(0).strip() or "Text"
+        fallback_name = "Grid" if node.data(0, ROLE_KIND) == "grid" else "Text"
+        name = node.text(0).strip() or fallback_name
         visible = node.checkState(0) == Qt.CheckState.Checked
         QTimer.singleShot(0, lambda: self._apply_tree_item_change(object_id, name, visible))
 
@@ -431,8 +469,12 @@ class MainWindow(QMainWindow):
             and self.generated_revision == self.controller.revision
         )
         visibility_changed = item.visible != visible
-        self.controller.update_text_object(object_id, name=name, visible=visible)
-        if visibility_changed and (had_current_generation or self._regeneration_pending):
+        if isinstance(item, TextObject):
+            self.controller.update_text_object(object_id, name=name, visible=visible)
+        else:
+            self.controller.update_grid_object(object_id, name=name, visible=visible)
+            self._preserve_generation_revision(had_current_generation)
+        if isinstance(item, TextObject) and visibility_changed and (had_current_generation or self._regeneration_pending):
             self._schedule_regeneration("Visibility changed · updating page…")
 
     def _schedule_regeneration(self, message: str) -> None:
@@ -445,7 +487,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
 
     def _regenerate_after_change(self) -> None:
-        if not any(item.visible for item in self.controller.snapshot.objects):
+        if not any(isinstance(item, TextObject) and item.visible for item in self.controller.snapshot.objects):
             self.console.setPlainText("All text objects are hidden.")
             self.statusBar().showMessage("All text objects are hidden", 4000)
             return
@@ -461,12 +503,19 @@ class MainWindow(QMainWindow):
             and self.generated_revision == self.controller.revision
         )
         try:
-            self.controller.move_text_objects(set(object_ids), dx_mm, dy_mm)
+            selected = set(object_ids)
+            moving_text = any(
+                isinstance(item, TextObject) and item.object_id in selected
+                for item in self.controller.snapshot.objects
+            )
+            self.controller.move_objects(selected, dx_mm, dy_mm)
         except ValueError as exc:
-            self.canvas.set_object_frames(self.controller.snapshot.objects, self._selected_text_ids())
+            self.canvas.set_object_frames(self.controller.snapshot.objects, self._selected_object_ids_copy())
             self.statusBar().showMessage(str(exc), 5000)
             return
-        if had_current_generation or self._regeneration_pending:
+        if not moving_text:
+            self._preserve_generation_revision(had_current_generation)
+        elif had_current_generation or self._regeneration_pending:
             self._schedule_regeneration("Object moved · updating page…")
 
     def _update_text_object(self, object_id: str, changes: dict) -> None:
@@ -474,6 +523,23 @@ class MainWindow(QMainWindow):
             self.controller.update_text_object(object_id, **changes)
         except ValueError as exc:
             self.statusBar().showMessage(str(exc), 5000)
+
+    def _update_grid_object(self, object_id: str, changes: dict) -> None:
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        try:
+            self.controller.update_grid_object(object_id, **changes)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc), 5000)
+            return
+        self._preserve_generation_revision(had_current_generation)
+
+    def _preserve_generation_revision(self, had_current_generation: bool) -> None:
+        if had_current_generation and self.generated_result is not None:
+            self.generated_revision = self.controller.revision
+            self._update_export_actions()
 
     def _update_page(self, changes: dict) -> None:
         try:
@@ -486,13 +552,35 @@ class MainWindow(QMainWindow):
         self._selected_kind, self._selected_value = "text", item.object_id
         self._selected_object_ids = {item.object_id}
         self._refresh_tree(self.controller.snapshot)
+        self._sync_tree_selection()
+
+    def add_grid_object(self) -> None:
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        item = self.controller.add_grid_object()
+        self._selected_kind, self._selected_value = "grid", item.object_id
+        self._selected_object_ids = {item.object_id}
+        self._refresh_tree(self.controller.snapshot)
+        self._sync_tree_selection()
+        self._preserve_generation_revision(had_current_generation)
 
     def remove_selected_object(self) -> None:
         if not self._selected_object_ids:
             return
-        self.controller.remove_text_objects(self._selected_object_ids)
+        selected = set(self._selected_object_ids)
+        selected_models = [item for item in self.controller.snapshot.objects if item.object_id in selected]
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        self.controller.remove_objects(selected)
+        if selected_models and all(isinstance(item, GridObject) for item in selected_models):
+            self._preserve_generation_revision(had_current_generation)
         self._selected_object_ids.clear()
         self._selected_kind, self._selected_value = "page", None
+        self._on_canvas_selection_changed(())
 
     def new_project(self) -> None:
         self._regeneration_timer.stop()

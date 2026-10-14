@@ -93,3 +93,20 @@ def test_canvas_move_signal_updates_text_and_frame_coordinates(qtbot) -> None:
     assert (moved.x_mm, moved.y_mm) == (item.x_mm + 7, item.y_mm + 9)
     assert (moved.frame_x_mm, moved.frame_y_mm) == (item.frame_x_mm + 7, item.frame_y_mm + 9)
     window.controller.reset(window.controller.snapshot)
+
+
+def test_grid_object_can_be_created_selected_and_edited(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.add_grid_object()
+
+    grid = window.controller.snapshot.objects[-1]
+    window.controller.reset(window.controller.snapshot)
+    assert grid.kind == "grid"
+    assert window._selected_kind == "grid"
+    assert window.properties.stack.currentWidget() is window.properties.grid_widget
+    assert grid.object_id in window.canvas._grid_items
+    window.properties.cell_height_field.setValue(12)
+    assert window.controller.snapshot.objects[-1].cell_height_mm == 12
+    window.controller.reset(window.controller.snapshot)

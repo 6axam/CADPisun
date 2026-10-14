@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QRegularExpression, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .document import PageSettings, TextObject
+from .document import GridObject, PageSettings, TextObject
 from .i18n import Language, normalize_language, tr
 from .styles import StyleSummary
 
@@ -34,6 +35,7 @@ def _millimetre_spin(minimum: float = 0.0, maximum: float = 297.0) -> QDoubleSpi
 
 class PropertiesPanel(QWidget):
     text_object_changed = Signal(str, object)
+    grid_object_changed = Signal(str, object)
     page_changed = Signal(object)
 
     def __init__(
@@ -55,10 +57,11 @@ class PropertiesPanel(QWidget):
         self.stack = QStackedWidget()
         self.page_widget = self._build_page_widget()
         self.text_widget = self._build_text_widget()
+        self.grid_widget = self._build_grid_widget()
         self.resource_widget = self._build_resource_widget()
         self.empty_widget = QLabel()
         self.empty_widget.setWordWrap(True)
-        for widget in (self.empty_widget, self.page_widget, self.text_widget, self.resource_widget):
+        for widget in (self.empty_widget, self.page_widget, self.text_widget, self.grid_widget, self.resource_widget):
             self.stack.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -192,6 +195,55 @@ class PropertiesPanel(QWidget):
         self._add_row(form, "properties.validation", self.resource_detail)
         return widget
 
+    def _build_grid_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.grid_name_field = QLineEdit()
+        self.grid_x_field = _millimetre_spin(0, 209.9)
+        self.grid_y_field = _millimetre_spin(0, 296.9)
+        self.grid_width_field = _millimetre_spin(0.01, 210)
+        self.grid_height_field = _millimetre_spin(0.01, 297)
+        self.cell_width_field = _millimetre_spin(1, 210)
+        self.cell_height_field = _millimetre_spin(1, 297)
+        self.grid_line_style_field = QComboBox()
+        for value in ("solid", "dashed", "dash_dot"):
+            self.grid_line_style_field.addItem("", value)
+        self.grid_color_field = QLineEdit()
+        self.grid_color_field.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"#[0-9A-Fa-f]{6}"))
+        )
+        self.grid_snap_field = QCheckBox()
+        self._add_group(layout, "properties.group.grid", [
+            ("properties.name", self.grid_name_field),
+            ("properties.grid_color", self.grid_color_field),
+        ])
+        self._add_group(layout, "properties.group.grid_geometry", [
+            ("properties.frame_x", self.grid_x_field),
+            ("properties.frame_y", self.grid_y_field),
+            ("properties.frame_width", self.grid_width_field),
+            ("properties.frame_height", self.grid_height_field),
+        ])
+        self._add_group(layout, "properties.group.cells", [
+            ("properties.cell_width", self.cell_width_field),
+            ("properties.cell_height", self.cell_height_field),
+        ])
+        self._add_group(layout, "properties.group.grid_lines", [
+            ("properties.line_style", self.grid_line_style_field),
+            ("properties.snap", self.grid_snap_field),
+        ])
+        layout.addStretch(1)
+        self.grid_name_field.editingFinished.connect(self._emit_grid)
+        self.grid_color_field.editingFinished.connect(self._emit_grid)
+        for field in (
+            self.grid_x_field, self.grid_y_field, self.grid_width_field,
+            self.grid_height_field, self.cell_width_field, self.cell_height_field,
+        ):
+            field.valueChanged.connect(self._emit_grid)
+        self.grid_line_style_field.currentIndexChanged.connect(self._emit_grid)
+        self.grid_snap_field.toggled.connect(self._emit_grid)
+        return widget
+
     def set_language(self, language: Language) -> None:
         self.language = normalize_language(language)
         self.empty_widget.setText(tr(self.language, "properties.empty"))
@@ -200,6 +252,8 @@ class PropertiesPanel(QWidget):
             label.setText(tr(self.language, key))
         for key, group in self._groups.items():
             group.setTitle(tr(self.language, key))
+        for index, value in enumerate(("solid", "dashed", "dash_dot")):
+            self.grid_line_style_field.setItemText(index, tr(self.language, f"properties.line_style.{value}"))
         if self._shown_style is not None:
             self._show_style_status(self._shown_style)
 
@@ -232,6 +286,23 @@ class PropertiesPanel(QWidget):
         self.realism_field.setValue(item.realism)
         self._loading = False
         self.stack.setCurrentWidget(self.text_widget)
+
+    def show_grid_object(self, item: GridObject) -> None:
+        self._loading = True
+        self._object_id = item.object_id
+        self._shown_style = None
+        self.grid_name_field.setText(item.name)
+        self.grid_x_field.setValue(item.x_mm)
+        self.grid_y_field.setValue(item.y_mm)
+        self.grid_width_field.setValue(item.width_mm)
+        self.grid_height_field.setValue(item.height_mm)
+        self.cell_width_field.setValue(item.cell_width_mm)
+        self.cell_height_field.setValue(item.cell_height_mm)
+        self.grid_line_style_field.setCurrentIndex(self.grid_line_style_field.findData(item.line_style))
+        self.grid_color_field.setText(item.color)
+        self.grid_snap_field.setChecked(item.snap_enabled)
+        self._loading = False
+        self.stack.setCurrentWidget(self.grid_widget)
 
     def show_style(self, style: StyleSummary) -> None:
         self._object_id = None
@@ -274,4 +345,20 @@ class PropertiesPanel(QWidget):
             "style_revision": revision,
             "seed": int(seed_text),
             "realism": self.realism_field.value(),
+        })
+
+    def _emit_grid(self) -> None:
+        if self._loading or self._object_id is None or not self.grid_color_field.hasAcceptableInput():
+            return
+        self.grid_object_changed.emit(self._object_id, {
+            "name": self.grid_name_field.text().strip() or "Grid",
+            "x_mm": self.grid_x_field.value(),
+            "y_mm": self.grid_y_field.value(),
+            "width_mm": self.grid_width_field.value(),
+            "height_mm": self.grid_height_field.value(),
+            "cell_width_mm": self.cell_width_field.value(),
+            "cell_height_mm": self.cell_height_field.value(),
+            "line_style": self.grid_line_style_field.currentData(),
+            "color": self.grid_color_field.text().upper(),
+            "snap_enabled": self.grid_snap_field.isChecked(),
         })

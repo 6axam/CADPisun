@@ -218,6 +218,9 @@ Tests T-C03…T-C07: crossings, dots, retracing ambiguity, два порядка
 5. **GUI-04:** application composition adapter, single-flight background generation, stale-result guard, coverage/errors и canvas refresh.
 6. **GUI-05:** export production SVG, diagnostic SVG, virtual G-code и reports; toolpath statistics, без machine send.
 7. **GUI-06:** shortcuts, dirty-close UX, QSettings dock layout, HiDPI/Wayland smoke tests, visual QA и user documentation.
+8. **GUI-07:** bilingual UI, CAD selection/move, independent text frames,
+   compact grouped properties и persisted layout-grid overlay с partial snap;
+   доказать byte-identical generated artifacts с сеткой и без неё.
 
 Каждый пакет завершается tests и отдельным commit. OCR, ML, hardware transport,
 capture и glyph-node editor остаются вне этого плана.

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import os
 import tempfile
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import Field, field_validator, model_validator
@@ -16,7 +16,11 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
 from handwriting_plotter.application.service import GenerationResult
-from handwriting_plotter.domain.models import StrictModel, canonical_json_bytes, strict_json_loads
+from handwriting_plotter.domain.models import (
+    StrictModel,
+    canonical_json_bytes,
+    strict_json_loads,
+)
 
 
 class PageSettings(StrictModel):
@@ -41,6 +45,7 @@ class PageSettings(StrictModel):
 
 
 class TextObject(StrictModel):
+    kind: Literal["text"] = "text"
     object_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=120)
     text: str = ""
@@ -76,6 +81,33 @@ class TextObject(StrictModel):
         return self
 
 
+class GridObject(StrictModel):
+    kind: Literal["grid"] = "grid"
+    object_id: str = Field(min_length=1)
+    name: str = Field(default="Grid", min_length=1, max_length=120)
+    visible: bool = True
+    x_mm: float = Field(default=15.0, ge=0, lt=210)
+    y_mm: float = Field(default=15.0, ge=0, lt=297)
+    width_mm: float = Field(default=180.0, gt=0, le=210)
+    height_mm: float = Field(default=267.0, gt=0, le=297)
+    cell_width_mm: float = Field(default=5.0, ge=1.0, le=210)
+    cell_height_mm: float = Field(default=5.0, ge=1.0, le=297)
+    line_style: Literal["solid", "dashed", "dash_dot"] = "solid"
+    color: str = Field(default="#8BA1BD", pattern=r"^#[0-9A-Fa-f]{6}$")
+    snap_enabled: bool = True
+
+    @model_validator(mode="after")
+    def grid_fits_a4(self) -> "GridObject":
+        if self.x_mm + self.width_mm > 210:
+            raise ValueError("grid exceeds page width")
+        if self.y_mm + self.height_mm > 297:
+            raise ValueError("grid exceeds page height")
+        return self
+
+
+ProjectObject = Annotated[TextObject | GridObject, Field(discriminator="kind")]
+
+
 class DisplaySettings(StrictModel):
     show_travel: bool = False
     show_markers: bool = False
@@ -83,16 +115,16 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.2"] = "1.2"
+    schema_version: Literal["1.3"] = "1.3"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
-    objects: tuple[TextObject, ...] = ()
+    objects: tuple[ProjectObject, ...] = ()
     display: DisplaySettings = DisplaySettings()
 
     @field_validator("objects")
     @classmethod
-    def unique_object_ids(cls, value: tuple[TextObject, ...]) -> tuple[TextObject, ...]:
+    def unique_object_ids(cls, value: tuple[ProjectObject, ...]) -> tuple[ProjectObject, ...]:
         ids = [item.object_id for item in value]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate object id")
@@ -202,20 +234,22 @@ def load_project_file(path: Path) -> LoadedProject:
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
     version = data.get("schema_version")
-    if version not in {"1.0", "1.1", "1.2"}:
+    if version not in {"1.0", "1.1", "1.2", "1.3"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
     cache_data = data.pop("generation_cache", None)
-    if version in {"1.0", "1.1"}:
+    if version in {"1.0", "1.1", "1.2"}:
         migrated_objects = []
         for item in data.get("objects", []):
             migrated = dict(item)
-            migrated.setdefault("frame_x_mm", migrated.get("x_mm", 15.0))
-            migrated.setdefault("frame_y_mm", migrated.get("y_mm", 15.0))
-            migrated.setdefault("frame_width_mm", min(60.0, 210.0 - migrated["frame_x_mm"]))
-            migrated.setdefault("frame_height_mm", min(30.0, 297.0 - migrated["frame_y_mm"]))
+            migrated.setdefault("kind", "text")
+            if migrated["kind"] == "text":
+                migrated.setdefault("frame_x_mm", migrated.get("x_mm", 15.0))
+                migrated.setdefault("frame_y_mm", migrated.get("y_mm", 15.0))
+                migrated.setdefault("frame_width_mm", min(60.0, 210.0 - migrated["frame_x_mm"]))
+                migrated.setdefault("frame_height_mm", min(30.0, 297.0 - migrated["frame_y_mm"]))
             migrated_objects.append(migrated)
         data["objects"] = migrated_objects
-        data["schema_version"] = "1.2"
+        data["schema_version"] = "1.3"
     snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
     if cache_data is None:
         return LoadedProject(snapshot)
@@ -329,52 +363,76 @@ class DocumentController(QObject):
         self.path_changed.emit(path)
 
     def add_text_object(self) -> TextObject:
-        count = len(self.snapshot.objects) + 1
+        count = sum(isinstance(item, TextObject) for item in self.snapshot.objects) + 1
         item = TextObject(object_id=str(uuid4()), name=f"Text {count}", text="New text")
         self.apply(self.snapshot.model_copy(update={"objects": self.snapshot.objects + (item,)}), "Add text object")
         return item
 
+    def add_grid_object(self) -> GridObject:
+        count = sum(isinstance(item, GridObject) for item in self.snapshot.objects) + 1
+        item = GridObject(object_id=str(uuid4()), name=f"Grid {count}")
+        self.apply(self.snapshot.model_copy(update={"objects": self.snapshot.objects + (item,)}), "Add grid object")
+        return item
+
     def remove_text_object(self, object_id: str) -> None:
-        self.remove_text_objects({object_id})
+        self.remove_objects({object_id})
 
     def remove_text_objects(self, object_ids: set[str]) -> None:
+        self.remove_objects(object_ids)
+
+    def remove_objects(self, object_ids: set[str]) -> None:
         objects = tuple(item for item in self.snapshot.objects if item.object_id not in object_ids)
         if len(objects) == len(self.snapshot.objects):
             return
-        description = "Delete text object" if len(self.snapshot.objects) - len(objects) == 1 else "Delete text objects"
+        description = "Delete object" if len(self.snapshot.objects) - len(objects) == 1 else "Delete objects"
         self.apply(self.snapshot.model_copy(update={"objects": objects}), description)
 
     def update_text_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
+        if not any(isinstance(item, TextObject) and item.object_id == object_id for item in self.snapshot.objects):
+            raise KeyError(object_id)
+        self._update_object(object_id, changes, "Edit text object")
+
+    def update_grid_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
+        if not any(isinstance(item, GridObject) and item.object_id == object_id for item in self.snapshot.objects):
+            raise KeyError(object_id)
+        self._update_object(object_id, changes, "Edit grid object")
+
+    def _update_object(self, object_id: str, changes: dict, description: str) -> None:
         objects = tuple(
             item.model_copy(update=changes) if item.object_id == object_id else item
             for item in self.snapshot.objects
         )
-        if not any(item.object_id == object_id for item in self.snapshot.objects):
-            raise KeyError(object_id)
         validated = ProjectSnapshot.model_validate(
             self.snapshot.model_copy(update={"objects": objects}).model_dump(mode="python"), strict=True
         )
-        self.apply(validated, "Edit text object")
+        self.apply(validated, description)
 
-    def move_text_objects(self, object_ids: set[str], dx_mm: float, dy_mm: float) -> None:
+    def move_objects(self, object_ids: set[str], dx_mm: float, dy_mm: float) -> None:
         if not object_ids or (abs(dx_mm) <= 1e-9 and abs(dy_mm) <= 1e-9):
             return
         known_ids = {item.object_id for item in self.snapshot.objects}
         if not object_ids <= known_ids:
             raise KeyError(sorted(object_ids - known_ids)[0])
         objects = tuple(
-            item.model_copy(update={
-                "x_mm": item.x_mm + dx_mm,
-                "y_mm": item.y_mm + dy_mm,
-                "frame_x_mm": item.frame_x_mm + dx_mm,
-                "frame_y_mm": item.frame_y_mm + dy_mm,
-            }) if item.object_id in object_ids else item
+            item.model_copy(update=(
+                {
+                    "x_mm": item.x_mm + dx_mm,
+                    "y_mm": item.y_mm + dy_mm,
+                    "frame_x_mm": item.frame_x_mm + dx_mm,
+                    "frame_y_mm": item.frame_y_mm + dy_mm,
+                }
+                if isinstance(item, TextObject)
+                else {"x_mm": item.x_mm + dx_mm, "y_mm": item.y_mm + dy_mm}
+            )) if item.object_id in object_ids else item
             for item in self.snapshot.objects
         )
         validated = ProjectSnapshot.model_validate(
             self.snapshot.model_copy(update={"objects": objects}).model_dump(mode="python"), strict=True
         )
-        self.apply(validated, "Move text object" if len(object_ids) == 1 else "Move text objects")
+        self.apply(validated, "Move object" if len(object_ids) == 1 else "Move objects")
+
+    def move_text_objects(self, object_ids: set[str], dx_mm: float, dy_mm: float) -> None:
+        self.move_objects(object_ids, dx_mm, dy_mm)
 
     def update_page(self, **changes) -> None:  # noqa: ANN003
         page = PageSettings.model_validate(self.snapshot.page.model_copy(update=changes).model_dump(), strict=True)

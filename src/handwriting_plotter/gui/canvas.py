@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+import math
+from typing import Any, ClassVar
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Signal, Qt
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -17,8 +18,8 @@ from PySide6.QtWidgets import (
     QGraphicsView,
 )
 
+from .document import GridObject, TextObject
 from .theme import COLORS
-
 
 OBJECT_ID_ROLE = 0
 
@@ -39,6 +40,41 @@ class SvgPageItem(QGraphicsItem):
 
     def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
         self._renderer.render(painter, self._rect)
+
+
+class GridPageItem(QGraphicsItem):
+    """Paint a configurable layout grid without adding it to production artifacts."""
+
+    _STYLES: ClassVar[dict[str, Qt.PenStyle]] = {
+        "solid": Qt.PenStyle.SolidLine,
+        "dashed": Qt.PenStyle.DashLine,
+        "dash_dot": Qt.PenStyle.DashDotLine,
+    }
+
+    def __init__(self, grid: GridObject) -> None:
+        super().__init__()
+        self.grid = grid
+        self._rect = QRectF(grid.x_mm, grid.y_mm, grid.width_mm, grid.height_mm)
+
+    def boundingRect(self) -> QRectF:  # noqa: N802
+        return QRectF(self._rect)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
+        color = QColor(self.grid.color)
+        color.setAlpha(175)
+        pen = QPen(color, 0.0, self._STYLES[self.grid.line_style])
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        right = self._rect.right()
+        bottom = self._rect.bottom()
+        x = self._rect.left()
+        while x <= right + 1e-9:
+            painter.drawLine(QPointF(x, self._rect.top()), QPointF(x, bottom))
+            x += self.grid.cell_width_mm
+        y = self._rect.top()
+        while y <= bottom + 1e-9:
+            painter.drawLine(QPointF(self._rect.left(), y), QPointF(right, y))
+            y += self.grid.cell_height_mm
 
 
 class PageCanvas(QGraphicsView):
@@ -71,6 +107,7 @@ class PageCanvas(QGraphicsView):
         self._marker_items: list[QGraphicsItem] = []
         self._object_frames: dict[str, QGraphicsRectItem] = {}
         self._object_models: dict[str, object] = {}
+        self._grid_items: dict[str, GridPageItem] = {}
         self._selected_object_ids: set[str] = set()
         self._selection_origin: QPointF | None = None
         self._selection_current: QPointF | None = None
@@ -155,16 +192,22 @@ class PageCanvas(QGraphicsView):
                 self.scene().removeItem(item)
         self._object_frames.clear()
         self._object_models.clear()
+        for item in self._grid_items.values():
+            if item.scene() is self.scene():
+                self.scene().removeItem(item)
+        self._grid_items.clear()
         self._selected_object_ids = set(selected_ids)
-        for obj in objects:
+        ordered_objects = sorted(objects, key=lambda obj: 0 if isinstance(obj, GridObject) else 1)
+        for obj in ordered_objects:
             if not obj.visible:
                 continue
-            frame = QGraphicsRectItem(
-                obj.frame_x_mm,
-                obj.frame_y_mm,
-                obj.frame_width_mm,
-                obj.frame_height_mm,
-            )
+            if isinstance(obj, GridObject):
+                grid_item = GridPageItem(obj)
+                grid_item.setZValue(4)
+                self.scene().addItem(grid_item)
+                self._grid_items[obj.object_id] = grid_item
+            bounds = self._object_rect(obj)
+            frame = QGraphicsRectItem(bounds)
             frame.setData(OBJECT_ID_ROLE, obj.object_id)
             frame.setBrush(Qt.BrushStyle.NoBrush)
             frame.setZValue(8)
@@ -173,6 +216,14 @@ class PageCanvas(QGraphicsView):
             self._object_models[obj.object_id] = obj
         self._sync_object_frame_styles()
 
+    @staticmethod
+    def _object_rect(obj: object) -> QRectF:
+        if isinstance(obj, TextObject):
+            return QRectF(obj.frame_x_mm, obj.frame_y_mm, obj.frame_width_mm, obj.frame_height_mm)
+        if isinstance(obj, GridObject):
+            return QRectF(obj.x_mm, obj.y_mm, obj.width_mm, obj.height_mm)
+        raise TypeError(type(obj).__name__)
+
     def set_selected_objects(self, object_ids) -> None:  # noqa: ANN001
         self._selected_object_ids = set(object_ids)
         self._sync_object_frame_styles()
@@ -180,10 +231,14 @@ class PageCanvas(QGraphicsView):
     def _sync_object_frame_styles(self) -> None:
         for object_id, frame in self._object_frames.items():
             selected = object_id in self._selected_object_ids
+            is_grid = isinstance(self._object_models[object_id], GridObject)
             color = QColor(COLORS["accent"] if selected else COLORS["muted"])
-            color.setAlpha(255 if selected else 105)
-            pen = QPen(color, 0.45 if selected else 0.25,
-                       Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine)
+            color.setAlpha(255 if selected else (0 if is_grid else 105))
+            pen = QPen(
+                color,
+                0.45 if selected else 0.25,
+                Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine,
+            )
             pen.setCosmetic(True)
             frame.setPen(pen)
 
@@ -207,38 +262,54 @@ class PageCanvas(QGraphicsView):
         self.selection_changed.emit(tuple(sorted(object_ids)))
 
     def _constrain_move_delta(self, object_ids: set[str], dx: float, dy: float) -> QPointF:
-        minimum_dx = max(
-            max(-float(self._object_models[object_id].frame_x_mm), -float(self._object_models[object_id].x_mm))
-            for object_id in object_ids
-        )
-        maximum_dx = min(
-            min(
-                self.PAGE_WIDTH_MM - float(self._object_models[object_id].frame_x_mm)
-                - float(self._object_models[object_id].frame_width_mm),
-                self.PAGE_WIDTH_MM - float(self._object_models[object_id].x_mm) - 0.01,
-            )
-            for object_id in object_ids
-        )
-        minimum_dy = max(
-            max(-float(self._object_models[object_id].frame_y_mm), -float(self._object_models[object_id].y_mm))
-            for object_id in object_ids
-        )
-        maximum_dy = min(
-            min(
-                self.PAGE_HEIGHT_MM - float(self._object_models[object_id].frame_y_mm)
-                - float(self._object_models[object_id].frame_height_mm),
-                self.PAGE_HEIGHT_MM - float(self._object_models[object_id].y_mm) - 0.01,
-            )
-            for object_id in object_ids
-        )
+        models = [self._object_models[object_id] for object_id in object_ids]
+        rects = [self._object_rect(model) for model in models]
+        minimum_dx = max(-rect.left() for rect in rects)
+        maximum_dx = min(self.PAGE_WIDTH_MM - rect.right() for rect in rects)
+        minimum_dy = max(-rect.top() for rect in rects)
+        maximum_dy = min(self.PAGE_HEIGHT_MM - rect.bottom() for rect in rects)
+        for model in models:
+            if isinstance(model, TextObject):
+                minimum_dx = max(minimum_dx, -model.x_mm)
+                maximum_dx = min(maximum_dx, self.PAGE_WIDTH_MM - model.x_mm - 0.01)
+                minimum_dy = max(minimum_dy, -model.y_mm)
+                maximum_dy = min(maximum_dy, self.PAGE_HEIGHT_MM - model.y_mm - 0.01)
         return QPointF(max(minimum_dx, min(maximum_dx, dx)), max(minimum_dy, min(maximum_dy, dy)))
+
+    @staticmethod
+    def _axis_lines(start: float, extent: float, cell: float) -> tuple[float, ...]:
+        return tuple(start + index * cell for index in range(math.floor(extent / cell) + 1))
+
+    def _snap_move_delta(self, object_ids: set[str], delta: QPointF) -> QPointF:
+        grids = [
+            model for object_id, model in self._object_models.items()
+            if object_id not in object_ids and isinstance(model, GridObject) and model.snap_enabled
+        ]
+        moving = [self._object_rect(self._object_models[object_id]).translated(delta) for object_id in object_ids]
+        x_adjustments: list[float] = []
+        y_adjustments: list[float] = []
+        for grid in grids:
+            x_lines = self._axis_lines(grid.x_mm, grid.width_mm, grid.cell_width_mm)
+            y_lines = self._axis_lines(grid.y_mm, grid.height_mm, grid.cell_height_mm)
+            for rect in moving:
+                for anchor in (rect.left(), rect.center().x(), rect.right()):
+                    x_adjustments.extend(line - anchor for line in x_lines if abs(line - anchor) <= 1.5)
+                for anchor in (rect.top(), rect.center().y(), rect.bottom()):
+                    y_adjustments.extend(line - anchor for line in y_lines if abs(line - anchor) <= 1.5)
+        x_adjust = min(x_adjustments, key=abs) if x_adjustments else 0.0
+        y_adjust = min(y_adjustments, key=abs) if y_adjustments else 0.0
+        return QPointF(delta.x() + x_adjust, delta.y() + y_adjust)
 
     def _preview_move(self, end: QPointF) -> None:
         if self._selection_origin is None or not self._move_initial_rects:
             return
         raw_delta = end - self._selection_origin
-        self._move_delta = self._constrain_move_delta(
+        constrained = self._constrain_move_delta(
             set(self._move_initial_rects), raw_delta.x(), raw_delta.y()
+        )
+        snapped = self._snap_move_delta(set(self._move_initial_rects), constrained)
+        self._move_delta = self._constrain_move_delta(
+            set(self._move_initial_rects), snapped.x(), snapped.y()
         )
         for object_id, initial in self._move_initial_rects.items():
             self._object_frames[object_id].setRect(initial.translated(self._move_delta))

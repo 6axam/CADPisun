@@ -10,7 +10,7 @@ from handwriting_plotter.application.desktop import (
 from handwriting_plotter.application.service import GenerationResult
 from handwriting_plotter.layout.pages import PageSpec
 
-from .document import ProjectSnapshot
+from .document import ProjectSnapshot, TextObject
 
 
 def composition_request(snapshot: ProjectSnapshot) -> CompositionRequest:
@@ -39,7 +39,7 @@ def composition_request(snapshot: ProjectSnapshot) -> CompositionRequest:
             seed=item.seed,
             realism=item.realism,
         )
-        for item in snapshot.objects if item.visible
+        for item in snapshot.objects if isinstance(item, TextObject) and item.visible
     )
     return CompositionRequest(snapshot.project_id, page_spec, blocks)
 
