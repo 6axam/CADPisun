@@ -21,7 +21,7 @@ def _write_style(root: Path, *, bad_hash: bool = False, duplicate: bool = False)
     (package / "glyphs").mkdir(parents=True)
     (package / "licenses").mkdir()
     license_data = "Test data only.\n"
-    (package / "licenses" / "test.txt").write_text(license_data, encoding="utf-8")
+    (package / "licenses" / "test.txt").write_bytes(license_data.encode("utf-8"))
     glyph = {
         "format": "hp-glyph",
         "schema_version": "1.0",

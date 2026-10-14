@@ -26,11 +26,12 @@ def publish_bundle(target: Path, files: dict[str, bytes], *, overwrite: bool = F
         for relative, content in sorted(files.items()):
             path = staging / _safe_relative(relative)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        for path in sorted(staging.rglob("*")):
-            if path.is_file():
-                with path.open("rb") as handle:
-                    os.fsync(handle.fileno())
+            # Windows rejects fsync on a read-only descriptor. Flush each file
+            # through the writable descriptor that created it instead.
+            with path.open("wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
         if target.exists():
             if backup.exists():
                 shutil.rmtree(backup)

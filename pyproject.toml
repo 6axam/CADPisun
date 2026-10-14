@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "handwriting-plotter"
-version = "0.2.0+20261014.1"
+version = "0.2.0+20261014.2"
 description = "Deterministic single-line handwriting layout and virtual plotter export"
 readme = "README.md"
 requires-python = "==3.12.*"

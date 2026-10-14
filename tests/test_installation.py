@@ -10,7 +10,7 @@ from handwriting_plotter.domain.errors import Diagnostic, ExitCode
 
 
 def test_base_import_has_no_optional_dependency() -> None:
-    assert handwriting_plotter.__version__ == "0.2.0+20261014.1"
+    assert handwriting_plotter.__version__ == "0.2.0+20261014.2"
     completed = subprocess.run(
         [sys.executable, "-c", "import handwriting_plotter,sys; print(','.join(sys.modules))"],
         text=True,
@@ -25,7 +25,7 @@ def test_cli_help_and_version(capsys) -> None:
     assert main([]) == ExitCode.OK
     assert "Generate deterministic" in capsys.readouterr().out
     assert main(["version"]) == ExitCode.OK
-    assert capsys.readouterr().out.strip() == "0.2.0+20261014.1"
+    assert capsys.readouterr().out.strip() == "0.2.0+20261014.2"
 
 
 def test_cli_invalid_input_uses_argparse_exit_code() -> None:

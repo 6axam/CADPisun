@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -77,14 +78,17 @@ def test_atomic_publish_preserves_existing_bundle_on_failure(tmp_path: Path, mon
     target = tmp_path / "bundle"
     target.mkdir()
     (target / "old.txt").write_text("preserve", encoding="utf-8")
-    original = Path.write_bytes
+    original_fsync = os.fsync
+    sync_count = 0
 
-    def fail(path: Path, content: bytes):
-        if path.name == "second.txt":
+    def fail(descriptor: int) -> None:
+        nonlocal sync_count
+        sync_count += 1
+        if sync_count == 2:
             raise OSError("simulated disk full")
-        return original(path, content)
+        original_fsync(descriptor)
 
-    monkeypatch.setattr(Path, "write_bytes", fail)
+    monkeypatch.setattr(os, "fsync", fail)
     with pytest.raises(OSError, match="disk full"):
         publish_bundle(target, {"first.txt": b"ok", "second.txt": b"fail"}, overwrite=True)
     assert (target / "old.txt").read_text() == "preserve"
