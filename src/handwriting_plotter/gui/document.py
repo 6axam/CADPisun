@@ -113,14 +113,22 @@ def save_project(path: Path, snapshot: ProjectSnapshot) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync_directory(path.parent)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def _sync_directory(path: Path) -> None:
+    """Persist a directory entry on platforms that allow directory handles."""
+
+    if os.name == "nt":
+        return
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 class _ReplaceSnapshotCommand(QUndoCommand):

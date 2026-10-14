@@ -13,6 +13,7 @@ from handwriting_plotter.gui.document import (
     load_project,
     save_project,
 )
+from handwriting_plotter.gui import document as document_module
 
 
 def sample_project() -> ProjectSnapshot:
@@ -33,6 +34,16 @@ def test_project_round_trip_is_portable_and_canonical(tmp_path) -> None:
     assert str(tmp_path) not in raw
     assert list(json.loads(raw)) == sorted(json.loads(raw))
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_project_save_skips_unsupported_directory_fsync_on_windows(tmp_path, monkeypatch) -> None:
+    def windows_open(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(document_module.os, "name", "nt")
+    monkeypatch.setattr(document_module.os, "open", windows_open)
+
+    document_module._sync_directory(tmp_path)
 
 
 def test_project_rejects_unknown_schema(tmp_path) -> None:
