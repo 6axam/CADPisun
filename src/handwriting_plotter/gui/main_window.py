@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThreadPool, Qt
+from PySide6.QtCore import QSettings, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
@@ -262,8 +262,15 @@ class MainWindow(QMainWindow):
     def _on_tree_item_changed(self, node: QTreeWidgetItem, column: int) -> None:
         if self._refreshing_tree or node.data(0, ROLE_KIND) != "text":
             return
-        self.controller.update_text_object(node.data(0, ROLE_VALUE), name=node.text(0).strip() or "Text",
-                                           visible=node.checkState(0) == Qt.CheckState.Checked)
+        object_id = node.data(0, ROLE_VALUE)
+        name = node.text(0).strip() or "Text"
+        visible = node.checkState(0) == Qt.CheckState.Checked
+        QTimer.singleShot(0, lambda: self._apply_tree_item_change(object_id, name, visible))
+
+    def _apply_tree_item_change(self, object_id: str, name: str, visible: bool) -> None:
+        if not any(item.object_id == object_id for item in self.controller.snapshot.objects):
+            return
+        self.controller.update_text_object(object_id, name=name, visible=visible)
 
     def _update_text_object(self, object_id: str, changes: dict) -> None:
         try:

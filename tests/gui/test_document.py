@@ -6,6 +6,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt
+from shiboken6 import isValid
+
 from handwriting_plotter.gui.document import (
     DocumentController,
     ProjectSnapshot,
@@ -134,6 +137,28 @@ def test_main_window_object_actions_update_real_model(qtbot) -> None:
     assert window.controller.dirty
     window.remove_selected_object()
     assert len(window.controller.snapshot.objects) == original
+
+
+def test_tree_visibility_change_does_not_destroy_signal_sender(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow, ROLE_KIND
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    root = window.project_tree.invisibleRootItem()
+    document = root.child(0).child(0)
+    node = next(
+        document.child(index)
+        for index in range(document.childCount())
+        if document.child(index).data(0, ROLE_KIND) == "text"
+    )
+    revision = window.controller.revision
+
+    node.setCheckState(0, Qt.CheckState.Unchecked)
+
+    assert isValid(node)
+    qtbot.waitUntil(lambda: window.controller.revision == revision + 1)
+    assert window.controller.snapshot.objects[0].visible is False
+    window.controller.reset(window.controller.snapshot)
 
 
 def test_style_catalog_and_property_selection_match_valid_revision(qtbot) -> None:
