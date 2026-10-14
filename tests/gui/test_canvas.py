@@ -140,6 +140,36 @@ def test_dragging_selected_object_emits_physical_move(qtbot) -> None:
     assert emitted[-1][2] == pytest.approx(15, abs=0.5)
 
 
+def test_ctrl_click_toggles_object_once_per_click(qtbot) -> None:
+    canvas = PageCanvas()
+    canvas.resize(700, 700)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.zoom_to_fit()
+    first = TextObject(
+        object_id="first", name="First", frame_x_mm=20, frame_y_mm=20,
+        frame_width_mm=20, frame_height_mm=20,
+    )
+    second = TextObject(
+        object_id="second", name="Second", frame_x_mm=50, frame_y_mm=20,
+        frame_width_mm=20, frame_height_mm=20,
+    )
+    canvas.set_object_frames((first, second), {first.object_id})
+    second_position = canvas.mapFromScene(QPointF(55, 25))
+
+    qtbot.mouseClick(
+        canvas.viewport(), Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ControlModifier, pos=second_position,
+    )
+    assert canvas._selected_object_ids == {"first", "second"}
+
+    qtbot.mouseClick(
+        canvas.viewport(), Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ControlModifier, pos=second_position,
+    )
+    assert canvas._selected_object_ids == {"first"}
+
+
 def test_grid_is_rendered_and_snap_can_apply_to_one_axis(qtbot) -> None:
     canvas = PageCanvas()
     qtbot.addWidget(canvas)

@@ -123,6 +123,7 @@ class PageCanvas(QGraphicsView):
         self._selection_origin: QPointF | None = None
         self._selection_current: QPointF | None = None
         self._selection_additive = False
+        self._selection_initial_ids: set[str] = set()
         self._pressed_object_id: str | None = None
         self._move_initial_rects: dict[str, QRectF] = {}
         self._move_delta = QPointF()
@@ -329,6 +330,7 @@ class PageCanvas(QGraphicsView):
         self._selection_item.hide()
         self._selection_origin = None
         self._selection_current = None
+        self._selection_initial_ids.clear()
         self._pressed_object_id = None
         self._move_initial_rects.clear()
         self._move_delta = QPointF()
@@ -339,6 +341,7 @@ class PageCanvas(QGraphicsView):
             self._selection_origin = point
             self._selection_current = point
             self._selection_additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            self._selection_initial_ids = set(self._selected_object_ids)
             self._pressed_object_id = self._object_at(point)
             if self._pressed_object_id is not None:
                 selected = set(self._selected_object_ids)
@@ -405,15 +408,15 @@ class PageCanvas(QGraphicsView):
                     crossing=end.x() < self._selection_origin.x(),
                 )
                 if self._selection_additive:
-                    selected |= self._selected_object_ids
+                    selected |= self._selection_initial_ids
             elif self._pressed_object_id is not None:
-                selected = set(self._selected_object_ids) if self._selection_additive else set()
+                selected = set(self._selection_initial_ids) if self._selection_additive else set()
                 if self._selection_additive and self._pressed_object_id in selected:
                     selected.remove(self._pressed_object_id)
                 else:
                     selected.add(self._pressed_object_id)
             else:
-                selected = set(self._selected_object_ids) if self._selection_additive else set()
+                selected = set(self._selection_initial_ids) if self._selection_additive else set()
             self._reset_pointer_operation()
             self._publish_selection(selected)
             event.accept()
