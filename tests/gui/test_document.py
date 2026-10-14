@@ -126,6 +126,12 @@ def test_controller_tracks_revision_dirty_and_undo(qtbot) -> None:
     assert controller.snapshot.objects[0].text == "Нове значення"
 
 
+@pytest.mark.parametrize("seed", [-1, 2**64])
+def test_text_object_rejects_seed_outside_unsigned_64_bit(seed) -> None:
+    with pytest.raises(ValueError, match="seed"):
+        TextObject(object_id="seed-test", name="Seed", seed=seed)
+
+
 def test_main_window_object_actions_update_real_model(qtbot) -> None:
     from handwriting_plotter.gui.main_window import MainWindow
 
@@ -177,3 +183,20 @@ def test_style_catalog_and_property_selection_match_valid_revision(qtbot) -> Non
     )
     panel.show_text_object(item)
     assert panel.style_field.currentData().split("\0") == ["ua-school-v1-pilot", "0.2.0"]
+
+
+def test_seed_property_preserves_full_unsigned_64_bit_precision(qtbot) -> None:
+    from handwriting_plotter.gui.properties import PropertiesPanel
+    from handwriting_plotter.gui.styles import discover_styles
+
+    panel = PropertiesPanel(discover_styles())
+    qtbot.addWidget(panel)
+    seed = 2**64 - 1
+    item = TextObject(object_id="seed", name="Seed", seed=seed)
+    emitted: list[dict] = []
+    panel.text_object_changed.connect(lambda _object_id, changes: emitted.append(changes))
+
+    panel.show_text_object(item)
+    panel.realism_field.setValue(0.5)
+
+    assert emitted[-1]["seed"] == seed

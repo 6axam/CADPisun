@@ -51,7 +51,7 @@ class TextObject(StrictModel):
     line_pitch_mm: float = Field(default=9.0, gt=0, le=100)
     style_id: str = Field(default="test-technical-v1", min_length=1)
     style_revision: str = Field(default="1.0.0", min_length=1)
-    seed: int = 1
+    seed: int = Field(default=1, ge=0, lt=2**64)
     realism: float = Field(default=0.35, ge=0, le=1)
 
 

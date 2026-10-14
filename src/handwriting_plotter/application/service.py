@@ -40,6 +40,10 @@ class GenerationRequest:
     realism: float = 0.35
     page_spec: PageSpec = PageSpec()
 
+    def __post_init__(self) -> None:
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or not 0 <= self.seed < 2**64:
+            raise ValueError("seed must be unsigned 64-bit")
+
 
 @dataclass(frozen=True, slots=True)
 class GenerationResult:

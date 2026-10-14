@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QRegularExpression, Signal
+from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -89,9 +90,8 @@ class PropertiesPanel(QWidget):
         for style in self._styles:
             label = f"{style.display_name} · {style.revision}"
             self.style_field.addItem(label, f"{style.style_id}\0{style.revision}")
-        self.seed_field = QDoubleSpinBox()
-        self.seed_field.setDecimals(0)
-        self.seed_field.setRange(-2_147_483_648, 2_147_483_647)
+        self.seed_field = QLineEdit()
+        self.seed_field.setValidator(QRegularExpressionValidator(QRegularExpression(r"[0-9]{1,20}")))
         self.realism_field = QDoubleSpinBox()
         self.realism_field.setRange(0, 1)
         self.realism_field.setSingleStep(0.05)
@@ -108,8 +108,9 @@ class PropertiesPanel(QWidget):
         self.name_field.editingFinished.connect(self._emit_text)
         self.text_field.textChanged.connect(self._emit_text)
         for field in (self.x_field, self.y_field, self.x_height_field, self.line_pitch_field,
-                      self.seed_field, self.realism_field):
+                      self.realism_field):
             field.valueChanged.connect(self._emit_text)
+        self.seed_field.editingFinished.connect(self._emit_text)
         self.style_field.currentIndexChanged.connect(self._emit_text)
         return widget
 
@@ -146,7 +147,7 @@ class PropertiesPanel(QWidget):
         self.line_pitch_field.setValue(item.line_pitch_mm)
         index = self.style_field.findData(f"{item.style_id}\0{item.style_revision}")
         self.style_field.setCurrentIndex(max(index, 0))
-        self.seed_field.setValue(item.seed)
+        self.seed_field.setText(str(item.seed))
         self.realism_field.setValue(item.realism)
         self._loading = False
         self.stack.setCurrentWidget(self.text_widget)
@@ -168,6 +169,9 @@ class PropertiesPanel(QWidget):
     def _emit_text(self) -> None:
         if self._loading or self._object_id is None or self.style_field.currentIndex() < 0:
             return
+        seed_text = self.seed_field.text()
+        if not seed_text:
+            return
         style_id, revision = self.style_field.currentData().split("\0", 1)
         self.text_object_changed.emit(self._object_id, {
             "name": self.name_field.text().strip() or "Text",
@@ -178,6 +182,6 @@ class PropertiesPanel(QWidget):
             "line_pitch_mm": self.line_pitch_field.value(),
             "style_id": style_id,
             "style_revision": revision,
-            "seed": int(self.seed_field.value()),
+            "seed": int(seed_text),
             "realism": self.realism_field.value(),
         })

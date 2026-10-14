@@ -45,6 +45,12 @@ def test_t_a04_same_inputs_are_byte_identical(tmp_path: Path) -> None:
     assert all(first.files[name] == second.files[name] for name in first.files)
 
 
+@pytest.mark.parametrize("seed", [-1, 2**64])
+def test_generation_request_rejects_seed_outside_unsigned_64_bit(seed: int) -> None:
+    with pytest.raises(ValueError, match="unsigned 64-bit"):
+        GenerationRequest(seed=seed)
+
+
 def test_atomic_publish_preserves_existing_bundle_on_failure(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "bundle"
     target.mkdir()
