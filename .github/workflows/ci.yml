@@ -32,5 +32,11 @@ jobs:
       - name: Install locked test dependencies
         run: uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev
 
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1 libgl1 libxcb-cursor0 libxkbcommon-x11-0
+
       - name: Run full test suite with headless Qt
         run: uv run pytest -q

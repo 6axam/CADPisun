@@ -11,4 +11,6 @@ def test_ci_runs_locked_headless_tests_on_linux_and_windows() -> None:
     assert 'python-version: "3.12.12"' in workflow
     assert "QT_QPA_PLATFORM: offscreen" in workflow
     assert "uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev" in workflow
+    assert "if: runner.os == 'Linux'" in workflow
+    assert "libegl1" in workflow
     assert "uv run pytest -q" in workflow
