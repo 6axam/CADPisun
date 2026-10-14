@@ -213,7 +213,7 @@ MVP II-A не требует worker/torch. II-B normalizer и correction service
 | propose_samples / apply_corrections / publish_style (II) | Версионированные операции без проектирования экрана |
 | prepare_machine_job / start_machine_job (I-H) | Раздельные операции подготовки и явного запуска |
 
-CLI возвращает exit 0 success, 2 invalid input/config/coverage, 3 geometry/style/layout, 4 device/protocol, 5 environment/IO, 130 cancelled. Предупреждения доступны в JSON report и stderr, не засоряют SVG/G-code stdout. Команды концептуально: inspect, generate, export, simulate, styles validate; machine prepare/send только I-H; samples/corrections/train только II. Никакого автоматического send после export.
+CLI возвращает exit 0 success, 2 invalid input/config/coverage, 3 geometry/style/layout, 4 resource limit (и device/protocol после появления I-H), 5 environment/IO, 130 cancelled. Предупреждения доступны в JSON report и stderr, не засоряют SVG/G-code stdout. Команды концептуально: inspect, generate, export, simulate, styles validate; machine prepare/send только I-H; samples/corrections/train только II. Никакого автоматического send после export.
 
 Storage stores immutable inputs/revisions, atomic manifest, каталог II. FileStore не импортирует geometry/recognizer; принимает bytes/DTO serializer. Limits, disk-full, permissions, hash mismatch возвращаются явно. При ошибке temp files могут остаться для диагностики, но отсутствует completed manifest; следующий run не принимает их за готовое задание.
 

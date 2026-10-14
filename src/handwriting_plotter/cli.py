@@ -17,6 +17,32 @@ from .styles.repository import FileStyleRepository
 from .version import __version__
 
 
+_INVALID_INPUT_PREFIXES = (
+    "EMPTY_DOCUMENT",
+    "INVALID_UNICODE_CLUSTER",
+    "MISSING_GLYPH",
+    "PEN_WIDTH_PROFILE_MISMATCH",
+    "UNSUPPORTED_CONTROL",
+    "UNSUPPORTED_SCRIPT_DIRECTION",
+    "UNSUPPORTED_X_HEIGHT",
+    "invalid page dimensions",
+    "invalid text dimensions",
+    "printable rectangle must have positive area",
+    "realism must be within",
+    "seed must be unsigned",
+    "unsupported page policy",
+)
+
+
+def _value_error_exit_code(error: ValueError) -> ExitCode:
+    message = str(error)
+    if message.startswith("RESOURCE_LIMIT"):
+        return ExitCode.RESOURCE_LIMIT
+    if message.startswith(_INVALID_INPUT_PREFIXES):
+        return ExitCode.INVALID_INPUT
+    return ExitCode.VALIDATION_FAILED
+
+
 def _generation_arguments(parser: argparse.ArgumentParser, *, output: bool) -> None:
     parser.add_argument("input", type=Path, help="UTF-8 input text file")
     if output:
@@ -110,7 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "inspect":
             report = service.inspect(text, request)
             print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            return ExitCode.OK if report["passed"] else ExitCode.VALIDATION_FAILED
+            return ExitCode.OK if report["passed"] else ExitCode.INVALID_INPUT
         if args.command == "simulate":
             result = service.build(text, request)
             print(json.dumps(result.report, ensure_ascii=False, sort_keys=True))
@@ -125,9 +151,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "hardware_verified": False,
         }, ensure_ascii=False, sort_keys=True))
         return ExitCode.OK
-    except (UnicodeError, ValueError, FileNotFoundError, FileExistsError) as error:
+    except UnicodeError as error:
         print(json.dumps({"error": type(error).__name__, "message": str(error)}, ensure_ascii=False), file=sys.stderr)
-        return ExitCode.VALIDATION_FAILED
+        return ExitCode.INVALID_INPUT
+    except FileExistsError as error:
+        print(json.dumps({"error": type(error).__name__, "message": str(error)}, ensure_ascii=False), file=sys.stderr)
+        return ExitCode.INVALID_INPUT
+    except ValueError as error:
+        print(json.dumps({"error": type(error).__name__, "message": str(error)}, ensure_ascii=False), file=sys.stderr)
+        return _value_error_exit_code(error)
     except OSError as error:
         print(json.dumps({"error": "IO_ERROR", "message": str(error)}, ensure_ascii=False), file=sys.stderr)
         return ExitCode.IO_ERROR

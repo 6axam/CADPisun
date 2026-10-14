@@ -7,6 +7,7 @@ import pytest
 
 from handwriting_plotter.application.service import GenerationRequest, HandwritingPlotterService
 from handwriting_plotter.cli import main
+from handwriting_plotter.domain.errors import ExitCode
 from handwriting_plotter.storage.files import publish_bundle
 
 
@@ -49,6 +50,27 @@ def test_t_a04_same_inputs_are_byte_identical(tmp_path: Path) -> None:
 def test_generation_request_rejects_seed_outside_unsigned_64_bit(seed: int) -> None:
     with pytest.raises(ValueError, match="unsigned 64-bit"):
         GenerationRequest(seed=seed)
+
+
+def test_cli_distinguishes_input_resource_and_io_failures(tmp_path: Path, capsys) -> None:
+    missing = tmp_path / "missing.txt"
+    assert main(["simulate", str(missing)]) == ExitCode.IO_ERROR
+    assert json.loads(capsys.readouterr().err)["error"] == "IO_ERROR"
+
+    invalid_utf8 = tmp_path / "invalid.txt"
+    invalid_utf8.write_bytes(b"\xff")
+    assert main(["simulate", str(invalid_utf8)]) == ExitCode.INVALID_INPUT
+    assert json.loads(capsys.readouterr().err)["error"] == "UnicodeDecodeError"
+
+    unsupported = tmp_path / "unsupported.txt"
+    unsupported.write_text("🙂", encoding="utf-8")
+    assert main(["inspect", str(unsupported)]) == ExitCode.INVALID_INPUT
+    assert json.loads(capsys.readouterr().out)["passed"] is False
+
+    oversized = tmp_path / "oversized.txt"
+    oversized.write_text("a" * (1024 * 1024 + 1), encoding="utf-8")
+    assert main(["simulate", str(oversized)]) == ExitCode.RESOURCE_LIMIT
+    assert json.loads(capsys.readouterr().err)["message"].startswith("RESOURCE_LIMIT")
 
 
 def test_atomic_publish_preserves_existing_bundle_on_failure(tmp_path: Path, monkeypatch) -> None:
