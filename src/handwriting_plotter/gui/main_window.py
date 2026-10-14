@@ -1062,4 +1062,5 @@ class MainWindow(QMainWindow):
 
     def _about(self) -> None:
         QMessageBox.about(self, "About Handwriting Plotter",
-                          "Handwriting Plotter\n\nDeterministic single-line handwriting and virtual plotter planning.")
+                          f"Handwriting Plotter {__version__}\n\n"
+                          "Deterministic single-line handwriting and virtual plotter planning.")
