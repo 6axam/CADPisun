@@ -6,6 +6,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QSettings
 
+from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
 
 
@@ -52,3 +53,30 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
     qtbot.addWidget(reopened)
     assert reopened.language == "uk"
     assert reopened.ukrainian_language_action.isChecked()
+
+
+def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    snapshot = ProjectSnapshot(
+        project_id="selection-project",
+        objects=(
+            TextObject(object_id="first", name="First"),
+            TextObject(object_id="second", name="Second", frame_x_mm=80),
+        ),
+    )
+    window.controller.reset(snapshot)
+
+    window.canvas._publish_selection({"first", "second"})
+
+    assert window._selected_object_ids == {"first", "second"}
+    assert {
+        item.data(0, 257)
+        for item in window.project_tree.selectedItems()
+        if item.data(0, 256) == "text"
+    } == {"first", "second"}
+
+    window.remove_selected_object()
+    assert window.controller.snapshot.objects == ()
+    window.controller.undo_stack.undo()
+    assert {item.object_id for item in window.controller.snapshot.objects} == {"first", "second"}

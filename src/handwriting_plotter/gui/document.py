@@ -335,10 +335,14 @@ class DocumentController(QObject):
         return item
 
     def remove_text_object(self, object_id: str) -> None:
-        objects = tuple(item for item in self.snapshot.objects if item.object_id != object_id)
+        self.remove_text_objects({object_id})
+
+    def remove_text_objects(self, object_ids: set[str]) -> None:
+        objects = tuple(item for item in self.snapshot.objects if item.object_id not in object_ids)
         if len(objects) == len(self.snapshot.objects):
             return
-        self.apply(self.snapshot.model_copy(update={"objects": objects}), "Delete text object")
+        description = "Delete text object" if len(self.snapshot.objects) - len(objects) == 1 else "Delete text objects"
+        self.apply(self.snapshot.model_copy(update={"objects": objects}), description)
 
     def update_text_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
         objects = tuple(

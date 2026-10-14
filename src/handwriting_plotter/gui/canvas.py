@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QWheelEvent
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Signal, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -44,6 +44,8 @@ class SvgPageItem(QGraphicsItem):
 class PageCanvas(QGraphicsView):
     """A zoomable scene whose coordinates are physical millimetres."""
 
+    selection_changed = Signal(object)
+
     PAGE_WIDTH_MM = 210.0
     PAGE_HEIGHT_MM = 297.0
 
@@ -68,6 +70,15 @@ class PageCanvas(QGraphicsView):
         self._marker_items: list[QGraphicsItem] = []
         self._object_frames: dict[str, QGraphicsRectItem] = {}
         self._selected_object_ids: set[str] = set()
+        self._selection_origin: QPointF | None = None
+        self._selection_current: QPointF | None = None
+        self._selection_additive = False
+        self._pressed_object_id: str | None = None
+        self._selection_item = QGraphicsRectItem()
+        self._selection_item.setBrush(Qt.BrushStyle.NoBrush)
+        self._selection_item.setZValue(20)
+        self._selection_item.hide()
+        self.scene().addItem(self._selection_item)
         self._show_travel = False
         self._show_markers = False
         self._page_rect = QRectF(0.0, 0.0, self.PAGE_WIDTH_MM, self.PAGE_HEIGHT_MM)
@@ -169,6 +180,84 @@ class PageCanvas(QGraphicsView):
                        Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine)
             pen.setCosmetic(True)
             frame.setPen(pen)
+
+    def _object_at(self, point: QPointF) -> str | None:
+        for object_id, frame in reversed(tuple(self._object_frames.items())):
+            if frame.sceneBoundingRect().contains(point):
+                return object_id
+        return None
+
+    def _objects_in_selection(self, rect: QRectF, *, crossing: bool) -> set[str]:
+        normalized = rect.normalized()
+        selected: set[str] = set()
+        for object_id, frame in self._object_frames.items():
+            bounds = frame.sceneBoundingRect()
+            if (crossing and normalized.intersects(bounds)) or (not crossing and normalized.contains(bounds)):
+                selected.add(object_id)
+        return selected
+
+    def _publish_selection(self, object_ids: set[str]) -> None:
+        self.set_selected_objects(object_ids)
+        self.selection_changed.emit(tuple(sorted(object_ids)))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.NoDrag:
+            point = self.mapToScene(event.position().toPoint())
+            self._selection_origin = point
+            self._selection_current = point
+            self._selection_additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            self._pressed_object_id = self._object_at(point)
+            self._selection_item.setRect(QRectF(point, point))
+            self._selection_item.hide()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._selection_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self._selection_current = self.mapToScene(event.position().toPoint())
+            rect = QRectF(self._selection_origin, self._selection_current).normalized()
+            if rect.width() >= 0.5 or rect.height() >= 0.5:
+                crossing = self._selection_current.x() < self._selection_origin.x()
+                color = QColor("#36c48d" if crossing else COLORS["accent"])
+                color.setAlpha(210)
+                pen = QPen(color, 0.3, Qt.PenStyle.DashLine if crossing else Qt.PenStyle.SolidLine)
+                pen.setCosmetic(True)
+                self._selection_item.setPen(pen)
+                self._selection_item.setRect(rect)
+                self._selection_item.show()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self._selection_origin is not None:
+            end = self.mapToScene(event.position().toPoint())
+            rect = QRectF(self._selection_origin, end).normalized()
+            dragged = rect.width() >= 0.5 or rect.height() >= 0.5
+            if dragged:
+                selected = self._objects_in_selection(
+                    rect,
+                    crossing=end.x() < self._selection_origin.x(),
+                )
+                if self._selection_additive:
+                    selected |= self._selected_object_ids
+            elif self._pressed_object_id is not None:
+                selected = set(self._selected_object_ids) if self._selection_additive else set()
+                if self._selection_additive and self._pressed_object_id in selected:
+                    selected.remove(self._pressed_object_id)
+                else:
+                    selected.add(self._pressed_object_id)
+            else:
+                selected = set(self._selected_object_ids) if self._selection_additive else set()
+            self._selection_item.hide()
+            self._selection_origin = None
+            self._selection_current = None
+            self._pressed_object_id = None
+            self._publish_selection(selected)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def set_show_travel(self, visible: bool) -> None:
         self._show_travel = visible

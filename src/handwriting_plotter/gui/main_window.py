@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QThreadPool, QTimer, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
+    QAbstractItemView, QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         self._visibility_timer.timeout.connect(self._regenerate_after_visibility_change)
         self._selected_kind = "page"
         self._selected_value: object = None
+        self._selected_object_ids: set[str] = set()
         self._refreshing_tree = False
         self._build_canvas()
         self._build_docks()
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self.project_tree.setObjectName("project-explorer")
         self.project_tree.setHeaderHidden(True)
         self.project_tree.setAlternatingRowColors(True)
+        self.project_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         project_layout.addWidget(self.project_tree)
         self.project_dock = self._dock(self._t("dock.project"), "project-dock", project_panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
@@ -247,6 +249,8 @@ class MainWindow(QMainWindow):
         self.controller.dirty_changed.connect(lambda _: self._update_title())
         self.controller.path_changed.connect(lambda _: self._update_title())
         self.project_tree.currentItemChanged.connect(self._on_selection_changed)
+        self.project_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
+        self.canvas.selection_changed.connect(self._on_canvas_selection_changed)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
         self.properties.text_object_changed.connect(self._update_text_object)
         self.properties.page_changed.connect(self._update_page)
@@ -271,6 +275,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_tree(self, snapshot: ProjectSnapshot) -> None:
         selected = (self._selected_kind, self._selected_value)
+        selected_object_ids = set(self._selected_object_ids)
         self._refreshing_tree = True
         self.project_tree.clear()
         project = QTreeWidgetItem([snapshot.name])
@@ -298,6 +303,10 @@ class MainWindow(QMainWindow):
         self.project_tree.addTopLevelItems([project, resources])
         self.project_tree.expandAll()
         self.project_tree.setCurrentItem(self._find_tree_item(*selected) or page)
+        for object_id in selected_object_ids:
+            node = self._find_tree_item("text", object_id)
+            if node is not None:
+                node.setSelected(True)
         self._refreshing_tree = False
 
     def _find_tree_item(self, kind: str, value: object) -> QTreeWidgetItem | None:
@@ -330,16 +339,67 @@ class MainWindow(QMainWindow):
             return
         self._selected_kind = current.data(0, ROLE_KIND) or "project"
         self._selected_value = current.data(0, ROLE_VALUE)
+        self._sync_tree_selection()
+
+    def _on_tree_selection_changed(self) -> None:
+        if self._refreshing_tree:
+            return
+        self._sync_tree_selection()
+
+    def _sync_tree_selection(self) -> None:
+        selected_ids = {
+            item.data(0, ROLE_VALUE)
+            for item in self.project_tree.selectedItems()
+            if item.data(0, ROLE_KIND) == "text" and isinstance(item.data(0, ROLE_VALUE), str)
+        }
+        current = self.project_tree.currentItem()
+        if current is not None and current.data(0, ROLE_KIND) == "text":
+            self._selected_kind = "text"
+            self._selected_value = current.data(0, ROLE_VALUE)
+            selected_ids.add(self._selected_value)
+        elif not selected_ids and current is not None:
+            self._selected_kind = current.data(0, ROLE_KIND) or "project"
+            self._selected_value = current.data(0, ROLE_VALUE)
+        self._selected_object_ids = selected_ids
         self.canvas.set_selected_objects(self._selected_text_ids())
         self._show_selected_properties()
-        enabled = self._selected_kind == "text"
+        enabled = bool(selected_ids)
         self.delete_action.setEnabled(enabled)
         self.remove_text_button.setEnabled(enabled)
 
     def _selected_text_ids(self) -> set[str]:
-        if self._selected_kind == "text" and isinstance(self._selected_value, str):
-            return {self._selected_value}
-        return set()
+        return set(self._selected_object_ids)
+
+    def _on_canvas_selection_changed(self, object_ids) -> None:  # noqa: ANN001
+        valid = {
+            object_id
+            for object_id in object_ids
+            if any(item.object_id == object_id for item in self.controller.snapshot.objects)
+        }
+        self._selected_object_ids = valid
+        self._refreshing_tree = True
+        self.project_tree.clearSelection()
+        if valid:
+            primary = sorted(valid)[0]
+            self._selected_kind, self._selected_value = "text", primary
+            node = self._find_tree_item("text", primary)
+            if node is not None:
+                self.project_tree.setCurrentItem(node)
+            for object_id in sorted(valid):
+                selected_node = self._find_tree_item("text", object_id)
+                if selected_node is not None:
+                    selected_node.setSelected(True)
+        else:
+            self._selected_kind, self._selected_value = "page", None
+            page = self._find_tree_item("page", None)
+            if page is not None:
+                self.project_tree.setCurrentItem(page)
+        self._refreshing_tree = False
+        self.canvas.set_selected_objects(valid)
+        self._show_selected_properties()
+        enabled = bool(valid)
+        self.delete_action.setEnabled(enabled)
+        self.remove_text_button.setEnabled(enabled)
 
     def _show_selected_properties(self) -> None:
         if self._selected_kind == "page":
@@ -406,17 +466,21 @@ class MainWindow(QMainWindow):
     def add_text_object(self) -> None:
         item = self.controller.add_text_object()
         self._selected_kind, self._selected_value = "text", item.object_id
+        self._selected_object_ids = {item.object_id}
         self._refresh_tree(self.controller.snapshot)
 
     def remove_selected_object(self) -> None:
-        if self._selected_kind != "text" or not isinstance(self._selected_value, str):
+        if not self._selected_object_ids:
             return
-        self.controller.remove_text_object(self._selected_value)
+        self.controller.remove_text_objects(self._selected_object_ids)
+        self._selected_object_ids.clear()
         self._selected_kind, self._selected_value = "page", None
 
     def new_project(self) -> None:
         self._visibility_timer.stop()
         self._visibility_regeneration_pending = False
+        self._selected_object_ids.clear()
+        self._selected_kind, self._selected_value = "page", None
         self.controller.reset(default_project())
         self.canvas.clear_artifacts()
         self.generated_result = None
@@ -432,6 +496,8 @@ class MainWindow(QMainWindow):
             self._visibility_timer.stop()
             self._visibility_regeneration_pending = False
             loaded = load_project_file(Path(filename))
+            self._selected_object_ids.clear()
+            self._selected_kind, self._selected_value = "page", None
             self.controller.reset(loaded.snapshot, Path(filename))
             self.canvas.clear_artifacts()
             self.generated_result = None

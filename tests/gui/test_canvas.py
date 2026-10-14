@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
 
 from handwriting_plotter.application.service import GenerationRequest, HandwritingPlotterService
 from handwriting_plotter.gui.canvas import PageCanvas
@@ -76,3 +76,15 @@ def test_text_object_frame_is_drawn_and_highlighted_on_selection(qtbot) -> None:
     assert frame.pen().style() == Qt.PenStyle.SolidLine
     canvas.set_selected_objects(set())
     assert frame.pen().style() == Qt.PenStyle.DashLine
+
+
+def test_selection_direction_controls_crossing_semantics(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    first = TextObject(object_id="first", name="First", frame_x_mm=20, frame_y_mm=20, frame_width_mm=20, frame_height_mm=20)
+    second = TextObject(object_id="second", name="Second", frame_x_mm=50, frame_y_mm=20, frame_width_mm=20, frame_height_mm=20)
+    canvas.set_object_frames((first, second))
+    selection = QRectF(15, 15, 45, 30)
+
+    assert canvas._objects_in_selection(selection, crossing=False) == {"first"}
+    assert canvas._objects_in_selection(selection, crossing=True) == {"first", "second"}
