@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+from dataclasses import dataclass
 import os
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -12,6 +15,7 @@ from pydantic import Field, field_validator
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
+from handwriting_plotter.application.service import GenerationResult
 from handwriting_plotter.domain.models import StrictModel, canonical_json_bytes, strict_json_loads
 
 
@@ -58,7 +62,7 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.1"] = "1.1"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
@@ -72,6 +76,28 @@ class ProjectSnapshot(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate object id")
         return value
+
+
+class CachedArtifact(StrictModel):
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    data_base64: str
+
+
+class GenerationCache(StrictModel):
+    format: Literal["hp-desktop-generation-cache"] = "hp-desktop-generation-cache"
+    schema_version: Literal["1.0"] = "1.0"
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    document_id: str = Field(min_length=1)
+    page_count: int = Field(ge=1)
+    test_only_style: bool
+    artifacts: dict[str, CachedArtifact]
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedProject:
+    snapshot: ProjectSnapshot
+    generation_result: GenerationResult | None = None
+    cache_warning: str | None = None
 
 
 def default_project() -> ProjectSnapshot:
@@ -91,16 +117,90 @@ def project_bytes(snapshot: ProjectSnapshot) -> bytes:
     return canonical_json_bytes(snapshot.model_dump(mode="json")) + b"\n"
 
 
-def load_project(path: Path) -> ProjectSnapshot:
+def _source_sha256(snapshot: ProjectSnapshot) -> str:
+    return sha256(project_bytes(snapshot)).hexdigest()
+
+
+def _encode_generation_cache(snapshot: ProjectSnapshot, result: GenerationResult) -> dict:
+    artifacts = {
+        name: CachedArtifact(
+            sha256=sha256(content).hexdigest(),
+            data_base64=base64.b64encode(content).decode("ascii"),
+        )
+        for name, content in sorted(result.files.items())
+    }
+    return GenerationCache(
+        source_sha256=_source_sha256(snapshot),
+        document_id=result.document_id,
+        page_count=result.page_count,
+        test_only_style=result.test_only_style,
+        artifacts=artifacts,
+    ).model_dump(mode="json")
+
+
+def _decode_generation_cache(snapshot: ProjectSnapshot, raw: object) -> GenerationResult:
+    cache = GenerationCache.model_validate(raw, strict=True)
+    if cache.source_sha256 != _source_sha256(snapshot):
+        raise ValueError("GENERATION_CACHE_SOURCE_MISMATCH")
+    files: dict[str, bytes] = {}
+    for name, artifact in cache.artifacts.items():
+        try:
+            content = base64.b64decode(artifact.data_base64, validate=True)
+        except ValueError as exc:
+            raise ValueError(f"GENERATION_CACHE_INVALID_BASE64:{name}") from exc
+        if sha256(content).hexdigest() != artifact.sha256:
+            raise ValueError(f"GENERATION_CACHE_HASH_MISMATCH:{name}")
+        files[name] = content
+    required = {
+        "page-0001.svg",
+        "page-0001.preview.svg",
+        "page-0001.plan.json",
+        "page-0001.gcode",
+        "report.json",
+    }
+    missing = sorted(required - files.keys())
+    if missing:
+        raise ValueError("GENERATION_CACHE_MISSING_ARTIFACTS:" + ",".join(missing))
+    report = strict_json_loads(files["report.json"])
+    if not isinstance(report, dict) or report.get("document_id") != cache.document_id:
+        raise ValueError("GENERATION_CACHE_REPORT_MISMATCH")
+    if report.get("page_count") != cache.page_count:
+        raise ValueError("GENERATION_CACHE_PAGE_COUNT_MISMATCH")
+    return GenerationResult(cache.document_id, cache.page_count, files, report, cache.test_only_style)
+
+
+def project_file_bytes(snapshot: ProjectSnapshot, result: GenerationResult | None = None) -> bytes:
+    data = snapshot.model_dump(mode="json")
+    if result is not None:
+        data["generation_cache"] = _encode_generation_cache(snapshot, result)
+    return canonical_json_bytes(data) + b"\n"
+
+
+def load_project_file(path: Path) -> LoadedProject:
     data = strict_json_loads(path.read_bytes())
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
-    if data.get("schema_version") != "1.0":
+    version = data.get("schema_version")
+    if version not in {"1.0", "1.1"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
-    return ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
+    cache_data = data.pop("generation_cache", None)
+    if version == "1.0":
+        data["schema_version"] = "1.1"
+    snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
+    if cache_data is None:
+        return LoadedProject(snapshot)
+    try:
+        result = _decode_generation_cache(snapshot, cache_data)
+    except (TypeError, ValueError) as exc:
+        return LoadedProject(snapshot, cache_warning=str(exc))
+    return LoadedProject(snapshot, result)
 
 
-def save_project(path: Path, snapshot: ProjectSnapshot) -> None:
+def load_project(path: Path) -> ProjectSnapshot:
+    return load_project_file(path).snapshot
+
+
+def save_project(path: Path, snapshot: ProjectSnapshot, result: GenerationResult | None = None) -> None:
     """Atomically replace a project file in its destination directory."""
 
     path = path.expanduser().resolve()
@@ -109,7 +209,7 @@ def save_project(path: Path, snapshot: ProjectSnapshot) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            stream.write(project_bytes(snapshot))
+            stream.write(project_file_bytes(snapshot, result))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

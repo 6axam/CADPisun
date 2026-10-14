@@ -194,20 +194,24 @@ Correction operations: set_transcript, adjust_polygon, split_region, merge_regio
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.0`. Корень содержит `project_id`, пользовательское `name`,
-`page`, ordered `objects[]` и `display`. Неизвестная версия или лишнее поле —
-ошибка, silent migration не выполняется.
+`schema_version=1.1`. Корень содержит `project_id`, пользовательское `name`,
+`page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
+Версия 1.0 читается и мигрирует в памяти в 1.1; неизвестная версия или лишнее
+поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
 `TextObject`: object_id, name, Unicode text, visible, x_mm/y_mm, x_height_mm,
 line_pitch_mm, pinned style_id/style_revision, seed и realism. `display` v1
-содержит show_travel/show_markers. Object IDs уникальны; StylePack files,
-сгенерированные SVG/G-code, абсолютные пути и QSettings layout в JSON не
-встраиваются.
+содержит show_travel/show_markers. Object IDs уникальны; абсолютные пути и
+QSettings layout в JSON не встраиваются.
 
 Файл кодируется canonical UTF-8 JSON с LF и записывается temp + fsync + atomic
-replace в том же каталоге. Сгенерированный `GenerationResult` остаётся cache
-для текущей document revision и не становится authority проекта.
+replace в том же каталоге. `generation_cache` хранит base64 артефакты
+`GenerationResult`, их SHA-256, source SHA-256, document_id, page_count и
+test_only_style. Cache восстанавливается только при совпадении source hash,
+хешей всех артефактов и report metadata; иначе он отбрасывается без потери
+исходного проекта. Cache относится только к текущей document revision и не
+становится authority проекта.
 
 Этап I: папка проекта с input.txt, request.json, pinned style manifest, page-0001.plan.json, page-0001.svg, page-0001.preview.svg, page-0001.gcode (если запрошен), report.json, job-manifest.json. Пользователь выбирает output directory; запись temp + atomic replace только новых артефактов, overwrite требует явного параметра. Не класть сюда чужие synced sources.
 

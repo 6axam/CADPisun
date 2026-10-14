@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from .canvas import PageCanvas
 from .backend import GuiBackend
-from .document import DocumentController, ProjectSnapshot, default_project, load_project, save_project
+from .document import DocumentController, ProjectSnapshot, default_project, load_project_file, save_project
 from .exporting import export_artifact
 from .properties import PropertiesPanel
 from .styles import discover_styles
@@ -301,12 +301,20 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            self.controller.reset(load_project(Path(filename)), Path(filename))
+            loaded = load_project_file(Path(filename))
+            self.controller.reset(loaded.snapshot, Path(filename))
             self.canvas.clear_artifacts()
             self.generated_result = None
             self.generated_revision = None
             self._update_export_actions()
-            self.console.setPlainText(f"Opened {filename}")
+            if loaded.generation_result is not None:
+                self._display_generation_result(self.controller.revision, loaded.generation_result)
+                self.console.appendPlainText(f"\nRestored generated page from {filename}")
+                self.statusBar().showMessage("Project and generated page restored", 5000)
+            else:
+                self.console.setPlainText(f"Opened {filename}")
+                if loaded.cache_warning:
+                    self.console.appendPlainText(f"Ignored invalid generated cache: {loaded.cache_warning}")
         except Exception as exc:
             QMessageBox.critical(self, "Could not open project", str(exc))
 
@@ -327,7 +335,12 @@ class MainWindow(QMainWindow):
 
     def _write_project(self, path: Path) -> None:
         try:
-            save_project(path, self.controller.snapshot)
+            current_result = (
+                self.generated_result
+                if self.generated_revision == self.controller.revision
+                else None
+            )
+            save_project(path, self.controller.snapshot, current_result)
             self.controller.mark_saved(path)
             self.statusBar().showMessage(f"Saved {path}", 4000)
         except Exception as exc:
@@ -359,6 +372,10 @@ class MainWindow(QMainWindow):
             )
             self.statusBar().showMessage("Discarded stale generation result", 5000)
             return
+        self._display_generation_result(revision, result)
+        self.statusBar().showMessage("Generation complete", 5000)
+
+    def _display_generation_result(self, revision: int, result) -> None:  # noqa: ANN001
         self.generated_result = result
         self.generated_revision = revision
         self._update_export_actions()
@@ -397,7 +414,6 @@ class MainWindow(QMainWindow):
             "Machine status: virtual simulation only; hardware unverified."
         )
         self.canvas.zoom_to_fit()
-        self.statusBar().showMessage("Generation complete", 5000)
 
     def _generation_failed(self, revision: int, message: str, details: str) -> None:
         self._generation_worker = None

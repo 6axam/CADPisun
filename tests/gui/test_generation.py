@@ -6,6 +6,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtWidgets import QFileDialog
+
 from handwriting_plotter.gui.backend import GuiBackend
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 
@@ -66,3 +68,30 @@ def test_stale_generation_result_is_discarded(qtbot) -> None:
     assert window.generated_result is None
     assert not window.canvas.has_artifact
     assert "Discarded stale result" in window.console.toPlainText()
+
+
+def test_open_restores_saved_generation_without_running_backend(qtbot, tmp_path, monkeypatch) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    snapshot = composition_project()
+    result = GuiBackend().build(snapshot)
+    path = tmp_path / "calculated.hplot.json"
+    first = MainWindow()
+    qtbot.addWidget(first)
+    first.controller.reset(snapshot)
+    first._display_generation_result(first.controller.revision, result)
+    first._write_project(path)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
+    monkeypatch.setattr(window.backend, "build", lambda _: pytest.fail("backend must not run while opening"))
+
+    window.open_project()
+
+    assert window.generated_result is not None
+    assert window.generated_result.files == result.files
+    assert window.generated_revision == window.controller.revision
+    assert window.canvas.has_artifact
+    assert all(action.isEnabled() for action in window.export_actions)
+    assert "Restored generated page" in window.console.toPlainText()

@@ -11,6 +11,7 @@ from handwriting_plotter.gui.document import (
     ProjectSnapshot,
     TextObject,
     load_project,
+    load_project_file,
     save_project,
 )
 from handwriting_plotter.gui import document as document_module
@@ -53,6 +54,59 @@ def test_project_rejects_unknown_schema(tmp_path) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="UNSUPPORTED_PROJECT_SCHEMA"):
         load_project(path)
+
+
+def test_project_v1_0_is_loaded_and_migrated_in_memory(tmp_path) -> None:
+    path = tmp_path / "legacy.hplot.json"
+    data = sample_project().model_dump(mode="json")
+    data["schema_version"] = "1.0"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_project(path)
+
+    assert loaded.schema_version == "1.1"
+    assert loaded.project_id == sample_project().project_id
+
+
+def test_generated_result_round_trips_with_verified_artifacts(tmp_path) -> None:
+    from handwriting_plotter.gui.backend import GuiBackend
+
+    path = tmp_path / "calculated.hplot.json"
+    snapshot = ProjectSnapshot(
+        project_id="calculated-project",
+        objects=(TextObject(object_id="text-1", name="Text", text="Alpha"),),
+    )
+    result = GuiBackend().build(snapshot)
+
+    save_project(path, snapshot, result)
+    loaded = load_project_file(path)
+
+    assert loaded.snapshot == snapshot
+    assert loaded.cache_warning is None
+    assert loaded.generation_result is not None
+    assert loaded.generation_result.document_id == result.document_id
+    assert loaded.generation_result.report == result.report
+    assert loaded.generation_result.files == result.files
+
+
+def test_invalid_generated_cache_is_ignored_without_losing_project(tmp_path) -> None:
+    from handwriting_plotter.gui.backend import GuiBackend
+
+    path = tmp_path / "tampered.hplot.json"
+    snapshot = ProjectSnapshot(
+        project_id="tampered-project",
+        objects=(TextObject(object_id="text-1", name="Text", text="Alpha"),),
+    )
+    save_project(path, snapshot, GuiBackend().build(snapshot))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["generation_cache"]["source_sha256"] = "0" * 64
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_project_file(path)
+
+    assert loaded.snapshot == snapshot
+    assert loaded.generation_result is None
+    assert loaded.cache_warning == "GENERATION_CACHE_SOURCE_MISMATCH"
 
 
 def test_controller_tracks_revision_dirty_and_undo(qtbot) -> None:

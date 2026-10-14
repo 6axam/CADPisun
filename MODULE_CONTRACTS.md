@@ -229,10 +229,11 @@ Storage stores immutable inputs/revisions, atomic manifest, каталог II. F
 | DesktopApplicationAdapter | Immutable project snapshot → shared GenerationResult; использует application/layout/stroke/motion adapters |
 | GenerationWorker | Snapshot revision + adapter → success/error signal; widgets не меняются из worker thread |
 | PageCanvas | Backend SVG/PenPlan bytes → scene in PageFrame mm; zoom/pan/fit и diagnostic visibility |
-| ProjectStore | `hp-desktop-project/1.0` ↔ canonical JSON; atomic replace, unknown version error |
+| ProjectStore | `hp-desktop-project/1.0,1.1` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
 
 Старый worker result не применяется к новой revision. Одновременно выполняется
 не больше одной generation job документа. Export копирует проверенные bytes из
-последнего результата; dirty/отсутствующий result требует Generate. Закрытие
-dirty project требует решения пользователя. Qt layout сохраняется в QSettings
-отдельно от portable project JSON.
+последнего результата либо из проверенного cache текущей revision;
+dirty/отсутствующий result требует Generate. Закрытие dirty project требует
+решения пользователя. Qt layout сохраняется в QSettings отдельно от portable
+project JSON.
