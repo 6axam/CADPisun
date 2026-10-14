@@ -76,6 +76,9 @@ class MainWindow(QMainWindow):
         self._selected_value: object = None
         self._selected_object_ids: set[str] = set()
         self._refreshing_tree = False
+        self._tree_signature: tuple | None = None
+        self._canvas_objects_signature: tuple | None = None
+        self._margin_signature: tuple[float, float, float, float] | None = None
         self._build_canvas()
         self._build_docks()
         self._build_actions()
@@ -84,7 +87,8 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
-        self.canvas.set_object_frames(self.controller.snapshot.objects)
+        self._refresh_canvas_objects(self.controller.snapshot)
+        self._refresh_canvas_margins(self.controller.snapshot)
         self.properties.show_page(self.controller.snapshot.page)
         self._restore_window_state()
         self._update_title()
@@ -465,6 +469,64 @@ class MainWindow(QMainWindow):
             if node is not None:
                 node.setSelected(True)
         self._refreshing_tree = False
+        self._tree_signature = self._project_tree_signature(snapshot)
+
+    @staticmethod
+    def _project_tree_signature(snapshot: ProjectSnapshot) -> tuple:
+        return (
+            snapshot.name,
+            tuple((item.kind, item.object_id, item.name, item.visible) for item in snapshot.objects),
+        )
+
+    @staticmethod
+    def _canvas_signature(snapshot: ProjectSnapshot) -> tuple:
+        signatures: list[tuple] = []
+        for item in snapshot.objects:
+            if isinstance(item, TextObject):
+                signatures.append((
+                    item.kind,
+                    item.object_id,
+                    item.visible,
+                    item.frame_x_mm,
+                    item.frame_y_mm,
+                    item.frame_width_mm,
+                    item.frame_height_mm,
+                ))
+            else:
+                signatures.append((
+                    item.kind,
+                    item.object_id,
+                    item.visible,
+                    item.x_mm,
+                    item.y_mm,
+                    item.width_mm,
+                    item.height_mm,
+                    item.cell_width_mm,
+                    item.cell_height_mm,
+                    item.line_style,
+                    item.color,
+                    item.snap_enabled,
+                ))
+        return tuple(signatures)
+
+    def _refresh_canvas_objects(self, snapshot: ProjectSnapshot) -> None:
+        self.canvas.set_object_frames(snapshot.objects, self._selected_object_ids_copy())
+        self._canvas_objects_signature = self._canvas_signature(snapshot)
+
+    def _refresh_canvas_margins(self, snapshot: ProjectSnapshot) -> None:
+        page = snapshot.page
+        self.canvas.set_margins(
+            page.margin_left_mm,
+            page.margin_top_mm,
+            page.margin_right_mm,
+            page.margin_bottom_mm,
+        )
+        self._margin_signature = (
+            page.margin_left_mm,
+            page.margin_top_mm,
+            page.margin_right_mm,
+            page.margin_bottom_mm,
+        )
 
     def _find_tree_item(self, kind: str, value: object) -> QTreeWidgetItem | None:
         root = self.project_tree.invisibleRootItem()
@@ -484,10 +546,19 @@ class MainWindow(QMainWindow):
         return None
 
     def _on_snapshot_changed(self, snapshot: ProjectSnapshot, revision: int) -> None:
-        self._refresh_tree(snapshot)
+        if self._project_tree_signature(snapshot) != self._tree_signature:
+            self._refresh_tree(snapshot)
         page = snapshot.page
-        self.canvas.set_margins(page.margin_left_mm, page.margin_top_mm, page.margin_right_mm, page.margin_bottom_mm)
-        self.canvas.set_object_frames(snapshot.objects, self._selected_object_ids_copy())
+        margins = (
+            page.margin_left_mm,
+            page.margin_top_mm,
+            page.margin_right_mm,
+            page.margin_bottom_mm,
+        )
+        if margins != self._margin_signature:
+            self._refresh_canvas_margins(snapshot)
+        if self._canvas_signature(snapshot) != self._canvas_objects_signature:
+            self._refresh_canvas_objects(snapshot)
         focus = QApplication.focusWidget()
         if focus is None or not self.properties.isAncestorOf(focus):
             self._show_selected_properties()
