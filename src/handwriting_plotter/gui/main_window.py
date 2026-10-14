@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QThreadPool, QTimer, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QDockWidget, QHBoxLayout, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
@@ -16,6 +16,7 @@ from .canvas import PageCanvas
 from .backend import GuiBackend
 from .document import DocumentController, ProjectSnapshot, default_project, load_project_file, save_project
 from .exporting import export_artifact
+from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .workers import GenerationWorker
@@ -35,6 +36,7 @@ class MainWindow(QMainWindow):
         self.setDockNestingEnabled(True)
         self.styles = discover_styles()
         self.settings = settings or QSettings("Handwriting Plotter", "Handwriting Plotter")
+        self.language = normalize_language(self.settings.value("ui/language", "en"))
         self.controller = DocumentController(default_project(), self)
         self.backend = GuiBackend()
         self.thread_pool = QThreadPool.globalInstance()
@@ -59,7 +61,10 @@ class MainWindow(QMainWindow):
         self.properties.show_page(self.controller.snapshot.page)
         self._restore_window_state()
         self._update_title()
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage(self._t("status.ready"))
+
+    def _t(self, key: str) -> str:
+        return tr(self.language, key)
 
     def _build_canvas(self) -> None:
         self.canvas = PageCanvas(self)
@@ -70,8 +75,8 @@ class MainWindow(QMainWindow):
         project_layout = QVBoxLayout(project_panel)
         project_layout.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
-        self.add_text_button = QPushButton("+ Text")
-        self.remove_text_button = QPushButton("Remove")
+        self.add_text_button = QPushButton(self._t("button.add_text"))
+        self.remove_text_button = QPushButton(self._t("button.remove"))
         controls.addWidget(self.add_text_button)
         controls.addWidget(self.remove_text_button)
         project_layout.addLayout(controls)
@@ -80,11 +85,11 @@ class MainWindow(QMainWindow):
         self.project_tree.setHeaderHidden(True)
         self.project_tree.setAlternatingRowColors(True)
         project_layout.addWidget(self.project_tree)
-        self.project_dock = self._dock("Project Explorer", "project-dock", project_panel)
+        self.project_dock = self._dock(self._t("dock.project"), "project-dock", project_panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
 
-        self.properties = PropertiesPanel(self.styles)
-        self.properties_dock = self._dock("Properties", "properties-dock", self.properties)
+        self.properties = PropertiesPanel(self.styles, language=self.language)
+        self.properties_dock = self._dock(self._t("dock.properties"), "properties-dock", self.properties)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.properties_dock)
 
         self.console = self._read_only_log("Application events will appear here.")
@@ -92,73 +97,149 @@ class MainWindow(QMainWindow):
         self.toolpath = self._read_only_log("Generate a document to inspect its toolpath.")
         self.output_tabs = QTabWidget()
         self.output_tabs.setObjectName("output-tabs")
-        self.output_tabs.addTab(self.console, "Console")
-        self.output_tabs.addTab(self.diagnostics, "Diagnostics")
-        self.output_tabs.addTab(self.toolpath, "Toolpath")
-        self.output_dock = self._dock("Output", "output-dock", self.output_tabs)
+        self.output_tabs.addTab(self.console, self._t("tab.console"))
+        self.output_tabs.addTab(self.diagnostics, self._t("tab.diagnostics"))
+        self.output_tabs.addTab(self.toolpath, self._t("tab.toolpath"))
+        self.output_dock = self._dock(self._t("dock.output"), "output-dock", self.output_tabs)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
         self.resizeDocks([self.project_dock, self.properties_dock], [275, 340], Qt.Orientation.Horizontal)
         self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
 
     def _build_actions(self) -> None:
-        self.new_action = self._action("&New Project", self.new_project, QKeySequence.StandardKey.New)
-        self.open_action = self._action("&Open…", self.open_project, QKeySequence.StandardKey.Open)
-        self.save_action = self._action("&Save", self.save_project, QKeySequence.StandardKey.Save)
-        self.save_as_action = self._action("Save &As…", self.save_project_as, QKeySequence.StandardKey.SaveAs)
-        self.exit_action = self._action("E&xit", self.close, QKeySequence.StandardKey.Quit)
-        self.undo_action = self.controller.undo_stack.createUndoAction(self, "&Undo")
+        self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
+        self.open_action = self._action(self._t("action.open"), self.open_project, QKeySequence.StandardKey.Open)
+        self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
+        self.save_as_action = self._action(self._t("action.save_as"), self.save_project_as, QKeySequence.StandardKey.SaveAs)
+        self.exit_action = self._action(self._t("action.exit"), self.close, QKeySequence.StandardKey.Quit)
+        self.undo_action = self.controller.undo_stack.createUndoAction(self, self._t("action.undo"))
         self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        self.redo_action = self.controller.undo_stack.createRedoAction(self, "&Redo")
+        self.redo_action = self.controller.undo_stack.createRedoAction(self, self._t("action.redo"))
         self.redo_action.setShortcuts([QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Shift+Z")])
-        self.add_text_action = self._action("Add &Text Object", self.add_text_object, QKeySequence("Insert"))
-        self.delete_action = self._action("&Delete Object", self.remove_selected_object, QKeySequence.StandardKey.Delete)
-        self.generate_action = self._action("&Generate Page", self.generate_page, QKeySequence("Ctrl+Return"))
-        self.export_svg_action = self._action("Production SVG…", lambda: self._export("page-0001.svg"))
-        self.export_preview_action = self._action("Diagnostic SVG…", lambda: self._export("page-0001.preview.svg"))
-        self.export_gcode_action = self._action("Virtual G-code (simulation only)…", lambda: self._export("page-0001.gcode"))
-        self.export_report_action = self._action("Validation Report…", lambda: self._export("report.json"))
+        self.add_text_action = self._action(self._t("action.add_text"), self.add_text_object, QKeySequence("Insert"))
+        self.delete_action = self._action(self._t("action.delete"), self.remove_selected_object, QKeySequence.StandardKey.Delete)
+        self.generate_action = self._action(self._t("action.generate"), self.generate_page, QKeySequence("Ctrl+Return"))
+        self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
+        self.export_preview_action = self._action(self._t("action.export_preview"), lambda: self._export("page-0001.preview.svg"))
+        self.export_gcode_action = self._action(self._t("action.export_gcode"), lambda: self._export("page-0001.gcode"))
+        self.export_report_action = self._action(self._t("action.export_report"), lambda: self._export("report.json"))
         self.export_actions = (
             self.export_svg_action, self.export_preview_action, self.export_gcode_action, self.export_report_action,
         )
         self._update_export_actions()
 
     def _build_menus(self) -> None:
-        file_menu = self.menuBar().addMenu("&File")
-        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
-        export_menu = file_menu.addMenu("&Export")
-        export_menu.addActions(self.export_actions)
-        file_menu.addSeparator()
-        file_menu.addAction(self.exit_action)
-        edit = self.menuBar().addMenu("&Edit")
-        edit.addActions([self.undo_action, self.redo_action])
-        edit.addSeparator()
-        edit.addActions([self.add_text_action, self.delete_action])
-        view = self.menuBar().addMenu("&View")
+        self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
+        self.file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        self.export_menu = self.file_menu.addMenu(self._t("menu.export"))
+        self.export_menu.addActions(self.export_actions)
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.exit_action)
+        self.edit_menu = self.menuBar().addMenu(self._t("menu.edit"))
+        self.edit_menu.addActions([self.undo_action, self.redo_action])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([self.add_text_action, self.delete_action])
+        self.view_menu = self.menuBar().addMenu(self._t("menu.view"))
         for dock in (self.project_dock, self.properties_dock, self.output_dock):
-            view.addAction(dock.toggleViewAction())
-        self.tools_menu = self.menuBar().addMenu("&Tools")
+            self.view_menu.addAction(dock.toggleViewAction())
+        self.language_menu = self.menuBar().addMenu(self._t("menu.language"))
+        self.language_group = QActionGroup(self)
+        self.language_group.setExclusive(True)
+        self.english_language_action = self._language_action("en")
+        self.ukrainian_language_action = self._language_action("uk")
+        self.language_menu.addActions(self.language_group.actions())
+        self.tools_menu = self.menuBar().addMenu(self._t("menu.tools"))
         self.tools_menu.addAction(self.generate_action)
-        self.machine_menu = self.menuBar().addMenu("&Machine")
-        self.machine_menu.addAction(self._action("Virtual Profile Information…", self._virtual_profile_info))
-        help_menu = self.menuBar().addMenu("&Help")
-        help_menu.addAction(self._action("&About", self._about))
+        self.machine_menu = self.menuBar().addMenu(self._t("menu.machine"))
+        self.virtual_profile_action = self._action(self._t("action.virtual_profile"), self._virtual_profile_info)
+        self.machine_menu.addAction(self.virtual_profile_action)
+        self.help_menu = self.menuBar().addMenu(self._t("menu.help"))
+        self.about_action = self._action(self._t("action.about"), self._about)
+        self.help_menu.addAction(self.about_action)
 
     def _build_toolbar(self) -> None:
-        toolbar = self.addToolBar("Workspace")
-        toolbar.setObjectName("workspace-toolbar")
-        toolbar.addActions([self.new_action, self.open_action, self.save_action])
-        toolbar.addSeparator()
-        toolbar.addActions([self.add_text_action, self.delete_action])
-        toolbar.addSeparator()
-        toolbar.addAction(self.generate_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self._action("Fit Page", self.canvas.zoom_to_fit, "F"))
-        self.travel_action = self._action("Travel", self.canvas.set_show_travel)
+        self.workspace_toolbar = self.addToolBar(self._t("toolbar.workspace"))
+        self.workspace_toolbar.setObjectName("workspace-toolbar")
+        self.workspace_toolbar.addActions([self.new_action, self.open_action, self.save_action])
+        self.workspace_toolbar.addSeparator()
+        self.workspace_toolbar.addActions([self.add_text_action, self.delete_action])
+        self.workspace_toolbar.addSeparator()
+        self.workspace_toolbar.addAction(self.generate_action)
+        self.workspace_toolbar.addSeparator()
+        self.fit_page_action = self._action(self._t("action.fit_page"), self.canvas.zoom_to_fit, "F")
+        self.workspace_toolbar.addAction(self.fit_page_action)
+        self.travel_action = self._action(self._t("action.travel"), self.canvas.set_show_travel)
         self.travel_action.setCheckable(True)
-        toolbar.addAction(self.travel_action)
-        self.markers_action = self._action("Start / End", self.canvas.set_show_markers)
+        self.workspace_toolbar.addAction(self.travel_action)
+        self.markers_action = self._action(self._t("action.markers"), self.canvas.set_show_markers)
         self.markers_action.setCheckable(True)
-        toolbar.addAction(self.markers_action)
+        self.workspace_toolbar.addAction(self.markers_action)
+
+    def _language_action(self, language: Language) -> QAction:
+        action = QAction(self._t(f"language.{language}"), self)
+        action.setCheckable(True)
+        action.setData(language)
+        action.setChecked(language == self.language)
+        action.triggered.connect(lambda checked=False, value=language: self.set_language(value))
+        self.language_group.addAction(action)
+        return action
+
+    def set_language(self, language: Language) -> None:
+        normalized = normalize_language(language)
+        if normalized == self.language:
+            return
+        self.language = normalized
+        self.settings.setValue("ui/language", normalized)
+        self.settings.sync()
+        self._retranslate_ui()
+
+    def _retranslate_ui(self) -> None:
+        self.file_menu.setTitle(self._t("menu.file"))
+        self.export_menu.setTitle(self._t("menu.export"))
+        self.edit_menu.setTitle(self._t("menu.edit"))
+        self.view_menu.setTitle(self._t("menu.view"))
+        self.language_menu.setTitle(self._t("menu.language"))
+        self.tools_menu.setTitle(self._t("menu.tools"))
+        self.machine_menu.setTitle(self._t("menu.machine"))
+        self.help_menu.setTitle(self._t("menu.help"))
+        action_keys = {
+            self.new_action: "action.new",
+            self.open_action: "action.open",
+            self.save_action: "action.save",
+            self.save_as_action: "action.save_as",
+            self.exit_action: "action.exit",
+            self.undo_action: "action.undo",
+            self.redo_action: "action.redo",
+            self.add_text_action: "action.add_text",
+            self.delete_action: "action.delete",
+            self.generate_action: "action.generate",
+            self.export_svg_action: "action.export_svg",
+            self.export_preview_action: "action.export_preview",
+            self.export_gcode_action: "action.export_gcode",
+            self.export_report_action: "action.export_report",
+            self.virtual_profile_action: "action.virtual_profile",
+            self.about_action: "action.about",
+            self.fit_page_action: "action.fit_page",
+            self.travel_action: "action.travel",
+            self.markers_action: "action.markers",
+        }
+        for action, key in action_keys.items():
+            action.setText(self._t(key))
+        self.english_language_action.setText(self._t("language.en"))
+        self.ukrainian_language_action.setText(self._t("language.uk"))
+        self.english_language_action.setChecked(self.language == "en")
+        self.ukrainian_language_action.setChecked(self.language == "uk")
+        self.project_dock.setWindowTitle(self._t("dock.project"))
+        self.properties_dock.setWindowTitle(self._t("dock.properties"))
+        self.output_dock.setWindowTitle(self._t("dock.output"))
+        self.add_text_button.setText(self._t("button.add_text"))
+        self.remove_text_button.setText(self._t("button.remove"))
+        self.output_tabs.setTabText(0, self._t("tab.console"))
+        self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
+        self.output_tabs.setTabText(2, self._t("tab.toolpath"))
+        self.workspace_toolbar.setWindowTitle(self._t("toolbar.workspace"))
+        self.properties.set_language(self.language)
+        self._refresh_tree(self.controller.snapshot)
+        self.statusBar().showMessage(self._t("status.ready"), 2500)
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -193,8 +274,8 @@ class MainWindow(QMainWindow):
         self.project_tree.clear()
         project = QTreeWidgetItem([snapshot.name])
         project.setData(0, ROLE_KIND, "project")
-        document = QTreeWidgetItem(["Document"])
-        page = QTreeWidgetItem(["Page 1 · A4"])
+        document = QTreeWidgetItem([self._t("tree.document")])
+        page = QTreeWidgetItem([self._t("tree.page")])
         page.setData(0, ROLE_KIND, "page")
         document.addChild(page)
         project.addChild(document)
@@ -205,7 +286,7 @@ class MainWindow(QMainWindow):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsUserCheckable)
             node.setCheckState(0, Qt.CheckState.Checked if item.visible else Qt.CheckState.Unchecked)
             document.addChild(node)
-        resources = QTreeWidgetItem(["Style Packs"])
+        resources = QTreeWidgetItem([self._t("tree.styles")])
         resources.setData(0, ROLE_KIND, "styles")
         for style in self.styles:
             state = "✓" if style.valid else "!"

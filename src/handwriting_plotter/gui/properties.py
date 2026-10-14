@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from .document import PageSettings, TextObject
+from .i18n import Language, normalize_language, tr
 from .styles import StyleSummary
 
 
@@ -33,28 +34,44 @@ class PropertiesPanel(QWidget):
     text_object_changed = Signal(str, object)
     page_changed = Signal(object)
 
-    def __init__(self, styles: tuple[StyleSummary, ...], parent=None) -> None:  # noqa: ANN001
+    def __init__(
+        self,
+        styles: tuple[StyleSummary, ...],
+        parent=None,  # noqa: ANN001
+        *,
+        language: Language = "en",
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("properties-panel")
         self._styles = styles
+        self.language = normalize_language(language)
         self._object_id: str | None = None
+        self._shown_style: StyleSummary | None = None
         self._loading = False
+        self._labels: dict[str, QLabel] = {}
         self.stack = QStackedWidget()
         self.page_widget = self._build_page_widget()
         self.text_widget = self._build_text_widget()
         self.resource_widget = self._build_resource_widget()
-        self.empty_widget = QLabel("Select a page, text object, or StylePack.")
+        self.empty_widget = QLabel()
         self.empty_widget.setWordWrap(True)
         for widget in (self.empty_widget, self.page_widget, self.text_widget, self.resource_widget):
             self.stack.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.addWidget(self.stack)
+        self.set_language(self.language)
+
+    def _add_row(self, form: QFormLayout, key: str, field: QWidget) -> None:
+        label = QLabel()
+        form.addRow(label, field)
+        self._labels[key] = label
 
     def _build_page_widget(self) -> QWidget:
         widget = QWidget()
         form = QFormLayout(widget)
-        form.addRow("Format", QLabel("A4 · 210 × 297 mm"))
+        self.page_format = QLabel()
+        self._add_row(form, "properties.format", self.page_format)
         self.page_fields = {
             "margin_left_mm": _millimetre_spin(0, 100),
             "margin_right_mm": _millimetre_spin(0, 100),
@@ -63,17 +80,17 @@ class PropertiesPanel(QWidget):
             "paragraph_gap_mm": _millimetre_spin(0, 50),
             "pen_width_mm": _millimetre_spin(0.05, 3),
         }
-        labels = {
-            "margin_left_mm": "Left margin",
-            "margin_right_mm": "Right margin",
-            "margin_top_mm": "Top margin",
-            "margin_bottom_mm": "Bottom margin",
-            "paragraph_gap_mm": "Paragraph gap",
-            "pen_width_mm": "Pen width",
-        }
         for name, field in self.page_fields.items():
             field.valueChanged.connect(self._emit_page)
-            form.addRow(labels[name], field)
+            key = {
+                "margin_left_mm": "properties.margin_left",
+                "margin_right_mm": "properties.margin_right",
+                "margin_top_mm": "properties.margin_top",
+                "margin_bottom_mm": "properties.margin_bottom",
+                "paragraph_gap_mm": "properties.paragraph_gap",
+                "pen_width_mm": "properties.pen_width",
+            }[name]
+            self._add_row(form, key, field)
         return widget
 
     def _build_text_widget(self) -> QWidget:
@@ -96,15 +113,15 @@ class PropertiesPanel(QWidget):
         self.realism_field.setRange(0, 1)
         self.realism_field.setSingleStep(0.05)
         self.realism_field.setDecimals(2)
-        form.addRow("Name", self.name_field)
-        form.addRow("Text", self.text_field)
-        form.addRow("X", self.x_field)
-        form.addRow("Y", self.y_field)
-        form.addRow("x-height", self.x_height_field)
-        form.addRow("Line pitch", self.line_pitch_field)
-        form.addRow("Style", self.style_field)
-        form.addRow("Seed", self.seed_field)
-        form.addRow("Realism", self.realism_field)
+        self._add_row(form, "properties.name", self.name_field)
+        self._add_row(form, "properties.text", self.text_field)
+        self._add_row(form, "properties.x", self.x_field)
+        self._add_row(form, "properties.y", self.y_field)
+        self._add_row(form, "properties.x_height", self.x_height_field)
+        self._add_row(form, "properties.line_pitch", self.line_pitch_field)
+        self._add_row(form, "properties.style", self.style_field)
+        self._add_row(form, "properties.seed", self.seed_field)
+        self._add_row(form, "properties.realism", self.realism_field)
         self.name_field.editingFinished.connect(self._emit_text)
         self.text_field.textChanged.connect(self._emit_text)
         for field in (self.x_field, self.y_field, self.x_height_field, self.line_pitch_field,
@@ -122,15 +139,25 @@ class PropertiesPanel(QWidget):
         self.resource_status = QLabel()
         self.resource_detail = QLabel()
         self.resource_detail.setWordWrap(True)
-        form.addRow("StylePack", self.resource_name)
-        form.addRow("Reference", self.resource_reference)
-        form.addRow("Status", self.resource_status)
-        form.addRow("Validation", self.resource_detail)
+        self._add_row(form, "properties.style_pack", self.resource_name)
+        self._add_row(form, "properties.reference", self.resource_reference)
+        self._add_row(form, "properties.status", self.resource_status)
+        self._add_row(form, "properties.validation", self.resource_detail)
         return widget
+
+    def set_language(self, language: Language) -> None:
+        self.language = normalize_language(language)
+        self.empty_widget.setText(tr(self.language, "properties.empty"))
+        self.page_format.setText(tr(self.language, "properties.a4"))
+        for key, label in self._labels.items():
+            label.setText(tr(self.language, key))
+        if self._shown_style is not None:
+            self._show_style_status(self._shown_style)
 
     def show_page(self, page: PageSettings) -> None:
         self._loading = True
         self._object_id = None
+        self._shown_style = None
         for name, field in self.page_fields.items():
             field.setValue(getattr(page, name))
         self._loading = False
@@ -139,6 +166,7 @@ class PropertiesPanel(QWidget):
     def show_text_object(self, item: TextObject) -> None:
         self._loading = True
         self._object_id = item.object_id
+        self._shown_style = None
         self.name_field.setText(item.name)
         self.text_field.setPlainText(item.text)
         self.x_field.setValue(item.x_mm)
@@ -154,12 +182,17 @@ class PropertiesPanel(QWidget):
 
     def show_style(self, style: StyleSummary) -> None:
         self._object_id = None
+        self._shown_style = style
         self.resource_name.setText(style.display_name)
         self.resource_reference.setText(f"{style.style_id}@{style.revision}")
-        status = "Test only" if style.test_only else "Production eligible"
-        self.resource_status.setText(status if style.valid else "Invalid")
+        self._show_style_status(style)
         self.resource_detail.setText(style.detail)
         self.stack.setCurrentWidget(self.resource_widget)
+
+    def _show_style_status(self, style: StyleSummary) -> None:
+        status_key = "properties.test_only" if style.test_only else "properties.production"
+        status = tr(self.language, status_key)
+        self.resource_status.setText(status if style.valid else tr(self.language, "properties.invalid"))
 
     def _emit_page(self) -> None:
         if self._loading:
