@@ -65,7 +65,9 @@ def test_status_messages_use_distinct_operation_colors(qtbot) -> None:
     ):
         window._show_status(severity, severity)
         assert window.statusBar().property("messageSeverity") == severity
-        assert color in window.statusBar().styleSheet()
+        assert window.operation_status_label.property("severity") == severity
+        assert color in window.operation_status_label.styleSheet()
+        assert window.operation_status_label.text() == severity
         assert window.statusBar().currentMessage() == severity
 
 
