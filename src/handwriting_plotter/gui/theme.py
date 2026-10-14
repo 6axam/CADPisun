@@ -91,6 +91,16 @@ QScrollBar:vertical {{ width: 11px; background: {COLORS['panel']}; }}
 QScrollBar::handle:vertical {{ background: #4a515e; border-radius: 5px; min-height: 24px; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QStatusBar {{ color: {COLORS['muted']}; border-top: 1px solid {COLORS['border']}; }}
+QProgressBar {{
+    color: {COLORS['text']};
+    background: {COLORS['panel_alt']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 3px;
+    min-height: 16px;
+    max-height: 16px;
+    text-align: center;
+}}
+QProgressBar::chunk {{ background: {COLORS['accent']}; border-radius: 2px; }}
 """
 
 

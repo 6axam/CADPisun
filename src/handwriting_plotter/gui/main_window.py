@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QTabWidget,
     QTreeWidget,
@@ -208,12 +209,61 @@ class MainWindow(QMainWindow):
         self._cursor_position = None
         self.telemetry_label = QLabel()
         self.telemetry_label.setObjectName("canvas-telemetry")
-        self.statusBar().addPermanentWidget(self.telemetry_label, 1)
+        self.statusBar().addPermanentWidget(self.telemetry_label)
+        self.operation_status_label = QLabel()
+        self.operation_status_label.setObjectName("operation-status")
+        self.operation_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.statusBar().addPermanentWidget(self.operation_status_label, 1)
+        self._status_reset_timer = QTimer(self)
+        self._status_reset_timer.setSingleShot(True)
+        self._status_reset_timer.timeout.connect(self._reset_status_message)
+        self.generation_progress = QProgressBar()
+        self.generation_progress.setObjectName("generation-progress")
+        self._progress_hide_timer = QTimer(self)
+        self._progress_hide_timer.setSingleShot(True)
+        self._progress_hide_timer.timeout.connect(self._hide_finished_generation_progress)
+        self.generation_progress.setFixedWidth(210)
+        self.generation_progress.setTextVisible(True)
+        self.generation_progress.hide()
+        self.statusBar().addPermanentWidget(self.generation_progress)
         self.version_label = QLabel()
         self.version_label.setObjectName("application-version")
         self.statusBar().addPermanentWidget(self.version_label)
         self._update_telemetry_label()
         self._update_version_label()
+
+    def _start_generation_progress(self) -> None:
+        self._progress_hide_timer.stop()
+        self.generation_progress.setProperty("state", "running")
+        self.generation_progress.setRange(0, 0)
+        self.generation_progress.setFormat(self._t("status.progress.generating"))
+        self.generation_progress.setStyleSheet(
+            f"QProgressBar::chunk {{ background: {COLORS['accent']}; }}"
+        )
+        self.generation_progress.show()
+
+    def _finish_generation_progress(self, state: str) -> None:
+        states = {
+            "success": (100, "status.progress.complete", COLORS["success"]),
+            "warning": (0, "status.progress.stopped", COLORS["warning"]),
+            "error": (0, "status.progress.failed", COLORS["danger"]),
+        }
+        if state not in states:
+            raise ValueError(f"UNKNOWN_PROGRESS_STATE:{state}")
+        value, message_key, color = states[state]
+        self.generation_progress.setProperty("state", state)
+        self.generation_progress.setRange(0, 100)
+        self.generation_progress.setValue(value)
+        self.generation_progress.setFormat(self._t(message_key))
+        self.generation_progress.setStyleSheet(
+            f"QProgressBar::chunk {{ background: {color}; }}"
+        )
+        self.generation_progress.show()
+        self._progress_hide_timer.start(1600)
+
+    def _hide_finished_generation_progress(self) -> None:
+        if self.generation_progress.property("state") != "running":
+            self.generation_progress.hide()
 
     def _update_version_label(self) -> None:
         self.version_label.setText(self._t("status.version").format(version=__version__))
@@ -227,12 +277,17 @@ class MainWindow(QMainWindow):
         }
         if severity not in colors:
             raise ValueError(f"UNKNOWN_STATUS_SEVERITY:{severity}")
+        self._status_reset_timer.stop()
         self.statusBar().setProperty("messageSeverity", severity)
-        self.statusBar().setStyleSheet(
-            f"QStatusBar {{ color: {colors[severity]}; "
-            f"border-top: 1px solid {COLORS['border']}; }}"
-        )
+        self.operation_status_label.setProperty("severity", severity)
+        self.operation_status_label.setStyleSheet(f"color: {colors[severity]};")
+        self.operation_status_label.setText(message)
         self.statusBar().showMessage(message, timeout)
+        if timeout > 0:
+            self._status_reset_timer.start(timeout)
+
+    def _reset_status_message(self) -> None:
+        self._show_status(self._t("status.ready"))
 
     def _update_telemetry_label(self) -> None:
         if self._cursor_position is None:
@@ -319,6 +374,16 @@ class MainWindow(QMainWindow):
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
         self.workspace_toolbar.setWindowTitle(self._t("toolbar.workspace"))
+        progress_state = self.generation_progress.property("state")
+        if progress_state == "running":
+            self.generation_progress.setFormat(self._t("status.progress.generating"))
+        elif progress_state in {"success", "warning", "error"}:
+            progress_key = {
+                "success": "status.progress.complete",
+                "warning": "status.progress.stopped",
+                "error": "status.progress.failed",
+            }[progress_state]
+            self.generation_progress.setFormat(self._t(progress_key))
         self._update_telemetry_label()
         self._update_version_label()
         self.properties.set_language(self.language)
@@ -723,6 +788,7 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(self._generation_failed)
         self._generation_worker = worker
         self.generate_action.setEnabled(False)
+        self._start_generation_progress()
         self._show_status("Generating page…")
         self.console.setPlainText(f"Generation started for revision {revision}.")
         self.thread_pool.start(worker)
@@ -735,9 +801,11 @@ class MainWindow(QMainWindow):
                 f"Discarded stale result for revision {revision}; current revision is {self.controller.revision}."
             )
             self._show_status("Discarded stale generation result", "warning", 5000)
+            self._finish_generation_progress("warning")
             return
         self._display_generation_result(revision, result)
         self._show_status("Generation complete", "success", 5000)
+        self._finish_generation_progress("success")
 
     def _display_generation_result(self, revision: int, result) -> None:  # noqa: ANN001
         self.generated_result = result
@@ -784,12 +852,14 @@ class MainWindow(QMainWindow):
         self.generate_action.setEnabled(True)
         if revision != self.controller.revision:
             self.console.appendPlainText(f"Ignored error from stale revision {revision}: {message}")
+            self._finish_generation_progress("warning")
             return
         friendly = message.replace("MISSING_GLYPH:", "The selected style is missing: ")
         self.diagnostics.setPlainText(friendly)
         self.console.setPlainText(details)
         self.output_tabs.setCurrentWidget(self.diagnostics)
         self._show_status("Generation failed — see Diagnostics", "error", 7000)
+        self._finish_generation_progress("error")
 
     def _update_export_actions(self) -> None:
         current = self.generated_result is not None and self.generated_revision == self.controller.revision

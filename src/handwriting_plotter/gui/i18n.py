@@ -107,6 +107,10 @@ _ENGLISH = {
     "status.fps": "FPS: {fps:.1f}",
     "status.cursor.empty": "X: —  Y: —",
     "status.cursor.position": "X: {x:.2f} mm  Y: {y:.2f} mm",
+    "status.progress.generating": "Processing and generating…",
+    "status.progress.complete": "Generation complete",
+    "status.progress.stopped": "Generation stopped",
+    "status.progress.failed": "Generation failed",
 }
 
 
@@ -209,6 +213,10 @@ _UKRAINIAN = {
     "status.fps": "FPS: {fps:.1f}",
     "status.cursor.empty": "X: —  Y: —",
     "status.cursor.position": "X: {x:.2f} мм  Y: {y:.2f} мм",
+    "status.progress.generating": "Обробка та генерація…",
+    "status.progress.complete": "Генерацію завершено",
+    "status.progress.stopped": "Генерацію зупинено",
+    "status.progress.failed": "Помилка генерації",
 }
 
 

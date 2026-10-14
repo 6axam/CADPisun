@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
 from handwriting_plotter.gui.document import GridObject, ProjectSnapshot, TextObject
+from handwriting_plotter.gui.theme import COLORS
 
 
 def composition_project() -> ProjectSnapshot:
@@ -36,6 +37,30 @@ def test_composition_builds_one_authoritative_plan_for_positioned_objects() -> N
     stroke_ids = [stroke for item in plan["operations"] if item["op"] == "draw" for stroke in item["stroke_ids"]]
     assert any(stroke.startswith("first/") for stroke in stroke_ids)
     assert any(stroke.startswith("second/") for stroke in stroke_ids)
+
+
+def test_generation_progress_reports_running_success_and_failure(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+
+    window._start_generation_progress()
+    assert window.generation_progress.isVisible()
+    assert window.generation_progress.minimum() == 0
+    assert window.generation_progress.maximum() == 0
+    assert window.generation_progress.property("state") == "running"
+
+    window._finish_generation_progress("success")
+    assert window.generation_progress.value() == 100
+    assert window.generation_progress.format() == "Generation complete"
+    assert COLORS["success"] in window.generation_progress.styleSheet()
+
+    window._finish_generation_progress("error")
+    assert window.generation_progress.value() == 0
+    assert window.generation_progress.format() == "Generation failed"
+    assert COLORS["danger"] in window.generation_progress.styleSheet()
 
 
 def test_text_frame_geometry_does_not_change_generated_artifacts() -> None:
