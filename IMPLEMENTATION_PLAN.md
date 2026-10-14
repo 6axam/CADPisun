@@ -221,6 +221,9 @@ Tests T-C03…T-C07: crossings, dots, retracing ambiguity, два порядка
 8. **GUI-07:** bilingual UI, CAD selection/move, independent text frames,
    compact grouped properties и persisted layout-grid overlay с partial snap;
    доказать byte-identical generated artifacts с сеткой и без неё.
+9. **GUI-08:** постоянная версия приложения, paint FPS и cursor coordinates в
+   mm, severity-colored operation status и честный indeterminate progress для
+   фоновой генерации без синтетических процентов.
 
 Каждый пакет завершается tests и отдельным commit. OCR, ML, hardware transport,
 capture и glyph-node editor остаются вне этого плана.

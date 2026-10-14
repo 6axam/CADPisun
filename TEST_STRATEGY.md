@@ -224,6 +224,7 @@ H-A: pen-up dry run и контрольные точки; H-B: цикл100 по�
 | R51 | Persistent storage | Files I, SQLite+blobs II | I-09/II-00 | T-A02/T-D02 |
 | R52 | GUI как optional слой после I-09 | Application/GUI contract tests | GUI-00…GUI-07 | Core/CLI без Qt; widgets используют только application API |
 | R53 | Сетка остаётся только UI-разметкой | Snapshot/backend byte comparison, canvas snap tests | GUI-07 | Сетка сохраняется и рисуется; все generated artifacts byte-identical; X/Y snap независимы |
+| R54 | Диагностическая строка не создаёт ложной точности | GUI signal/state tests и visual QA | GUI-08 | Версия постоянна; FPS измеряется paint events; координаты в mm; статусы различимы цветом; generation progress indeterminate до реального результата |
 | R53 | Изоляция ML | Отдельные envs/jobs | II-02/03/06 | Base import без torch/TF |
 | R54 | Reuse вместо переписывания | Parsers/CV/HTR/serial + domain core | Все | RESEARCH table/TECH_STACK |
 | R55 | Реальный анализ пяти кандидатов | Code/commit/license review | Архитектура | RESEARCH §1, source permalinks |
