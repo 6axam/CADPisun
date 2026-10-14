@@ -12,14 +12,14 @@ from handwriting_plotter.gui.main_window import MainWindow
 from handwriting_plotter.gui.studio import HandwritingStudio
 
 
-def _draw_sample(studio: HandwritingStudio) -> None:
+def _draw_sample(studio: HandwritingStudio, offset: float = 0.0) -> None:
     canvas = studio.capture_canvas
     canvas.resize(640, 480)
-    assert canvas._begin_pointer("mouse", QPointF(100, 320))
-    assert canvas._move_pointer(QPointF(130, 210))
-    assert canvas._end_pointer(QPointF(170, 320))
-    assert canvas._begin_pointer("mouse", QPointF(190, 320))
-    assert canvas._end_pointer(QPointF(210, 220))
+    assert canvas._begin_pointer("mouse", QPointF(100 + offset, 320))
+    assert canvas._move_pointer(QPointF(130 + offset, 210 - offset))
+    assert canvas._end_pointer(QPointF(170 + offset, 320))
+    assert canvas._begin_pointer("mouse", QPointF(190 + offset, 320))
+    assert canvas._end_pointer(QPointF(210 + offset, 220 + offset))
 
 
 def test_workspace_switch_preserves_document_state(qtbot, tmp_path: Path) -> None:
@@ -153,4 +153,47 @@ def test_custom_queue_captures_five_tokens_and_resumes_progress(qtbot, tmp_path:
     assert resumed.reject_current_sample()
     assert digest in resumed.queue_state.rejected_capture_hashes
     assert resumed.coverage_progress.value() == 4
+
+
+def test_three_variants_can_be_browsed_preferred_reopened_and_removed(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1200, 760)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+
+    hashes = []
+    for offset in (0.0, 12.0, 24.0):
+        _draw_sample(studio, offset)
+        record = studio.save_sample()
+        assert record is not None
+        hashes.append(record.sha256)
+        studio.capture_canvas.clear()
+
+    assert studio.variant_list.count() == 3
+    studio.variant_list.setCurrentRow(1)
+    selected_id = studio.variant_list.currentItem().data(256)
+    studio.preferred_button.click()
+    preferred = next(item for item in studio.draft_catalog.variants if item.variant_id == selected_id)
+    assert preferred.preferred
+    assert sum(item.preferred for item in studio.draft_catalog.visible_variants("м")) == 1
+
+    studio.variant_list.itemDoubleClicked.emit(studio.variant_list.currentItem())
+    assert studio.hash_value.text() == preferred.capture_sha256
+    assert studio.capture_canvas.strokes
+
+    studio.variant_list.setCurrentRow(0)
+    deleted_id = studio.variant_list.currentItem().data(256)
+    studio.delete_variant_button.click()
+    assert studio.variant_list.count() == 2
+    deleted = next(item for item in studio.draft_catalog.variants if item.variant_id == deleted_id)
+    assert deleted.deleted
+    assert deleted.history[-1].action == "deleted"
+    assert all(studio.repository.path_for(digest).is_file() for digest in hashes)
+
+    reopened = HandwritingStudio(tmp_path)
+    qtbot.addWidget(reopened)
+    reopened.label_edit.setText("м")
+    assert reopened.variant_list.count() == 2
+    assert next(item for item in reopened.draft_catalog.variants if item.variant_id == selected_id).preferred
 

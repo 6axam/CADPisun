@@ -69,6 +69,19 @@ The five-token test uses the UI workflow, persists queue progress, reconstructs
 the Studio, verifies zero missing tokens, then rejects one hash and verifies
 coverage decreases without deleting the raw capture.
 
+### Phase 05 variant management
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_drafts.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `7 passed in 1.29s`; full regression `174 passed in 12.65s`.
+The acceptance test records three geometrically different `м` samples, renders
+three thumbnails, selects one preferred, reopens it, tombstones another, and
+verifies that every immutable raw file still exists after Studio restart.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

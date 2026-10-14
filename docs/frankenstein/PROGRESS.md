@@ -6,14 +6,15 @@ Last updated: 2026-10-14.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 05 — glyph variant management
-- Last completed phase: 04 — capture queues and coverage dashboard
+- Phase: 06 — stroke normalization and processing
+- Last completed phase: 05 — glyph variant management
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
 - Phase 03 commit: `1dd1204`
-- Phase 04 commit: see the commit named `feat: add glyph queues and handwriting coverage dashboard` (recorded at the next checkpoint).
-- Next concrete action: add side-by-side variant browsing, preferred selection, draft deletion/rejection, and preserved raw history.
+- Phase 04 commit: `f0ca242`
+- Phase 05 commit: see the commit named `feat: manage multiple captured glyph variants` (recorded at the next checkpoint).
+- Next concrete action: implement duplicate filtering, resampling, smoothing, simplification, fitting and measured source deviation.
 
 ## Validation ledger
 
@@ -28,6 +29,8 @@ Last updated: 2026-10-14.
 | 2026-10-14 | Phase 03 full Linux headless regression | 167 passed in 12.18 s |
 | 2026-10-14 | Phase 04 queue/Studio focused suites | 7 passed in 1.24 s |
 | 2026-10-14 | Phase 04 full Linux headless regression | 171 passed in 13.81 s |
+| 2026-10-14 | Phase 05 draft/variant focused suites | 7 passed in 1.29 s |
+| 2026-10-14 | Phase 05 full Linux headless regression | 174 passed in 12.65 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -87,9 +90,21 @@ draft rejection and the required experimental variant count is configurable.
 The acceptance test records `а м и н о` in sequence and resumes at `о` in a new
 Studio instance.
 
-### Phase 05 — IN_PROGRESS
+### Phase 05 — DONE
 
-- Add a visible per-token variant browser with thumbnails and selection.
-- Move context/preferred/rejected/deleted state into a versioned editable draft catalog.
-- Preserve raw hashes and review history for every metadata revision.
+- Added a visible per-token variant browser with thumbnails and selection.
+- Moved context/preferred/rejected/deleted state into a versioned editable draft catalog.
+- Preserved raw hashes and review history for every metadata revision.
+
+Three separately captured `м` variants are displayed side by side with rendered
+thumbnails. A user can reopen any variant, select one preferred variant, reject
+poor input, or remove it from the editable draft. Preferred/review/delete
+changes append history events. Deleted captures remain byte-verified in the raw
+repository and are recovered in the audit catalog after restart.
+
+### Phase 06 — IN_PROGRESS
+
+- Keep the processing module Qt-free and derivatives linked to capture SHA-256.
+- Certify maximum source-to-result deviation for every processed stroke.
+- Preserve direction, boundaries, corners, loops, and small marks without path reversal.
 

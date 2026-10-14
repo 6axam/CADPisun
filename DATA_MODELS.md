@@ -258,6 +258,13 @@ coverage, но не удаляет и не меняет raw capture. Queue JSON 
 атомарно и восстанавливается после перезапуска; coverage заново считается по
 проверенным raw records и queue metadata.
 
+Variant metadata живёт в `hp-style-draft/1.0` отдельно от raw files. Каждый
+`VariantDraft` содержит variant/sample IDs, capture SHA-256, label, ручной
+context tag, review status, preferred/deleted flags и contiguous append-only
+history. Для одного label допускается не более одного preferred variant.
+Delete создаёт tombstone и history event; исходный capture остаётся доступен по
+hash. Только последующий builder решает, какие accepted candidates публиковать.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

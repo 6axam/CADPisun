@@ -235,6 +235,12 @@ skip и rejected hashes являются явными review decisions. Coverage
 считает variants из `CaptureRepository` за вычетом rejected hashes и применяет
 настраиваемый required_variants без продуктового auto-approval.
 
+`DraftStore` атомарно хранит `hp-style-draft/1.0`; операции preferred,
+accepted/rejected и delete создают следующую запись history, не меняя
+`CaptureRepository`. GUI показывает только non-deleted variants, но audit и
+восстановление сохраняют tombstones. Reopen всегда повторно загружает raw bytes
+по capture_sha256.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

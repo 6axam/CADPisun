@@ -11,8 +11,8 @@ States: `TODO`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 | 02 | Qt pointer capture engine | 01 | two directed strokes preserved; mouse/tablet duplicate guard | DONE |
 | 03 | Integrated Handwriting Studio | 02 | save, leave, return, reopen sample | DONE |
 | 04 | Capture queues and coverage | 03 | five-token capture without manual filenames | DONE |
-| 05 | Variant management | 04 | three `м` variants browsable and selectable | IN_PROGRESS |
-| 06 | Directed-stroke processing | 01, 05 | two tolerances, bounded deviation, shared raw source | TODO |
+| 05 | Variant management | 04 | three `м` variants browsable and selectable | DONE |
+| 06 | Directed-stroke processing | 01, 05 | two tolerances, bounded deviation, shared raw source | IN_PROGRESS |
 | 07 | Common glyph metrics | 06 | coherent `а м н о и` baseline/x-height | TODO |
 | 08 | Join annotation | 07 | pair preview reports join/lift/rejection | TODO |
 | 09 | Recorded ligatures | 08 | captured `ма` selected through PenPlan | TODO |

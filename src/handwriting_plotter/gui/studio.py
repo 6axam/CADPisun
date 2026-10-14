@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import regex
-from PySide6.QtCore import QStandardPaths, Qt
+from PySide6.QtCore import QPointF, QSize, QStandardPaths, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.capture.models import CaptureProvenance, CaptureSession, WritingGuides
+from handwriting_plotter.capture.drafts import DraftCatalog, DraftEvent, DraftStore, VariantDraft
 from handwriting_plotter.capture.queue import CaptureQueueState, CaptureQueueStore
 from handwriting_plotter.capture.repository import CaptureRecord, CaptureRepository
 from handwriting_plotter.version import __version__
@@ -67,6 +69,7 @@ class HandwritingStudio(QWidget):
         self.language = language
         self.repository = CaptureRepository(root)
         self.queue_store = CaptureQueueStore(root)
+        self.draft_store = DraftStore(root)
         self._records: list[CaptureRecord] = []
         self._load_errors: list[str] = []
         try:
@@ -80,6 +83,13 @@ class HandwritingStudio(QWidget):
             self.queue_state = CaptureQueueState(
                 queue_id="default", name="Ukrainian", tokens=UKRAINIAN_QUEUE
             )
+        try:
+            self.draft_catalog = self.draft_store.load("personal")
+        except FileNotFoundError:
+            self.draft_catalog = DraftCatalog(style_id="personal", display_name="Personal handwriting")
+        except Exception as exc:
+            self._load_errors.append(str(exc))
+            self.draft_catalog = DraftCatalog(style_id="personal", display_name="Personal handwriting")
         self._build_ui()
         self._connect()
         self._reload_records()
@@ -187,6 +197,9 @@ class HandwritingStudio(QWidget):
         center_layout.addLayout(view_controls)
         upper.addWidget(center)
 
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         self.properties_group = QGroupBox()
         form = QFormLayout(self.properties_group)
         self.label_edit = QLineEdit(self.queue_state.tokens[self.queue_state.current_index])
@@ -229,7 +242,23 @@ class HandwritingStudio(QWidget):
             label = QLabel()
             self._property_labels[key] = label
             form.addRow(label, widget)
-        upper.addWidget(self.properties_group)
+        right_layout.addWidget(self.properties_group)
+        self.variants_title = QLabel()
+        self.variant_list = QListWidget()
+        self.variant_list.setObjectName("studio-variant-browser")
+        self.variant_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.variant_list.setIconSize(QSize(120, 80))
+        self.variant_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.variant_list.setMovement(QListWidget.Movement.Static)
+        variant_actions = QHBoxLayout()
+        self.preferred_button = QPushButton()
+        self.delete_variant_button = QPushButton()
+        variant_actions.addWidget(self.preferred_button)
+        variant_actions.addWidget(self.delete_variant_button)
+        right_layout.addWidget(self.variants_title)
+        right_layout.addWidget(self.variant_list, 1)
+        right_layout.addLayout(variant_actions)
+        upper.addWidget(right)
         upper.setStretchFactor(0, 1)
         upper.setStretchFactor(1, 4)
         upper.setStretchFactor(2, 1)
@@ -270,6 +299,9 @@ class HandwritingStudio(QWidget):
         self.save_next_button.clicked.connect(self.save_and_next)
         self.open_existing_button.clicked.connect(self._open_current)
         self.reject_button.clicked.connect(self.reject_current_sample)
+        self.variant_list.itemDoubleClicked.connect(self._open_variant_item)
+        self.preferred_button.clicked.connect(self._set_selected_preferred)
+        self.delete_variant_button.clicked.connect(self._delete_selected_variant)
         self.points_check.toggled.connect(self.capture_canvas.set_show_points)
         self.directions_check.toggled.connect(self.capture_canvas.set_show_directions)
         self.zoom_out_button.clicked.connect(
@@ -288,6 +320,9 @@ class HandwritingStudio(QWidget):
         self.style_name.setPlaceholderText(tr(language, "studio.style_name"))
         self.search.setPlaceholderText(tr(language, "studio.search"))
         self.properties_group.setTitle(tr(language, "studio.properties"))
+        self.variants_title.setText(tr(language, "studio.variants"))
+        self.preferred_button.setText(tr(language, "studio.preferred"))
+        self.delete_variant_button.setText(tr(language, "studio.delete_variant"))
         self.diagnostics_title.setText(tr(language, "studio.diagnostics"))
         for key, label in self._property_labels.items():
             label.setText(tr(language, key))
@@ -313,6 +348,7 @@ class HandwritingStudio(QWidget):
         self.points_check.setText(tr(language, "studio.points_toggle"))
         self.directions_check.setText(tr(language, "studio.directions_toggle"))
         self._refresh_collection()
+        self._refresh_variants()
         self._refresh_queue_status()
         self._refresh_diagnostics()
 
@@ -356,8 +392,10 @@ class HandwritingStudio(QWidget):
             self.diagnostics.setPlainText(f"{tr(self.language, 'studio.invalid')}\n{exc}")
             return None
         self._records.append(record)
+        self._add_record_to_draft(record)
         self.hash_value.setText(record.sha256)
         self._refresh_collection()
+        self._refresh_variants()
         self._refresh_diagnostics(tr(self.language, "studio.saved").format(hash=record.sha256[:12]))
         return record
 
@@ -399,6 +437,7 @@ class HandwritingStudio(QWidget):
         self.hash_value.setText(record.sha256)
         self._sync_guide_controls()
         self._refresh_diagnostics(tr(self.language, "studio.opened").format(hash=record.sha256[:12]))
+        self._refresh_variants()
 
     def _reload_records(self) -> None:
         try:
@@ -406,6 +445,7 @@ class HandwritingStudio(QWidget):
         except Exception as exc:
             self._records = []
             self._load_errors.append(str(exc))
+        self._sync_draft_catalog()
         self._refresh_collection()
 
     def _refresh_collection(self) -> None:
@@ -451,6 +491,7 @@ class HandwritingStudio(QWidget):
         if not self.variant_edit.hasFocus():
             self.variant_edit.setText(self._suggest_variant_id(label.strip()))
         self._refresh_diagnostics()
+        self._refresh_variants()
 
     def _capture_changed(self, strokes: int, points: int) -> None:
         self.stroke_count_value.setText(str(strokes))
@@ -584,9 +625,16 @@ class HandwritingStudio(QWidget):
         rejected = set(self.queue_state.rejected_capture_hashes)
         rejected.add(digest)
         self._set_queue_state(rejected_capture_hashes=frozenset(rejected))
+        variant = next((item for item in self.draft_catalog.variants if item.capture_sha256 == digest), None)
+        if variant is not None:
+            self.draft_catalog = self.draft_catalog.update_status(
+                variant.variant_id, "rejected", self._now_utc()
+            )
+            self.draft_store.save(self.draft_catalog)
         self.capture_canvas.clear()
         self.hash_value.setText("—")
         self._refresh_diagnostics(tr(self.language, "studio.rejected").format(hash=digest[:12]))
+        self._refresh_variants()
         return True
 
     def _required_variants_changed(self, value: int) -> None:
@@ -620,6 +668,118 @@ class HandwritingStudio(QWidget):
         self.label_edit.setText(tokens[0])
         self.capture_canvas.clear()
         self._refresh_collection()
+
+    @staticmethod
+    def _now_utc() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    def _sync_draft_catalog(self) -> None:
+        known = {item.capture_sha256 for item in self.draft_catalog.variants}
+        changed = False
+        for record in self._records:
+            if record.sha256 not in known:
+                self.draft_catalog = self._catalog_with_record(self.draft_catalog, record)
+                known.add(record.sha256)
+                changed = True
+        if changed:
+            self.draft_store.save(self.draft_catalog)
+
+    def _add_record_to_draft(self, record: CaptureRecord) -> None:
+        self.draft_catalog = self._catalog_with_record(self.draft_catalog, record)
+        self.draft_store.save(self.draft_catalog)
+
+    def _catalog_with_record(self, catalog: DraftCatalog, record: CaptureRecord) -> DraftCatalog:
+        sample = record.session.samples[0]
+        metadata = record.session.extensions.get("cadpisun.studio", {})
+        requested = str(metadata.get("variant_id", self._suggest_variant_id(sample.label))) if isinstance(metadata, dict) else self._suggest_variant_id(sample.label)
+        existing_ids = {item.variant_id for item in catalog.variants}
+        variant_id = requested
+        suffix = 2
+        while variant_id in existing_ids:
+            variant_id = f"{requested}-{suffix}"
+            suffix += 1
+        context = str(metadata.get("context_tag", "isolated")) if isinstance(metadata, dict) else "isolated"
+        if context not in {"isolated", "initial", "medial", "final"}:
+            context = "isolated"
+        variant = VariantDraft(
+            variant_id=variant_id,
+            sample_id=sample.sample_id,
+            capture_sha256=record.sha256,
+            label=sample.label,
+            context_tag=context,
+            history=(DraftEvent(
+                revision=1,
+                action="captured",
+                occurred_at_utc=record.session.created_at_utc,
+            ),),
+        )
+        return DraftCatalog(
+            style_id=catalog.style_id,
+            display_name=self.style_name.text().strip() or catalog.display_name,
+            variants=(*catalog.variants, variant),
+        )
+
+    def _refresh_variants(self) -> None:
+        label = self.label_edit.text().strip()
+        selected_id = self.variant_list.currentItem().data(ROLE_TOKEN) if self.variant_list.currentItem() else None
+        self.variant_list.clear()
+        for variant in self.draft_catalog.visible_variants(label):
+            try:
+                record = next(item for item in self._records if item.sha256 == variant.capture_sha256)
+            except StopIteration:
+                continue
+            marker = "★" if variant.preferred else ("✕" if variant.review_status == "rejected" else "")
+            item = QListWidgetItem(self._thumbnail(record), f"{marker} {variant.variant_id}".strip())
+            item.setData(ROLE_TOKEN, variant.variant_id)
+            item.setToolTip(f"{variant.context_tag} · {variant.review_status} · {variant.capture_sha256[:12]}")
+            self.variant_list.addItem(item)
+            if variant.variant_id == selected_id:
+                self.variant_list.setCurrentItem(item)
+
+    def _thumbnail(self, record: CaptureRecord) -> QIcon:
+        sample = record.session.samples[0]
+        pixmap = QPixmap(120, 80)
+        pixmap.fill(QColor("#f8f8f6"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor("#20242a"), 2.0))
+        sx = 110 / sample.coordinate_reference.width
+        sy = 70 / sample.coordinate_reference.height
+        for stroke in sample.strokes:
+            points = [QPointF(5 + point.x * sx, 5 + point.y * sy) for point in stroke.points]
+            for first, second in zip(points, points[1:], strict=False):
+                painter.drawLine(first, second)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _selected_variant(self) -> VariantDraft | None:
+        item = self.variant_list.currentItem()
+        if item is None:
+            return None
+        variant_id = str(item.data(ROLE_TOKEN))
+        return next((variant for variant in self.draft_catalog.variants if variant.variant_id == variant_id), None)
+
+    def _open_variant_item(self, item: QListWidgetItem) -> None:
+        variant_id = str(item.data(ROLE_TOKEN))
+        variant = next(value for value in self.draft_catalog.variants if value.variant_id == variant_id)
+        record = next(value for value in self._records if value.sha256 == variant.capture_sha256)
+        self.open_record(record)
+
+    def _set_selected_preferred(self) -> None:
+        variant = self._selected_variant()
+        if variant is None:
+            return
+        self.draft_catalog = self.draft_catalog.set_preferred(variant.variant_id, self._now_utc())
+        self.draft_store.save(self.draft_catalog)
+        self._refresh_variants()
+
+    def _delete_selected_variant(self) -> None:
+        variant = self._selected_variant()
+        if variant is None:
+            return
+        self.draft_catalog = self.draft_catalog.delete_from_draft(variant.variant_id, self._now_utc())
+        self.draft_store.save(self.draft_catalog)
+        self._refresh_variants()
 
     def _suggest_variant_id(self, label: str) -> str:
         if not label:
