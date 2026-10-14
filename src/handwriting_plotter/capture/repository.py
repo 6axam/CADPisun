@@ -94,6 +94,17 @@ class CaptureRepository:
             raise ValueError("CAPTURE_HASH_MISMATCH")
         return load_capture_bytes(content)
 
+    def list_records(self) -> tuple[CaptureRecord, ...]:
+        records: list[CaptureRecord] = []
+        raw_root = self.root / "raw"
+        if not raw_root.is_dir():
+            return ()
+        for path in sorted(raw_root.glob("[0-9a-f][0-9a-f]/*.hp-capture.json")):
+            digest = path.name.removesuffix(".hp-capture.json")
+            session = self.load(digest)
+            records.append(CaptureRecord(digest, path, session))
+        return tuple(records)
+
     @staticmethod
     def _verify_content(path: Path, digest: str, expected: bytes) -> None:
         content = path.read_bytes()

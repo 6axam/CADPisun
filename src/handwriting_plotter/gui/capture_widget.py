@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QPen,
     QPointingDevice,
     QTabletEvent,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
 
@@ -62,6 +63,13 @@ class HandwritingCaptureWidget(QWidget):
         self._pressure_observed = False
         self._device_name: str | None = None
         self._system_id: str | None = None
+        self._writing_guides: WritingGuides | None = None
+        self._show_points = False
+        self._show_directions = False
+        self._zoom_factor = 1.0
+        self._pan = QPointF()
+        self._pan_origin: QPointF | None = None
+        self._pan_initial = QPointF()
 
     @property
     def strokes(self) -> tuple[CaptureStroke, ...]:
@@ -72,6 +80,14 @@ class HandwritingCaptureWidget(QWidget):
         return bool(self._active_points)
 
     @property
+    def can_undo(self) -> bool:
+        return not self.has_active_stroke and bool(self._strokes)
+
+    @property
+    def can_redo(self) -> bool:
+        return not self.has_active_stroke and bool(self._redo)
+
+    @property
     def coordinate_reference(self) -> CoordinateReference:
         if self._coordinate_reference is None:
             self._coordinate_reference = self._current_reference()
@@ -79,6 +95,8 @@ class HandwritingCaptureWidget(QWidget):
 
     @property
     def writing_guides(self) -> WritingGuides:
+        if self._writing_guides is not None:
+            return self._writing_guides
         height = self.coordinate_reference.height
         return WritingGuides(
             ascender_y=height * 0.18,
@@ -117,6 +135,65 @@ class HandwritingCaptureWidget(QWidget):
             strokes=self.strokes,
         )
 
+    @property
+    def zoom_factor(self) -> float:
+        return self._zoom_factor
+
+    def set_writing_guides(self, guides: WritingGuides) -> None:
+        height = self.coordinate_reference.height
+        if not all(0 <= value <= height for value in (
+            guides.ascender_y, guides.x_height_y, guides.baseline_y, guides.descender_y,
+        )):
+            raise ValueError("writing guides are outside capture canvas")
+        self._writing_guides = guides
+        self.update()
+
+    def set_show_points(self, enabled: bool) -> None:
+        self._show_points = bool(enabled)
+        self.update()
+
+    def set_show_directions(self, enabled: bool) -> None:
+        self._show_directions = bool(enabled)
+        self.update()
+
+    def set_zoom_factor(self, value: float) -> None:
+        value = max(0.25, min(8.0, float(value)))
+        center = QPointF(self.width() / 2, self.height() / 2)
+        reference = self.coordinate_reference
+        old_scale_x = self.width() / reference.width * self._zoom_factor
+        old_scale_y = self.height() / reference.height * self._zoom_factor
+        capture_x = (center.x() - self._pan.x()) / old_scale_x
+        capture_y = (center.y() - self._pan.y()) / old_scale_y
+        self._zoom_factor = value
+        new_scale_x = self.width() / reference.width * value
+        new_scale_y = self.height() / reference.height * value
+        self._pan = QPointF(center.x() - capture_x * new_scale_x, center.y() - capture_y * new_scale_y)
+        self.update()
+
+    def reset_view(self) -> None:
+        self._zoom_factor = 1.0
+        self._pan = QPointF()
+        self.update()
+
+    def load_sample(self, sample: CaptureSample, device: DeviceCapabilities | None = None) -> None:
+        if self.has_active_stroke:
+            raise ValueError("CAPTURE_STROKE_ACTIVE")
+        self._strokes = list(sample.strokes)
+        self._redo.clear()
+        self._coordinate_reference = sample.coordinate_reference
+        self._writing_guides = sample.guides
+        self._observed_pointer_types = {
+            point.pointer_type for stroke in sample.strokes for point in stroke.points
+        }
+        self._pressure_observed = any(
+            point.pressure is not None for stroke in sample.strokes for point in stroke.points
+        )
+        if device is not None:
+            self._device_name = device.device_name
+            self._system_id = device.system_id
+        self.reset_view()
+        self._publish_change()
+
     def clear(self) -> None:
         self._strokes.clear()
         self._redo.clear()
@@ -130,6 +207,8 @@ class HandwritingCaptureWidget(QWidget):
         self._pressure_observed = False
         self._device_name = None
         self._system_id = None
+        self._writing_guides = None
+        self.reset_view()
         self._publish_change()
 
     def undo_stroke(self) -> bool:
@@ -153,6 +232,11 @@ class HandwritingCaptureWidget(QWidget):
         return self._finish_pointer("move", "interrupted")
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_origin = event.position()
+            self._pan_initial = QPointF(self._pan)
+            event.accept()
+            return
         if self._ignore_synthesized_mouse(event):
             event.accept()
             return
@@ -163,6 +247,11 @@ class HandwritingCaptureWidget(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._pan_origin is not None and event.buttons() & Qt.MouseButton.MiddleButton:
+            self._pan = self._pan_initial + event.position() - self._pan_origin
+            self.update()
+            event.accept()
+            return
         if self._ignore_synthesized_mouse(event):
             event.accept()
             return
@@ -173,6 +262,10 @@ class HandwritingCaptureWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.MiddleButton and self._pan_origin is not None:
+            self._pan_origin = None
+            event.accept()
+            return
         if self._ignore_synthesized_mouse(event):
             event.accept()
             return
@@ -181,6 +274,14 @@ class HandwritingCaptureWidget(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            factor = 1.2 if event.angleDelta().y() > 0 else 1 / 1.2
+            self.set_zoom_factor(self._zoom_factor * factor)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def tabletEvent(self, event: QTabletEvent) -> None:  # noqa: N802
         pointer_type = self._tablet_pointer_type(event)
@@ -233,8 +334,7 @@ class HandwritingCaptureWidget(QWidget):
             (guides.descender_y, "#d6d9de", Qt.PenStyle.DashLine),
         ):
             painter.setPen(QPen(QColor(color), 1.0, style))
-            display_y = y * self.height() / reference.height
-            painter.drawLine(QPointF(0, display_y), QPointF(self.width(), display_y))
+            painter.drawLine(self._from_capture(0, y), self._from_capture(reference.width, y))
 
     def _paint_points(self, painter: QPainter, points: Iterable[CapturePoint]) -> None:
         converted = [self._from_capture(point.x, point.y) for point in points]
@@ -242,6 +342,20 @@ class HandwritingCaptureWidget(QWidget):
             painter.drawLine(first, second)
         if len(converted) == 1:
             painter.drawPoint(converted[0])
+        if self._show_points:
+            painter.save()
+            painter.setPen(QPen(QColor(COLORS["accent"]), 1.0))
+            for point in converted:
+                painter.drawEllipse(point, 2.2, 2.2)
+            painter.restore()
+        if self._show_directions and len(converted) >= 2:
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(COLORS["success"]))
+            painter.drawEllipse(converted[0], 3.2, 3.2)
+            painter.setBrush(QColor(COLORS["danger"]))
+            painter.drawEllipse(converted[-1], 3.2, 3.2)
+            painter.restore()
 
     def _begin_pointer(
         self,
@@ -332,13 +446,22 @@ class HandwritingCaptureWidget(QWidget):
         reference = self.coordinate_reference
         width = max(1, self.width())
         height = max(1, self.height())
-        x = max(0.0, min(reference.width, position.x() * reference.width / width))
-        y = max(0.0, min(reference.height, position.y() * reference.height / height))
+        x = max(0.0, min(
+            reference.width,
+            (position.x() - self._pan.x()) * reference.width / (width * self._zoom_factor),
+        ))
+        y = max(0.0, min(
+            reference.height,
+            (position.y() - self._pan.y()) * reference.height / (height * self._zoom_factor),
+        ))
         return QPointF(x, y)
 
     def _from_capture(self, x: float, y: float) -> QPointF:
         reference = self.coordinate_reference
-        return QPointF(x * self.width() / reference.width, y * self.height() / reference.height)
+        return QPointF(
+            x * self.width() / reference.width * self._zoom_factor + self._pan.x(),
+            y * self.height() / reference.height * self._zoom_factor + self._pan.y(),
+        )
 
     def _current_reference(self) -> CoordinateReference:
         return CoordinateReference(

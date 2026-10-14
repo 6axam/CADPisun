@@ -77,6 +77,12 @@ G-code. Нижняя строка показывает FPS холста, коо�
 Production SVG, diagnostic SVG, validation JSON и virtual G-code экспортируются
 по отдельности. Отправки на реальный станок нет.
 
+Кнопка **Handwriting Studio** открывает локальную рабочую область записи
+настоящих направленных штрихов мышью, стилусом или поддерживаемым touch input.
+Raw-записи сохраняются атомарно вне установленного пакета и пока остаются
+редактируемыми test-only исходниками; публикация персонального StylePack
+выполняется последующими этапами Project Frankenstein.
+
 Подробный сценарий, сочетания клавиш и ограничения описаны в
 [руководстве по GUI](docs/gui-usage.md). Снимок рабочего интерфейса находится в
 [`examples/gui/handwriting-plotter-gui.png`](examples/gui/handwriting-plotter-gui.png).

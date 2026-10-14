@@ -43,6 +43,19 @@ The automated suite used Qt mouse events and controlled pen-event translation;
 no physical tablet/touch hardware was available, so hardware-specific event
 delivery remains a release validation item.
 
+### Phase 03 integrated Handwriting Studio
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/gui/test_capture_widget.py tests/gui/test_studio.py tests/gui/test_shell.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `15 passed in 3.27s`; full regression `167 passed in 12.18s`.
+The integration test saves a two-stroke Ukrainian sample, leaves and returns to
+the workspace, constructs a fresh Studio instance, and reopens byte-verified raw
+data from the user-data directory.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.
