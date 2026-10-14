@@ -407,6 +407,7 @@ class MainWindow(QMainWindow):
         self.canvas.cursor_position_changed.connect(self._on_cursor_position_changed)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
         self.properties.text_object_changed.connect(self._update_text_object)
+        self.properties.text_content_changed.connect(self._update_text_content)
         self.properties.grid_object_changed.connect(self._update_grid_object)
         self.properties.page_changed.connect(self._update_page)
         self.add_text_button.clicked.connect(self.add_text_object)
@@ -663,6 +664,16 @@ class MainWindow(QMainWindow):
     def _update_text_object(self, object_id: str, changes: dict) -> None:
         try:
             self.controller.update_text_object(object_id, **changes)
+        except ValueError as exc:
+            self._show_status(str(exc), "error", 5000)
+
+    def _update_text_content(self, object_id: str, changes: dict) -> None:
+        try:
+            self.controller.update_text_object(
+                object_id,
+                undo_merge_key=f"text-content:{object_id}",
+                **changes,
+            )
         except ValueError as exc:
             self._show_status(str(exc), "error", 5000)
 

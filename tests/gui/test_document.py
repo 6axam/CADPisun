@@ -161,6 +161,43 @@ def test_controller_tracks_revision_dirty_and_undo(qtbot) -> None:
     assert controller.snapshot.objects[0].text == "Нове значення"
 
 
+def test_consecutive_text_typing_merges_into_one_undo_command(qtbot) -> None:
+    controller = DocumentController(sample_project())
+    original_text = controller.snapshot.objects[0].text
+
+    for value in (original_text + " ", original_text + " w", original_text + " wo", original_text + " word"):
+        controller.update_text_object(
+            "text-1",
+            undo_merge_key="text-content:text-1",
+            text=value,
+        )
+
+    assert controller.snapshot.objects[0].text == original_text + " word"
+    assert controller.undo_stack.count() == 1
+    controller.undo_stack.undo()
+    assert controller.snapshot.objects[0].text == original_text
+
+
+def test_properties_typing_uses_merged_text_undo_path(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    item = window.controller.snapshot.objects[0]
+    original_text = item.text
+    window._selected_kind = "text"
+    window._selected_value = item.object_id
+    window._selected_object_ids = {item.object_id}
+    window._show_selected_properties()
+
+    qtbot.keyClicks(window.properties.text_field, "abc")
+
+    assert window.controller.undo_stack.count() == 1
+    assert window.controller.snapshot.objects[0].text != original_text
+    window.controller.undo_stack.undo()
+    assert window.controller.snapshot.objects[0].text == original_text
+
+
 def test_controller_moves_multiple_text_objects_in_one_undo_step(qtbot) -> None:
     snapshot = ProjectSnapshot(
         project_id="move-project",

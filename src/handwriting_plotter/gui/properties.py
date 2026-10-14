@@ -35,6 +35,7 @@ def _millimetre_spin(minimum: float = 0.0, maximum: float = 297.0) -> QDoubleSpi
 
 class PropertiesPanel(QWidget):
     text_object_changed = Signal(str, object)
+    text_content_changed = Signal(str, object)
     grid_object_changed = Signal(str, object)
     page_changed = Signal(object)
 
@@ -170,7 +171,7 @@ class PropertiesPanel(QWidget):
         ])
         layout.addStretch(1)
         self.name_field.editingFinished.connect(self._emit_text)
-        self.text_field.textChanged.connect(self._emit_text)
+        self.text_field.textChanged.connect(self._emit_text_content)
         for field in (
             self.x_field, self.y_field, self.frame_x_field, self.frame_y_field,
             self.frame_width_field, self.frame_height_field, self.x_height_field,
@@ -324,13 +325,23 @@ class PropertiesPanel(QWidget):
         self.page_changed.emit({name: field.value() for name, field in self.page_fields.items()})
 
     def _emit_text(self) -> None:
+        payload = self._text_changes()
+        if payload is not None:
+            self.text_object_changed.emit(self._object_id, payload)
+
+    def _emit_text_content(self) -> None:
+        payload = self._text_changes()
+        if payload is not None:
+            self.text_content_changed.emit(self._object_id, payload)
+
+    def _text_changes(self) -> dict | None:
         if self._loading or self._object_id is None or self.style_field.currentIndex() < 0:
-            return
+            return None
         seed_text = self.seed_field.text()
         if not seed_text:
-            return
+            return None
         style_id, revision = self.style_field.currentData().split("\0", 1)
-        self.text_object_changed.emit(self._object_id, {
+        return {
             "name": self.name_field.text().strip() or "Text",
             "text": self.text_field.toPlainText(),
             "x_mm": self.x_field.value(),
@@ -345,7 +356,7 @@ class PropertiesPanel(QWidget):
             "style_revision": revision,
             "seed": int(seed_text),
             "realism": self.realism_field.value(),
-        })
+        }
 
     def _emit_grid(self) -> None:
         if self._loading or self._object_id is None or not self.grid_color_field.hasAcceptableInput():

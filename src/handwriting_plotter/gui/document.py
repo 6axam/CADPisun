@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -296,11 +297,36 @@ def _sync_directory(path: Path) -> None:
 
 
 class _ReplaceSnapshotCommand(QUndoCommand):
-    def __init__(self, controller: "DocumentController", before: ProjectSnapshot, after: ProjectSnapshot, text: str) -> None:
+    MERGE_WINDOW_SECONDS = 1.5
+
+    def __init__(
+        self,
+        controller: "DocumentController",
+        before: ProjectSnapshot,
+        after: ProjectSnapshot,
+        text: str,
+        merge_key: str | None = None,
+    ) -> None:
         super().__init__(text)
         self._controller = controller
         self._before = before
         self._after = after
+        self._merge_key = merge_key
+        self._updated_at = time.monotonic()
+
+    def id(self) -> int:  # noqa: A003 - Qt API
+        return 1 if self._merge_key is not None else -1
+
+    def mergeWith(self, other: QUndoCommand) -> bool:  # noqa: N802 - Qt API
+        if not isinstance(other, _ReplaceSnapshotCommand):
+            return False
+        if self._controller is not other._controller or self._merge_key != other._merge_key:
+            return False
+        if other._updated_at - self._updated_at > self.MERGE_WINDOW_SECONDS:
+            return False
+        self._after = other._after
+        self._updated_at = other._updated_at
+        return True
 
     def redo(self) -> None:
         self._controller._replace(self._after)
@@ -327,10 +353,12 @@ class DocumentController(QObject):
     def dirty(self) -> bool:
         return self._dirty
 
-    def apply(self, snapshot: ProjectSnapshot, description: str) -> None:
+    def apply(self, snapshot: ProjectSnapshot, description: str, merge_key: str | None = None) -> None:
         if snapshot == self.snapshot:
             return
-        self.undo_stack.push(_ReplaceSnapshotCommand(self, self.snapshot, snapshot, description))
+        self.undo_stack.push(
+            _ReplaceSnapshotCommand(self, self.snapshot, snapshot, description, merge_key)
+        )
 
     def _replace(self, snapshot: ProjectSnapshot) -> None:
         self.snapshot = snapshot
@@ -387,17 +415,30 @@ class DocumentController(QObject):
         description = "Delete object" if len(self.snapshot.objects) - len(objects) == 1 else "Delete objects"
         self.apply(self.snapshot.model_copy(update={"objects": objects}), description)
 
-    def update_text_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
+    def update_text_object(
+        self,
+        object_id: str,
+        *,
+        undo_merge_key: str | None = None,
+        **changes,
+    ) -> None:  # noqa: ANN003
         if not any(isinstance(item, TextObject) and item.object_id == object_id for item in self.snapshot.objects):
             raise KeyError(object_id)
-        self._update_object(object_id, changes, "Edit text object")
+        self._update_object(object_id, changes, "Edit text object", merge_key=undo_merge_key)
 
     def update_grid_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
         if not any(isinstance(item, GridObject) and item.object_id == object_id for item in self.snapshot.objects):
             raise KeyError(object_id)
         self._update_object(object_id, changes, "Edit grid object")
 
-    def _update_object(self, object_id: str, changes: dict, description: str) -> None:
+    def _update_object(
+        self,
+        object_id: str,
+        changes: dict,
+        description: str,
+        *,
+        merge_key: str | None = None,
+    ) -> None:
         objects = tuple(
             item.model_copy(update=changes) if item.object_id == object_id else item
             for item in self.snapshot.objects
@@ -405,7 +446,7 @@ class DocumentController(QObject):
         validated = ProjectSnapshot.model_validate(
             self.snapshot.model_copy(update={"objects": objects}).model_dump(mode="python"), strict=True
         )
-        self.apply(validated, description)
+        self.apply(validated, description, merge_key)
 
     def move_objects(self, object_ids: set[str], dx_mm: float, dy_mm: float) -> None:
         if not object_ids or (abs(dx_mm) <= 1e-9 and abs(dy_mm) <= 1e-9):
