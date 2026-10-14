@@ -11,6 +11,11 @@ from handwriting_plotter.styles.models import GlyphVariantFile, to_variant
 from handwriting_plotter.styles.repository import FileStyleRepository
 
 
+def test_versioned_style_assets_force_lf_checkout() -> None:
+    attributes = Path(".gitattributes").read_text(encoding="utf-8")
+    assert "/assets/styles/** text eol=lf" in attributes
+
+
 def _write_style(root: Path, *, bad_hash: bool = False, duplicate: bool = False) -> Path:
     package = root / "draft"
     (package / "glyphs").mkdir(parents=True)

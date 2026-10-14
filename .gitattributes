@@ -1,0 +1,2 @@
+# StylePack manifests hash exact bytes; checkout must never rewrite line endings.
+/assets/styles/** text eol=lf
