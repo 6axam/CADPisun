@@ -103,6 +103,7 @@ _ENGLISH = {
     "properties.production": "Production eligible",
     "properties.invalid": "Invalid",
     "status.ready": "Ready",
+    "status.version": "Version {version}",
 }
 
 
@@ -201,6 +202,7 @@ _UKRAINIAN = {
     "properties.production": "Придатний до використання",
     "properties.invalid": "Недійсний",
     "status.ready": "Готово",
+    "status.version": "Версія {version}",
 }
 
 

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -39,6 +40,7 @@ from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .workers import GenerationWorker
+from handwriting_plotter.version import __version__
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
 ROLE_VALUE = ROLE_KIND + 1
@@ -75,6 +77,7 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
+        self._build_status_bar()
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
         self.canvas.set_object_frames(self.controller.snapshot.objects)
@@ -198,6 +201,15 @@ class MainWindow(QMainWindow):
         self.markers_action.setCheckable(True)
         self.workspace_toolbar.addAction(self.markers_action)
 
+    def _build_status_bar(self) -> None:
+        self.version_label = QLabel()
+        self.version_label.setObjectName("application-version")
+        self.statusBar().addPermanentWidget(self.version_label)
+        self._update_version_label()
+
+    def _update_version_label(self) -> None:
+        self.version_label.setText(self._t("status.version").format(version=__version__))
+
     def _language_action(self, language: Language) -> QAction:
         action = QAction(self._t(f"language.{language}"), self)
         action.setCheckable(True)
@@ -263,6 +275,7 @@ class MainWindow(QMainWindow):
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
         self.workspace_toolbar.setWindowTitle(self._t("toolbar.workspace"))
+        self._update_version_label()
         self.properties.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
         self.statusBar().showMessage(self._t("status.ready"), 2500)

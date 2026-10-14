@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings
 
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
+from handwriting_plotter.version import __version__
 
 
 def test_main_window_has_engineering_workspace(qtbot) -> None:
@@ -22,6 +23,8 @@ def test_main_window_has_engineering_workspace(qtbot) -> None:
     assert [action.text().replace("&", "") for action in window.menuBar().actions()] == [
         "File", "Edit", "View", "Language", "Tools", "Machine", "Help",
     ]
+    assert window.version_label.text() == f"Version {__version__}"
+    assert window.statusBar().childrenRect().contains(window.version_label.geometry())
 
 
 def test_docks_are_actually_toggleable(qtbot) -> None:
@@ -48,6 +51,7 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
     ]
     assert window.project_dock.windowTitle() == "Об’єкти проєкту"
     assert window.properties._labels["properties.name"].text() == "Назва"
+    assert window.version_label.text() == f"Версія {__version__}"
 
     reopened = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))
     qtbot.addWidget(reopened)
