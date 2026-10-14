@@ -38,6 +38,20 @@ def test_docks_are_actually_toggleable(qtbot) -> None:
     assert window.project_dock.isVisible()
 
 
+def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.canvas.fps_changed.emit(59.94)
+    window.canvas.cursor_position_changed.emit(window.canvas.page_rect_mm.center())
+    window.show()
+
+    assert window.telemetry_label.isVisible()
+    assert "FPS: 59.9" in window.telemetry_label.text()
+    assert "X: 105.00 mm" in window.telemetry_label.text()
+    assert "Y: 148.50 mm" in window.telemetry_label.text()
+
+
 def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> None:
     settings_path = str(tmp_path / "language.ini")
     window = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))

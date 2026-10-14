@@ -104,6 +104,9 @@ _ENGLISH = {
     "properties.invalid": "Invalid",
     "status.ready": "Ready",
     "status.version": "Version {version}",
+    "status.fps": "FPS: {fps:.1f}",
+    "status.cursor.empty": "X: —  Y: —",
+    "status.cursor.position": "X: {x:.2f} mm  Y: {y:.2f} mm",
 }
 
 
@@ -203,6 +206,9 @@ _UKRAINIAN = {
     "properties.invalid": "Недійсний",
     "status.ready": "Готово",
     "status.version": "Версія {version}",
+    "status.fps": "FPS: {fps:.1f}",
+    "status.cursor.empty": "X: —  Y: —",
+    "status.cursor.position": "X: {x:.2f} мм  Y: {y:.2f} мм",
 }
 
 

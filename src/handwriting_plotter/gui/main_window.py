@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from handwriting_plotter.version import __version__
+
 from .backend import GuiBackend
 from .canvas import PageCanvas
 from .document import (
@@ -40,7 +42,6 @@ from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .workers import GenerationWorker
-from handwriting_plotter.version import __version__
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
 ROLE_VALUE = ROLE_KIND + 1
@@ -202,13 +203,39 @@ class MainWindow(QMainWindow):
         self.workspace_toolbar.addAction(self.markers_action)
 
     def _build_status_bar(self) -> None:
+        self._canvas_fps = 0.0
+        self._cursor_position = None
+        self.telemetry_label = QLabel()
+        self.telemetry_label.setObjectName("canvas-telemetry")
+        self.statusBar().addPermanentWidget(self.telemetry_label, 1)
         self.version_label = QLabel()
         self.version_label.setObjectName("application-version")
         self.statusBar().addPermanentWidget(self.version_label)
+        self._update_telemetry_label()
         self._update_version_label()
 
     def _update_version_label(self) -> None:
         self.version_label.setText(self._t("status.version").format(version=__version__))
+
+    def _update_telemetry_label(self) -> None:
+        if self._cursor_position is None:
+            coordinates = self._t("status.cursor.empty")
+        else:
+            coordinates = self._t("status.cursor.position").format(
+                x=self._cursor_position.x(),
+                y=self._cursor_position.y(),
+            )
+        self.telemetry_label.setText(
+            f"{self._t('status.fps').format(fps=self._canvas_fps)}  ·  {coordinates}"
+        )
+
+    def _on_canvas_fps_changed(self, fps: float) -> None:
+        self._canvas_fps = fps
+        self._update_telemetry_label()
+
+    def _on_cursor_position_changed(self, position) -> None:  # noqa: ANN001
+        self._cursor_position = position
+        self._update_telemetry_label()
 
     def _language_action(self, language: Language) -> QAction:
         action = QAction(self._t(f"language.{language}"), self)
@@ -275,6 +302,7 @@ class MainWindow(QMainWindow):
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
         self.workspace_toolbar.setWindowTitle(self._t("toolbar.workspace"))
+        self._update_telemetry_label()
         self._update_version_label()
         self.properties.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
@@ -288,6 +316,8 @@ class MainWindow(QMainWindow):
         self.project_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self.canvas.selection_changed.connect(self._on_canvas_selection_changed)
         self.canvas.objects_moved.connect(self._on_canvas_objects_moved)
+        self.canvas.fps_changed.connect(self._on_canvas_fps_changed)
+        self.canvas.cursor_position_changed.connect(self._on_cursor_position_changed)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
         self.properties.text_object_changed.connect(self._update_text_object)
         self.properties.grid_object_changed.connect(self._update_grid_object)

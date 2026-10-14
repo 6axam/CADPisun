@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtGui import QMouseEvent
 
 from handwriting_plotter.application.service import (
     GenerationRequest,
@@ -156,3 +159,33 @@ def test_grid_is_rendered_and_snap_can_apply_to_one_axis(qtbot) -> None:
     assert canvas._grid_items[grid.object_id].grid.color == "#123456"
     assert snapped.x() == pytest.approx(-1.2)
     assert snapped.y() == 0
+
+
+def test_canvas_reports_cursor_coordinates_and_measured_paint_rate(qtbot) -> None:
+    canvas = PageCanvas()
+    canvas.resize(700, 700)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.zoom_to_fit()
+    positions: list[QPointF | None] = []
+    rates: list[float] = []
+    canvas.cursor_position_changed.connect(positions.append)
+    canvas.fps_changed.connect(rates.append)
+
+    viewport_position = QPointF(canvas.mapFromScene(QPointF(30, 40)))
+    canvas.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove,
+        viewport_position,
+        viewport_position,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    ))
+    now = time.monotonic()
+    canvas._paint_timestamps.clear()
+    canvas._paint_timestamps.extend((now - 0.5, now))
+    canvas._publish_fps()
+
+    assert positions[-1].x() == pytest.approx(30, abs=0.5)
+    assert positions[-1].y() == pytest.approx(40, abs=0.5)
+    assert rates[-1] == pytest.approx(2.0, rel=0.1)

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import time
+from collections import deque
 from typing import Any, ClassVar
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -82,6 +84,8 @@ class PageCanvas(QGraphicsView):
 
     selection_changed = Signal(object)
     objects_moved = Signal(object, float, float)
+    cursor_position_changed = Signal(object)
+    fps_changed = Signal(float)
 
     PAGE_WIDTH_MM = 210.0
     PAGE_HEIGHT_MM = 297.0
@@ -100,7 +104,14 @@ class PageCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
         self.setBackgroundBrush(QColor(COLORS["window"]))
+        self._paint_timestamps: deque[float] = deque()
+        self._fps_timer = QTimer(self)
+        self._fps_timer.setInterval(500)
+        self._fps_timer.timeout.connect(self._publish_fps)
+        self._fps_timer.start()
         self._fit_mode = True
         self._production_item: SvgPageItem | None = None
         self._preview_item: SvgPageItem | None = None
@@ -346,8 +357,12 @@ class PageCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        scene_point = self.mapToScene(event.position().toPoint())
+        self.cursor_position_changed.emit(
+            QPointF(scene_point) if self._page_rect.contains(scene_point) else None
+        )
         if self._selection_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self._selection_current = self.mapToScene(event.position().toPoint())
+            self._selection_current = scene_point
             rect = QRectF(self._selection_origin, self._selection_current).normalized()
             if rect.width() >= 0.5 or rect.height() >= 0.5:
                 if self._move_initial_rects:
@@ -365,6 +380,10 @@ class PageCanvas(QGraphicsView):
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: ANN001, N802
+        self.cursor_position_changed.emit(None)
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self._selection_origin is not None:
@@ -472,3 +491,23 @@ class PageCanvas(QGraphicsView):
         super().resizeEvent(event)
         if self._fit_mode:
             self.zoom_to_fit()
+
+    def paintEvent(self, event) -> None:  # noqa: ANN001, N802
+        super().paintEvent(event)
+        now = time.monotonic()
+        self._paint_timestamps.append(now)
+        self._prune_paint_timestamps(now)
+
+    def _prune_paint_timestamps(self, now: float) -> None:
+        while self._paint_timestamps and now - self._paint_timestamps[0] > 1.0:
+            self._paint_timestamps.popleft()
+
+    def _publish_fps(self) -> None:
+        now = time.monotonic()
+        self._prune_paint_timestamps(now)
+        if len(self._paint_timestamps) < 2:
+            fps = 0.0
+        else:
+            elapsed = self._paint_timestamps[-1] - self._paint_timestamps[0]
+            fps = (len(self._paint_timestamps) - 1) / elapsed if elapsed > 0 else 0.0
+        self.fps_changed.emit(fps)
