@@ -2,6 +2,8 @@
 
 > **Установка без Git:** [пошаговая инструкция для Windows 10/11, Arch/Omarchy и Ubuntu](INSTALL.md) — скачивание ZIP, установка Python 3.12.12, PySide6 и запуск GUI.
 
+> **Project Frankenstein:** [план и текущий прогресс персонального рукописного workflow](docs/frankenstein/MASTER_PLAN.md).
+
 **Текущая сборка: `0.2.0+20261014.2`.** Номер отображается в нижней строке GUI
 и командой `uv run hplot version`, поэтому его можно сверить после загрузки ZIP.
 
