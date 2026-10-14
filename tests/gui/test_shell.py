@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings
 
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
+from handwriting_plotter.gui.theme import COLORS
 from handwriting_plotter.version import __version__
 
 
@@ -50,6 +51,22 @@ def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot) -> None:
     assert "FPS: 59.9" in window.telemetry_label.text()
     assert "X: 105.00 mm" in window.telemetry_label.text()
     assert "Y: 148.50 mm" in window.telemetry_label.text()
+
+
+def test_status_messages_use_distinct_operation_colors(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    for severity, color in (
+        ("info", COLORS["muted"]),
+        ("success", COLORS["success"]),
+        ("warning", COLORS["warning"]),
+        ("error", COLORS["danger"]),
+    ):
+        window._show_status(severity, severity)
+        assert window.statusBar().property("messageSeverity") == severity
+        assert color in window.statusBar().styleSheet()
+        assert window.statusBar().currentMessage() == severity
 
 
 def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> None:

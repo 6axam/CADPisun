@@ -41,6 +41,7 @@ from .exporting import export_artifact
 from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
+from .theme import COLORS
 from .workers import GenerationWorker
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
@@ -85,7 +86,7 @@ class MainWindow(QMainWindow):
         self.properties.show_page(self.controller.snapshot.page)
         self._restore_window_state()
         self._update_title()
-        self.statusBar().showMessage(self._t("status.ready"))
+        self._show_status(self._t("status.ready"))
 
     def _t(self, key: str) -> str:
         return tr(self.language, key)
@@ -217,6 +218,22 @@ class MainWindow(QMainWindow):
     def _update_version_label(self) -> None:
         self.version_label.setText(self._t("status.version").format(version=__version__))
 
+    def _show_status(self, message: str, severity: str = "info", timeout: int = 0) -> None:
+        colors = {
+            "info": COLORS["muted"],
+            "success": COLORS["success"],
+            "warning": COLORS["warning"],
+            "error": COLORS["danger"],
+        }
+        if severity not in colors:
+            raise ValueError(f"UNKNOWN_STATUS_SEVERITY:{severity}")
+        self.statusBar().setProperty("messageSeverity", severity)
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ color: {colors[severity]}; "
+            f"border-top: 1px solid {COLORS['border']}; }}"
+        )
+        self.statusBar().showMessage(message, timeout)
+
     def _update_telemetry_label(self) -> None:
         if self._cursor_position is None:
             coordinates = self._t("status.cursor.empty")
@@ -306,7 +323,7 @@ class MainWindow(QMainWindow):
         self._update_version_label()
         self.properties.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
-        self.statusBar().showMessage(self._t("status.ready"), 2500)
+        self._show_status(self._t("status.ready"), timeout=2500)
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -406,9 +423,9 @@ class MainWindow(QMainWindow):
         self._update_title()
         if self.generated_revision is not None and self.generated_revision != revision:
             self._update_export_actions()
-            self.statusBar().showMessage("Project changed · generated preview is stale", 4000)
+            self._show_status("Project changed · generated preview is stale", "warning", 4000)
             return
-        self.statusBar().showMessage(f"Project changed · revision {revision}", 2500)
+        self._show_status(f"Project changed · revision {revision}", timeout=2500)
 
     def _on_selection_changed(self, current: QTreeWidgetItem | None, previous=None) -> None:  # noqa: ANN001
         if current is None or self._refreshing_tree:
@@ -527,12 +544,12 @@ class MainWindow(QMainWindow):
         self.generated_result = None
         self.generated_revision = None
         self._update_export_actions()
-        self.statusBar().showMessage(message)
+        self._show_status(message)
 
     def _regenerate_after_change(self) -> None:
         if not any(isinstance(item, TextObject) and item.visible for item in self.controller.snapshot.objects):
             self.console.setPlainText("All text objects are hidden.")
-            self.statusBar().showMessage("All text objects are hidden", 4000)
+            self._show_status("All text objects are hidden", timeout=4000)
             return
         if self._generation_worker is not None:
             self._regeneration_timer.start()
@@ -554,7 +571,7 @@ class MainWindow(QMainWindow):
             self.controller.move_objects(selected, dx_mm, dy_mm)
         except ValueError as exc:
             self.canvas.set_object_frames(self.controller.snapshot.objects, self._selected_object_ids_copy())
-            self.statusBar().showMessage(str(exc), 5000)
+            self._show_status(str(exc), "error", 5000)
             return
         if not moving_text:
             self._preserve_generation_revision(had_current_generation)
@@ -565,7 +582,7 @@ class MainWindow(QMainWindow):
         try:
             self.controller.update_text_object(object_id, **changes)
         except ValueError as exc:
-            self.statusBar().showMessage(str(exc), 5000)
+            self._show_status(str(exc), "error", 5000)
 
     def _update_grid_object(self, object_id: str, changes: dict) -> None:
         had_current_generation = (
@@ -575,7 +592,7 @@ class MainWindow(QMainWindow):
         try:
             self.controller.update_grid_object(object_id, **changes)
         except ValueError as exc:
-            self.statusBar().showMessage(str(exc), 5000)
+            self._show_status(str(exc), "error", 5000)
             return
         self._preserve_generation_revision(had_current_generation)
 
@@ -588,7 +605,7 @@ class MainWindow(QMainWindow):
         try:
             self.controller.update_page(**changes)
         except ValueError as exc:
-            self.statusBar().showMessage(str(exc), 5000)
+            self._show_status(str(exc), "error", 5000)
 
     def add_text_object(self) -> None:
         item = self.controller.add_text_object()
@@ -655,12 +672,13 @@ class MainWindow(QMainWindow):
             if loaded.generation_result is not None:
                 self._display_generation_result(self.controller.revision, loaded.generation_result)
                 self.console.appendPlainText(f"\nRestored generated page from {filename}")
-                self.statusBar().showMessage("Project and generated page restored", 5000)
+                self._show_status("Project and generated page restored", "success", 5000)
             else:
                 self.console.setPlainText(f"Opened {filename}")
                 if loaded.cache_warning:
                     self.console.appendPlainText(f"Ignored invalid generated cache: {loaded.cache_warning}")
         except Exception as exc:
+            self._show_status(str(exc), "error", 7000)
             QMessageBox.critical(self, "Could not open project", str(exc))
 
     def save_project(self) -> None:
@@ -687,8 +705,9 @@ class MainWindow(QMainWindow):
             )
             save_project(path, self.controller.snapshot, current_result)
             self.controller.mark_saved(path)
-            self.statusBar().showMessage(f"Saved {path}", 4000)
+            self._show_status(f"Saved {path}", "success", 4000)
         except Exception as exc:
+            self._show_status(str(exc), "error", 7000)
             QMessageBox.critical(self, "Could not save project", str(exc))
 
     def _update_title(self) -> None:
@@ -704,7 +723,7 @@ class MainWindow(QMainWindow):
         worker.signals.failed.connect(self._generation_failed)
         self._generation_worker = worker
         self.generate_action.setEnabled(False)
-        self.statusBar().showMessage("Generating page…")
+        self._show_status("Generating page…")
         self.console.setPlainText(f"Generation started for revision {revision}.")
         self.thread_pool.start(worker)
 
@@ -715,10 +734,10 @@ class MainWindow(QMainWindow):
             self.console.appendPlainText(
                 f"Discarded stale result for revision {revision}; current revision is {self.controller.revision}."
             )
-            self.statusBar().showMessage("Discarded stale generation result", 5000)
+            self._show_status("Discarded stale generation result", "warning", 5000)
             return
         self._display_generation_result(revision, result)
-        self.statusBar().showMessage("Generation complete", 5000)
+        self._show_status("Generation complete", "success", 5000)
 
     def _display_generation_result(self, revision: int, result) -> None:  # noqa: ANN001
         self.generated_result = result
@@ -770,7 +789,7 @@ class MainWindow(QMainWindow):
         self.diagnostics.setPlainText(friendly)
         self.console.setPlainText(details)
         self.output_tabs.setCurrentWidget(self.diagnostics)
-        self.statusBar().showMessage("Generation failed — see Diagnostics", 7000)
+        self._show_status("Generation failed — see Diagnostics", "error", 7000)
 
     def _update_export_actions(self) -> None:
         current = self.generated_result is not None and self.generated_revision == self.controller.revision
@@ -779,6 +798,7 @@ class MainWindow(QMainWindow):
 
     def _export(self, artifact: str) -> None:
         if self.generated_result is None or self.generated_revision != self.controller.revision:
+            self._show_status("Generate the current project before exporting", "warning", 5000)
             QMessageBox.information(self, "Generate first", "Generate the current project before exporting.")
             return
         specifications = {
@@ -793,9 +813,10 @@ class MainWindow(QMainWindow):
             return
         try:
             export_artifact(self.generated_result, artifact, Path(filename))
-            self.statusBar().showMessage(f"Exported {filename}", 5000)
+            self._show_status(f"Exported {filename}", "success", 5000)
             self.console.appendPlainText(f"Exported {artifact} to {filename}")
         except Exception as exc:
+            self._show_status(str(exc), "error", 7000)
             QMessageBox.critical(self, "Export failed", str(exc))
 
     def _virtual_profile_info(self) -> None:

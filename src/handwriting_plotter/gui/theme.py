@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-
 COLORS = {
     "window": "#17191d",
     "panel": "#202329",
@@ -16,6 +15,7 @@ COLORS = {
     "accent": "#4b8df8",
     "accent_hover": "#64a0ff",
     "danger": "#ef6b73",
+    "success": "#4ec98b",
     "warning": "#e6b85c",
     "paper": "#f8f8f6",
 }
