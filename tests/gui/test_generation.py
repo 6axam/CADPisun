@@ -121,6 +121,38 @@ def test_grid_edits_preserve_current_generated_result(qtbot) -> None:
         window.controller.reset(window.controller.snapshot)
 
 
+def test_generation_affecting_edits_mark_preview_stale_until_undone(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.controller.reset(composition_project())
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    item = window.controller.snapshot.objects[0]
+    assert not window.canvas.preview_is_stale
+
+    changes = (
+        lambda: window.controller.update_text_object(item.object_id, text="Changed text"),
+        lambda: window.controller.update_text_object(item.object_id, x_height_mm=4.25),
+        lambda: window.controller.update_text_object(item.object_id, style_revision="9.9.9"),
+        lambda: window.controller.update_page(margin_left_mm=16.0),
+    )
+    for change in changes:
+        change()
+        assert window.canvas.preview_is_stale
+        assert window.canvas.has_artifact
+        assert window.canvas._stale_banner_item.isVisible()
+        assert all(not action.isEnabled() for action in window.export_actions)
+
+        window.controller.undo_stack.undo()
+        assert not window.canvas.preview_is_stale
+        assert not window.canvas._stale_banner_item.isVisible()
+        assert all(action.isEnabled() for action in window.export_actions)
+
+    window.controller.reset(window.controller.snapshot)
+
+
 def test_missing_glyph_fails_before_replacing_gui_result(qtbot) -> None:
     from handwriting_plotter.gui.main_window import MainWindow
 

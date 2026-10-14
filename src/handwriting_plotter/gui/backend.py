@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from handwriting_plotter.application.desktop import (
     CompositionRequest,
     CompositionTextBlock,
     DesktopApplicationAdapter,
 )
 from handwriting_plotter.application.service import GenerationResult
+from handwriting_plotter.domain.models import canonical_hash
 from handwriting_plotter.layout.pages import PageSpec
 
 from .document import ProjectSnapshot, TextObject
@@ -42,6 +45,17 @@ def composition_request(snapshot: ProjectSnapshot) -> CompositionRequest:
         for item in snapshot.objects if isinstance(item, TextObject) and item.visible
     )
     return CompositionRequest(snapshot.project_id, page_spec, blocks)
+
+
+def generation_source_hash(snapshot: ProjectSnapshot) -> str:
+    """Hash only the project fields consumed by the generation backend."""
+
+    request = composition_request(snapshot)
+    return canonical_hash({
+        "project_id": request.project_id,
+        "page_spec": asdict(request.page_spec),
+        "blocks": [asdict(block) for block in request.blocks],
+    })
 
 
 class GuiBackend:

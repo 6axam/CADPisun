@@ -111,6 +111,7 @@ _ENGLISH = {
     "status.progress.complete": "Generation complete",
     "status.progress.stopped": "Generation stopped",
     "status.progress.failed": "Generation failed",
+    "canvas.preview_stale": "PREVIEW OUT OF DATE · GENERATE PAGE",
 }
 
 
@@ -217,6 +218,7 @@ _UKRAINIAN = {
     "status.progress.complete": "Генерацію завершено",
     "status.progress.stopped": "Генерацію зупинено",
     "status.progress.failed": "Помилка генерації",
+    "canvas.preview_stale": "ПОПЕРЕДНІЙ ПЕРЕГЛЯД ЗАСТАРІВ · ЗГЕНЕРУЙТЕ СТОРІНКУ",
 }
 
 

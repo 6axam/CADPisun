@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from handwriting_plotter.version import __version__
 
-from .backend import GuiBackend
+from .backend import GuiBackend, generation_source_hash
 from .canvas import PageCanvas
 from .document import (
     DocumentController,
@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.generated_result = None
         self.generated_revision: int | None = None
+        self.generated_source_hash: str | None = None
         self._generation_worker: GenerationWorker | None = None
         self._regeneration_pending = False
         self._regeneration_timer = QTimer(self)
@@ -386,6 +387,10 @@ class MainWindow(QMainWindow):
             self.generation_progress.setFormat(self._t(progress_key))
         self._update_telemetry_label()
         self._update_version_label()
+        self.canvas.set_preview_stale(
+            self.canvas.preview_is_stale,
+            self._t("canvas.preview_stale"),
+        )
         self.properties.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
         self._show_status(self._t("status.ready"), timeout=2500)
@@ -486,10 +491,21 @@ class MainWindow(QMainWindow):
         if focus is None or not self.properties.isAncestorOf(focus):
             self._show_selected_properties()
         self._update_title()
-        if self.generated_revision is not None and self.generated_revision != revision:
+        if self.generated_result is not None:
+            current = self.generated_source_hash == generation_source_hash(snapshot)
+            self.canvas.set_preview_stale(
+                not current,
+                self._t("canvas.preview_stale"),
+            )
+            if current:
+                self.generated_revision = revision
+                self._update_export_actions()
+            else:
+                self._update_export_actions()
+                self._show_status("Project changed · generated preview is stale", "warning", 4000)
+                return
+        elif self.generated_revision is not None and self.generated_revision != revision:
             self._update_export_actions()
-            self._show_status("Project changed · generated preview is stale", "warning", 4000)
-            return
         self._show_status(f"Project changed · revision {revision}", timeout=2500)
 
     def _on_selection_changed(self, current: QTreeWidgetItem | None, previous=None) -> None:  # noqa: ANN001
@@ -608,6 +624,7 @@ class MainWindow(QMainWindow):
         self.canvas.clear_artifacts()
         self.generated_result = None
         self.generated_revision = None
+        self.generated_source_hash = None
         self._update_export_actions()
         self._show_status(message)
 
@@ -718,6 +735,7 @@ class MainWindow(QMainWindow):
         self.canvas.clear_artifacts()
         self.generated_result = None
         self.generated_revision = None
+        self.generated_source_hash = None
         self._update_export_actions()
         self.console.setPlainText("New project created.")
 
@@ -737,6 +755,7 @@ class MainWindow(QMainWindow):
             self.canvas.clear_artifacts()
             self.generated_result = None
             self.generated_revision = None
+            self.generated_source_hash = None
             self._update_export_actions()
             if loaded.generation_result is not None:
                 self._display_generation_result(self.controller.revision, loaded.generation_result)
@@ -814,10 +833,12 @@ class MainWindow(QMainWindow):
     def _display_generation_result(self, revision: int, result) -> None:  # noqa: ANN001
         self.generated_result = result
         self.generated_revision = revision
+        self.generated_source_hash = generation_source_hash(self.controller.snapshot)
         self._update_export_actions()
         files = result.files
         self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
                                   files["page-0001.plan.json"])
+        self.canvas.set_preview_stale(False, self._t("canvas.preview_stale"))
         diagnostics = result.report.get("diagnostics", [])
         styles = result.report.get("styles", [])
         validation_lines = [

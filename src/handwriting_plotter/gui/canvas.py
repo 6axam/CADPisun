@@ -9,7 +9,7 @@ from collections import deque
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSimpleTextItem,
     QGraphicsView,
 )
 
@@ -134,6 +135,7 @@ class PageCanvas(QGraphicsView):
         self.scene().addItem(self._selection_item)
         self._show_travel = False
         self._show_markers = False
+        self._preview_is_stale = False
         self._page_rect = QRectF(0.0, 0.0, self.PAGE_WIDTH_MM, self.PAGE_HEIGHT_MM)
         self._build_page()
 
@@ -149,6 +151,10 @@ class PageCanvas(QGraphicsView):
     def zoom_factor(self) -> float:
         return self.transform().m11()
 
+    @property
+    def preview_is_stale(self) -> bool:
+        return self._preview_is_stale
+
     def _build_page(self) -> None:
         self.scene().setSceneRect(-25.0, -25.0, self.PAGE_WIDTH_MM + 50.0, self.PAGE_HEIGHT_MM + 50.0)
         paper = QGraphicsRectItem(self._page_rect)
@@ -163,6 +169,22 @@ class PageCanvas(QGraphicsView):
         self.scene().addItem(paper)
         self._paper_item = paper
         self.set_margins(15.0, 15.0, 15.0, 15.0)
+        self._stale_banner_item = QGraphicsRectItem(12.0, 8.0, 186.0, 13.0)
+        self._stale_banner_item.setBrush(QColor(245, 158, 11, 225))
+        self._stale_banner_item.setPen(QPen(Qt.PenStyle.NoPen))
+        self._stale_banner_item.setZValue(30)
+        self._stale_banner_item.hide()
+        self.scene().addItem(self._stale_banner_item)
+        self._stale_banner_text = QGraphicsSimpleTextItem("PREVIEW OUT OF DATE · GENERATE PAGE")
+        font = QFont()
+        font.setPointSizeF(4.5)
+        font.setBold(True)
+        self._stale_banner_text.setFont(font)
+        self._stale_banner_text.setBrush(QColor("#201600"))
+        self._stale_banner_text.setPos(17.0, 9.1)
+        self._stale_banner_text.setZValue(31)
+        self._stale_banner_text.hide()
+        self.scene().addItem(self._stale_banner_text)
 
     def set_margins(self, left: float, top: float, right: float, bottom: float) -> None:
         rect = QRectF(left, top, self.PAGE_WIDTH_MM - left - right, self.PAGE_HEIGHT_MM - top - bottom)
@@ -197,6 +219,18 @@ class PageCanvas(QGraphicsView):
         self._production_item = None
         self._preview_item = None
         self._marker_items.clear()
+        self.set_preview_stale(False)
+
+    def set_preview_stale(self, stale: bool, label: str | None = None) -> None:
+        self._preview_is_stale = bool(stale and self.has_artifact)
+        if label is not None:
+            self._stale_banner_text.setText(label)
+        opacity = 0.38 if self._preview_is_stale else 1.0
+        for item in (self._production_item, self._preview_item):
+            if item is not None:
+                item.setOpacity(opacity)
+        self._stale_banner_item.setVisible(self._preview_is_stale)
+        self._stale_banner_text.setVisible(self._preview_is_stale)
 
     def set_object_frames(self, objects, selected_ids=()) -> None:  # noqa: ANN001
         for item in self._object_frames.values():
