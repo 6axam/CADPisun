@@ -6,13 +6,14 @@ Last updated: 2026-10-14.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 04 — capture queues and coverage dashboard
-- Last completed phase: 03 — integrated Handwriting Studio
+- Phase: 05 — glyph variant management
+- Last completed phase: 04 — capture queues and coverage dashboard
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
-- Phase 03 commit: see the commit named `feat: add integrated Handwriting Studio workspace` (recorded at the next checkpoint).
-- Next concrete action: make queue state, previous/current/next navigation, required variant count, and coverage progress persistent.
+- Phase 03 commit: `1dd1204`
+- Phase 04 commit: see the commit named `feat: add glyph queues and handwriting coverage dashboard` (recorded at the next checkpoint).
+- Next concrete action: add side-by-side variant browsing, preferred selection, draft deletion/rejection, and preserved raw history.
 
 ## Validation ledger
 
@@ -25,6 +26,8 @@ Last updated: 2026-10-14.
 | 2026-10-14 | Phase 02 full Linux headless regression | 164 passed in 12.40 s |
 | 2026-10-14 | Phase 03 focused Studio/Qt shell suite | 15 passed in 3.27 s |
 | 2026-10-14 | Phase 03 full Linux headless regression | 167 passed in 12.18 s |
+| 2026-10-14 | Phase 04 queue/Studio focused suites | 7 passed in 1.24 s |
+| 2026-10-14 | Phase 04 full Linux headless regression | 171 passed in 13.81 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -71,9 +74,22 @@ shows actual sample counts and validation, and reopens saved records by label
 after a new widget/process lifetime. All visible capture, view, guide, language,
 search, save, and retrieval controls are connected to real behavior.
 
-### Phase 04 — IN_PROGRESS
+### Phase 04 — DONE
 
-- Promote the glyph list into a persistent configurable queue.
-- Add previous/current/next, skip, retry, save-and-next, required variants, and coverage totals.
-- Keep queue state as editable metadata outside immutable raw captures.
+- Promoted the glyph list into a persistent configurable queue.
+- Added previous/current/next, skip, retry, save-and-next, required variants, and coverage totals.
+- Kept queue state as editable metadata outside immutable raw captures.
+
+The persistent queue supports previous/next, skip, retry, save-and-next, open,
+reject and resume. Ukrainian, Russian, English and custom token sets share one
+strict queue model. Coverage is calculated from actual immutable records after
+draft rejection and the required experimental variant count is configurable.
+The acceptance test records `а м и н о` in sequence and resumes at `о` in a new
+Studio instance.
+
+### Phase 05 — IN_PROGRESS
+
+- Add a visible per-token variant browser with thumbnails and selection.
+- Move context/preferred/rejected/deleted state into a versioned editable draft catalog.
+- Preserve raw hashes and review history for every metadata revision.
 

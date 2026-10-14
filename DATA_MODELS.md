@@ -251,6 +251,13 @@ points/session, 100 000 samples/session. Raw bytes сохраняются оди
 SHA-256 canonical representation; изменение создаёт другой hash, а processed
 derivatives позже ссылаются на исходный hash.
 
+Редактируемая очередь хранится отдельно как `hp-capture-queue/1.0`: queue_id,
+name, ordered unique Unicode tokens, current_index, required_variants,
+skipped_tokens и rejected_capture_hashes. Reject исключает hash из draft
+coverage, но не удаляет и не меняет raw capture. Queue JSON записывается
+атомарно и восстанавливается после перезапуска; coverage заново считается по
+проверенным raw records и queue metadata.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

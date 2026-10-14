@@ -229,6 +229,12 @@ Files `capture/{models,repository}.py` не импортируют Qt. `serializ
 resource limits, event/time/ID order, coordinate frame и capability mismatch не
 исправляются молча.
 
+`CaptureQueueStore` читает/атомарно заменяет только editable
+`hp-capture-queue/1.0` metadata. Queue navigation не переписывает raw captures;
+skip и rejected hashes являются явными review decisions. Coverage dashboard
+считает variants из `CaptureRepository` за вычетом rejected hashes и применяет
+настраиваемый required_variants без продуктового auto-approval.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

@@ -112,8 +112,45 @@ def test_studio_actions_and_ukrainian_labels_are_functional(qtbot, tmp_path: Pat
     ]
     assert visible == ["ґ"]
 
+    studio.queue_preset.setCurrentIndex(studio.queue_preset.findData("en"))
+    assert studio.queue_state.tokens[0] == "a"
+    assert studio.queue_state.tokens[-1] == "z"
+
     studio.set_language("uk")
     assert studio.save_button.text() == "Зберегти зразок"
     assert studio.collection_title.text() == "Колекція знаків"
     assert "Оригінальні точки" in studio.diagnostics.toPlainText()
+
+
+def test_custom_queue_captures_five_tokens_and_resumes_progress(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1100, 700)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.custom_queue.setText("а м и н о")
+    studio.apply_queue_button.click()
+    studio.required_variants.setValue(1)
+
+    for expected in ("а", "м", "и", "н", "о"):
+        assert studio.label_edit.text() == expected
+        _draw_sample(studio)
+        assert studio.save_and_next() is not None
+
+    assert [record.session.samples[0].label for record in studio.records] == ["а", "м", "и", "н", "о"]
+    assert studio.coverage_progress.value() == 5
+    assert "Missing: 0" in studio.coverage_summary.text()
+    assert studio.queue_state.current_index == 4
+
+    resumed = HandwritingStudio(tmp_path)
+    qtbot.addWidget(resumed)
+    assert resumed.queue_state.tokens == ("а", "м", "и", "н", "о")
+    assert resumed.queue_state.current_index == 4
+    assert resumed.label_edit.text() == "о"
+    assert resumed.coverage_progress.value() == 5
+
+    assert resumed.open_latest_for_label("о")
+    digest = resumed.hash_value.text()
+    assert resumed.reject_current_sample()
+    assert digest in resumed.queue_state.rejected_capture_hashes
+    assert resumed.coverage_progress.value() == 4
 

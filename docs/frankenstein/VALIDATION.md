@@ -56,6 +56,19 @@ The integration test saves a two-stroke Ukrainian sample, leaves and returns to
 the workspace, constructs a fresh Studio instance, and reopens byte-verified raw
 data from the user-data directory.
 
+### Phase 04 queues and coverage
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_queue.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `7 passed in 1.24s`; full regression `171 passed in 13.81s`.
+The five-token test uses the UI workflow, persists queue progress, reconstructs
+the Studio, verifies zero missing tokens, then rejects one hash and verifies
+coverage decreases without deleting the raw capture.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.
