@@ -107,6 +107,7 @@ class DesktopApplicationAdapter:
         lines: list[PageLine] = []
         coverage_count = 0
         style_records: dict[tuple[str, str], dict[str, Any]] = {}
+        loaded_styles: dict[tuple[str, str], Any] = {}
         object_bounds: list[tuple[str, Bounds]] = []
         diagnostics: list[str] = []
         files: dict[str, bytes] = {
@@ -118,7 +119,13 @@ class DesktopApplicationAdapter:
                 diagnostics.append(f"EMPTY_TEXT_OBJECT:{block.object_id}")
                 continue
             document = normalize(block.text)
-            style = self.style_repository.load(block.style_id, block.style_revision)
+            style_key = (block.style_id, block.style_revision)
+            style = loaded_styles.get(style_key)
+            if style is None:
+                # A load verifies every file hash. Reuse the immutable snapshot only
+                # inside this build; the next build verifies the package again.
+                style = self.style_repository.load(*style_key)
+                loaded_styles[style_key] = style
             coverage = check_coverage(document, style)
             if not coverage.passed:
                 missing = ",".join(f"{item.key}@{item.original_spans}" for item in coverage.missing)
