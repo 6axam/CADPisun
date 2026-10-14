@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -49,6 +51,7 @@ class PropertiesPanel(QWidget):
         self._shown_style: StyleSummary | None = None
         self._loading = False
         self._labels: dict[str, QLabel] = {}
+        self._groups: dict[str, QGroupBox] = {}
         self.stack = QStackedWidget()
         self.page_widget = self._build_page_widget()
         self.text_widget = self._build_text_widget()
@@ -67,11 +70,29 @@ class PropertiesPanel(QWidget):
         form.addRow(label, field)
         self._labels[key] = label
 
+    def _add_group(self, layout: QVBoxLayout, key: str, fields: list[tuple[str, QWidget]]) -> QGroupBox:
+        group = QGroupBox()
+        grid = QGridLayout(group)
+        grid.setContentsMargins(8, 10, 8, 8)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(4)
+        for index, (label_key, field) in enumerate(fields):
+            row = (index // 2) * 2
+            column = index % 2
+            label = QLabel()
+            label.setBuddy(field)
+            grid.addWidget(label, row, column)
+            grid.addWidget(field, row + 1, column)
+            self._labels[label_key] = label
+        layout.addWidget(group)
+        self._groups[key] = group
+        return group
+
     def _build_page_widget(self) -> QWidget:
         widget = QWidget()
-        form = QFormLayout(widget)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.page_format = QLabel()
-        self._add_row(form, "properties.format", self.page_format)
         self.page_fields = {
             "margin_left_mm": _millimetre_spin(0, 100),
             "margin_right_mm": _millimetre_spin(0, 100),
@@ -80,27 +101,35 @@ class PropertiesPanel(QWidget):
             "paragraph_gap_mm": _millimetre_spin(0, 50),
             "pen_width_mm": _millimetre_spin(0.05, 3),
         }
-        for name, field in self.page_fields.items():
+        for field in self.page_fields.values():
             field.valueChanged.connect(self._emit_page)
-            key = {
-                "margin_left_mm": "properties.margin_left",
-                "margin_right_mm": "properties.margin_right",
-                "margin_top_mm": "properties.margin_top",
-                "margin_bottom_mm": "properties.margin_bottom",
-                "paragraph_gap_mm": "properties.paragraph_gap",
-                "pen_width_mm": "properties.pen_width",
-            }[name]
-            self._add_row(form, key, field)
+        self._add_group(layout, "properties.group.page", [("properties.format", self.page_format)])
+        self._add_group(layout, "properties.group.margins", [
+            ("properties.margin_left", self.page_fields["margin_left_mm"]),
+            ("properties.margin_right", self.page_fields["margin_right_mm"]),
+            ("properties.margin_top", self.page_fields["margin_top_mm"]),
+            ("properties.margin_bottom", self.page_fields["margin_bottom_mm"]),
+        ])
+        self._add_group(layout, "properties.group.layout", [
+            ("properties.paragraph_gap", self.page_fields["paragraph_gap_mm"]),
+            ("properties.pen_width", self.page_fields["pen_width_mm"]),
+        ])
+        layout.addStretch(1)
         return widget
 
     def _build_text_widget(self) -> QWidget:
         widget = QWidget()
-        form = QFormLayout(widget)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.name_field = QLineEdit()
         self.text_field = QPlainTextEdit()
-        self.text_field.setMinimumHeight(150)
+        self.text_field.setMinimumHeight(100)
         self.x_field = _millimetre_spin(0, 209.9)
         self.y_field = _millimetre_spin(0, 296.9)
+        self.frame_x_field = _millimetre_spin(0, 209.9)
+        self.frame_y_field = _millimetre_spin(0, 296.9)
+        self.frame_width_field = _millimetre_spin(0.01, 210)
+        self.frame_height_field = _millimetre_spin(0.01, 297)
         self.x_height_field = _millimetre_spin(0.5, 30)
         self.line_pitch_field = _millimetre_spin(0.5, 100)
         self.style_field = QComboBox()
@@ -113,19 +142,37 @@ class PropertiesPanel(QWidget):
         self.realism_field.setRange(0, 1)
         self.realism_field.setSingleStep(0.05)
         self.realism_field.setDecimals(2)
-        self._add_row(form, "properties.name", self.name_field)
-        self._add_row(form, "properties.text", self.text_field)
-        self._add_row(form, "properties.x", self.x_field)
-        self._add_row(form, "properties.y", self.y_field)
-        self._add_row(form, "properties.x_height", self.x_height_field)
-        self._add_row(form, "properties.line_pitch", self.line_pitch_field)
-        self._add_row(form, "properties.style", self.style_field)
-        self._add_row(form, "properties.seed", self.seed_field)
-        self._add_row(form, "properties.realism", self.realism_field)
+        self._add_group(layout, "properties.group.content", [
+            ("properties.name", self.name_field),
+            ("properties.text", self.text_field),
+        ])
+        self._add_group(layout, "properties.group.position", [
+            ("properties.text_origin", self.x_field),
+            ("properties.y", self.y_field),
+        ])
+        self._add_group(layout, "properties.group.frame", [
+            ("properties.frame_x", self.frame_x_field),
+            ("properties.frame_y", self.frame_y_field),
+            ("properties.frame_width", self.frame_width_field),
+            ("properties.frame_height", self.frame_height_field),
+        ])
+        self._add_group(layout, "properties.group.typography", [
+            ("properties.x_height", self.x_height_field),
+            ("properties.line_pitch", self.line_pitch_field),
+        ])
+        self._add_group(layout, "properties.group.style", [
+            ("properties.style", self.style_field),
+            ("properties.realism", self.realism_field),
+            ("properties.seed", self.seed_field),
+        ])
+        layout.addStretch(1)
         self.name_field.editingFinished.connect(self._emit_text)
         self.text_field.textChanged.connect(self._emit_text)
-        for field in (self.x_field, self.y_field, self.x_height_field, self.line_pitch_field,
-                      self.realism_field):
+        for field in (
+            self.x_field, self.y_field, self.frame_x_field, self.frame_y_field,
+            self.frame_width_field, self.frame_height_field, self.x_height_field,
+            self.line_pitch_field, self.realism_field,
+        ):
             field.valueChanged.connect(self._emit_text)
         self.seed_field.editingFinished.connect(self._emit_text)
         self.style_field.currentIndexChanged.connect(self._emit_text)
@@ -151,6 +198,8 @@ class PropertiesPanel(QWidget):
         self.page_format.setText(tr(self.language, "properties.a4"))
         for key, label in self._labels.items():
             label.setText(tr(self.language, key))
+        for key, group in self._groups.items():
+            group.setTitle(tr(self.language, key))
         if self._shown_style is not None:
             self._show_style_status(self._shown_style)
 
@@ -171,6 +220,10 @@ class PropertiesPanel(QWidget):
         self.text_field.setPlainText(item.text)
         self.x_field.setValue(item.x_mm)
         self.y_field.setValue(item.y_mm)
+        self.frame_x_field.setValue(item.frame_x_mm)
+        self.frame_y_field.setValue(item.frame_y_mm)
+        self.frame_width_field.setValue(item.frame_width_mm)
+        self.frame_height_field.setValue(item.frame_height_mm)
         self.x_height_field.setValue(item.x_height_mm)
         self.line_pitch_field.setValue(item.line_pitch_mm)
         index = self.style_field.findData(f"{item.style_id}\0{item.style_revision}")
@@ -211,6 +264,10 @@ class PropertiesPanel(QWidget):
             "text": self.text_field.toPlainText(),
             "x_mm": self.x_field.value(),
             "y_mm": self.y_field.value(),
+            "frame_x_mm": self.frame_x_field.value(),
+            "frame_y_mm": self.frame_y_field.value(),
+            "frame_width_mm": self.frame_width_field.value(),
+            "frame_height_mm": self.frame_height_field.value(),
             "x_height_mm": self.x_height_field.value(),
             "line_pitch_mm": self.line_pitch_field.value(),
             "style_id": style_id,

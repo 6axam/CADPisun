@@ -228,3 +228,34 @@ def test_seed_property_preserves_full_unsigned_64_bit_precision(qtbot) -> None:
     panel.realism_field.setValue(0.5)
 
     assert emitted[-1]["seed"] == seed
+
+
+def test_text_properties_group_pairs_and_edit_independent_frame(qtbot) -> None:
+    from handwriting_plotter.gui.properties import PropertiesPanel
+    from handwriting_plotter.gui.styles import discover_styles
+
+    panel = PropertiesPanel(discover_styles())
+    qtbot.addWidget(panel)
+    item = TextObject(
+        object_id="frame-properties",
+        name="Frame",
+        x_mm=12,
+        y_mm=18,
+        frame_x_mm=20,
+        frame_y_mm=30,
+        frame_width_mm=70,
+        frame_height_mm=40,
+    )
+    emitted: list[dict] = []
+    panel.text_object_changed.connect(lambda _object_id, changes: emitted.append(changes))
+
+    panel.show_text_object(item)
+    frame_layout = panel._groups["properties.group.frame"].layout()
+    x_position = frame_layout.getItemPosition(frame_layout.indexOf(panel.frame_x_field))
+    y_position = frame_layout.getItemPosition(frame_layout.indexOf(panel.frame_y_field))
+    panel.frame_width_field.setValue(65)
+
+    assert x_position[0] == y_position[0]
+    assert x_position[1] != y_position[1]
+    assert emitted[-1]["frame_width_mm"] == 65
+    assert emitted[-1]["x_mm"] == 12
