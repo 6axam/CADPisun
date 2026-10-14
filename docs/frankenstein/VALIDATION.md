@@ -31,6 +31,18 @@ QT_QPA_PLATFORM=offscreen uv run pytest -q
 
 Results: `10 passed in 0.37s`; full regression `160 passed in 12.44s`.
 
+### Phase 02 Qt pointer capture
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q tests/gui/test_capture_widget.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `4 passed in 0.52s`; full regression `164 passed in 12.40s`.
+The automated suite used Qt mouse events and controlled pen-event translation;
+no physical tablet/touch hardware was available, so hardware-specific event
+delivery remains a release validation item.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.
