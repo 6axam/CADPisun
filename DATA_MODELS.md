@@ -228,6 +228,29 @@ Canonical hash исключает created_at и путь output. Semantic IDs д
 
 Этап II: `assets/<sha256>.<extension>` и SQLite catalog. Таблицы: assets, regions, transcriptions, reconstruction_candidates, correction_events, style_revisions, variant_refs, dataset_snapshots, model_records, jobs. FK включены, один writer, транзакция на correction/revision publish, row revision для optimistic concurrency. Миграции через user_version, до изменения backup; файлы сначала атомарно сохраняются, затем каталог ссылается на них. Непривязанные blobs удаляются только явной сборкой мусора.
 
+### 9.2 Raw online capture v1
+
+`hp-capture/1.0` — canonical UTF-8 JSON для неизменяемых записей реального
+указателя. Корень `CaptureSession` содержит session_id, UTC creation time,
+`DeviceCapabilities`, ordered samples и namespaced extensions. Каждый
+`CaptureSample` хранит NFC label, classification (`glyph|sequence`), собственный
+`CoordinateReference`, `WritingGuides`, provenance и ordered strokes.
+
+Raw frame использует logical pixels, origin=top_left, x→right, y→down; width,
+height и device_pixel_ratio записываются явно. Это не PageFrame mm и не
+GlyphFrame. `CaptureStroke` начинается `down`, заканчивается `up`, `cancel` либо
+явным interrupted move и содержит ordered unique points. Point хранит x/y,
+event, pointer type и nullable elapsed_s/pressure. `None` означает отсутствие
+измерения; нулевое давление и нулевое monotonic elapsed time остаются настоящими
+значениями. Mouse pressure не фабрикуется.
+
+Все coordinates/measurements finite, времена всего sample nondecreasing и либо
+есть у всех points, либо отсутствуют. IDs samples/strokes/points уникальны в
+session. Ограничения: 32 MiB/file, 250 000 points/stroke, 1 000 000
+points/session, 100 000 samples/session. Raw bytes сохраняются один раз по
+SHA-256 canonical representation; изменение создаёт другой hash, а processed
+derivatives позже ссылаются на исходный hash.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

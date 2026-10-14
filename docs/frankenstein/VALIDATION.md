@@ -22,6 +22,15 @@ QT_QPA_PLATFORM=offscreen uv run pytest -q
 
 Result: `150 passed in 13.38s`.
 
+### Phase 01 raw capture format
+
+```bash
+uv run pytest -q tests/capture/test_capture_format.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `10 passed in 0.37s`; full regression `160 passed in 12.44s`.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

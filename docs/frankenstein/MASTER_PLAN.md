@@ -7,8 +7,8 @@ States: `TODO`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 | Phase | Deliverable | Depends on | Acceptance evidence | State |
 |---|---|---|---|---|
 | 00 | Architecture and source audit | current `main` | baseline tests, integration map, licensed source audit | DONE |
-| 01 | Canonical `hp-capture/1.0` raw format | 00 | strict round-trip, malformed/resource-limit tests | IN_PROGRESS |
-| 02 | Qt pointer capture engine | 01 | two directed strokes preserved; mouse/tablet duplicate guard | TODO |
+| 01 | Canonical `hp-capture/1.0` raw format | 00 | strict round-trip, malformed/resource-limit tests | DONE |
+| 02 | Qt pointer capture engine | 01 | two directed strokes preserved; mouse/tablet duplicate guard | IN_PROGRESS |
 | 03 | Integrated Handwriting Studio | 02 | save, leave, return, reopen sample | TODO |
 | 04 | Capture queues and coverage | 03 | five-token capture without manual filenames | TODO |
 | 05 | Variant management | 04 | three `м` variants browsable and selectable | TODO |

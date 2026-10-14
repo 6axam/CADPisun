@@ -217,6 +217,18 @@ CLI возвращает exit 0 success, 2 invalid input/config/coverage, 3 geom
 
 Storage stores immutable inputs/revisions, atomic manifest, каталог II. FileStore не импортирует geometry/recognizer; принимает bytes/DTO serializer. Limits, disk-full, permissions, hash mismatch возвращаются явно. При ошибке temp files могут остаться для диагностики, но отсутствует completed manifest; следующий run не принимает их за готовое задание.
 
+### 12.1 Raw capture boundary
+
+Files `capture/{models,repository}.py` не импортируют Qt. `serialize_capture`
+принимает validated `CaptureSession` и выдаёт canonical bytes.
+`load_capture_bytes` применяет byte budget, strict JSON без BOM/duplicate keys и
+принимает только `hp-capture/1.0`. `CaptureRepository.store` публикует raw bytes
+атомарно по content SHA-256 без overwrite; повторная запись тех же bytes
+идемпотентна, несовпадение existing bytes даёт `CAPTURE_HASH_MISMATCH`.
+`load(hash)` повторно проверяет имя/hash до parsing. Ошибки unknown format/schema,
+resource limits, event/time/ID order, coordinate frame и capability mismatch не
+исправляются молча.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI
