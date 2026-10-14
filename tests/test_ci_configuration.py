@@ -13,6 +13,15 @@ def test_ci_runs_locked_headless_tests_on_linux_and_windows() -> None:
     assert "uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev" in workflow
     assert "if: runner.os == 'Linux'" in workflow
     assert "libegl1" in workflow
-    assert "timeout-minutes: 5" in workflow
-    assert "uv run pytest -q tests/gui" in workflow
+    assert "timeout-minutes: 2" in workflow
+    for module in (
+        "test_canvas.py",
+        "test_document.py",
+        "test_exporting.py",
+        "test_generation.py",
+        "test_polish.py",
+        "test_refresh_performance.py",
+        "test_shell.py",
+    ):
+        assert f"uv run pytest -q tests/gui/{module}" in workflow
     assert "uv run pytest -q --ignore=tests/gui" in workflow

@@ -38,9 +38,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes libegl1 libgl1 libxcb-cursor0 libxkbcommon-x11-0
 
-      - name: Run headless Qt GUI tests
-        timeout-minutes: 5
-        run: uv run pytest -q tests/gui
+      - name: Test Canvas
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_canvas.py
+
+      - name: Test document editing
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_document.py
+
+      - name: Test export
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_exporting.py
+
+      - name: Test generation
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_generation.py
+
+      - name: Test desktop polish
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_polish.py
+
+      - name: Test selective refresh
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_refresh_performance.py
+
+      - name: Test desktop shell
+        timeout-minutes: 2
+        run: uv run pytest -q tests/gui/test_shell.py
 
       - name: Run core and integration tests
         timeout-minutes: 5
