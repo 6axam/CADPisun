@@ -41,6 +41,11 @@ class MainWindow(QMainWindow):
         self.generated_result = None
         self.generated_revision: int | None = None
         self._generation_worker: GenerationWorker | None = None
+        self._visibility_regeneration_pending = False
+        self._visibility_timer = QTimer(self)
+        self._visibility_timer.setSingleShot(True)
+        self._visibility_timer.setInterval(120)
+        self._visibility_timer.timeout.connect(self._regenerate_after_visibility_change)
         self._selected_kind = "page"
         self._selected_value: object = None
         self._refreshing_tree = False
@@ -268,9 +273,34 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._apply_tree_item_change(object_id, name, visible))
 
     def _apply_tree_item_change(self, object_id: str, name: str, visible: bool) -> None:
-        if not any(item.object_id == object_id for item in self.controller.snapshot.objects):
+        item = next((item for item in self.controller.snapshot.objects if item.object_id == object_id), None)
+        if item is None:
             return
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        visibility_changed = item.visible != visible
         self.controller.update_text_object(object_id, name=name, visible=visible)
+        if visibility_changed and (had_current_generation or self._visibility_regeneration_pending):
+            self._visibility_regeneration_pending = True
+            self._visibility_timer.start()
+            self.canvas.clear_artifacts()
+            self.generated_result = None
+            self.generated_revision = None
+            self._update_export_actions()
+            self.statusBar().showMessage("Visibility changed · updating page…")
+
+    def _regenerate_after_visibility_change(self) -> None:
+        if not any(item.visible for item in self.controller.snapshot.objects):
+            self.console.setPlainText("All text objects are hidden.")
+            self.statusBar().showMessage("All text objects are hidden", 4000)
+            return
+        if self._generation_worker is not None:
+            self._visibility_timer.start()
+            return
+        self._visibility_regeneration_pending = False
+        self.generate_page()
 
     def _update_text_object(self, object_id: str, changes: dict) -> None:
         try:
@@ -296,6 +326,8 @@ class MainWindow(QMainWindow):
         self._selected_kind, self._selected_value = "page", None
 
     def new_project(self) -> None:
+        self._visibility_timer.stop()
+        self._visibility_regeneration_pending = False
         self.controller.reset(default_project())
         self.canvas.clear_artifacts()
         self.generated_result = None
@@ -308,6 +340,8 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
+            self._visibility_timer.stop()
+            self._visibility_regeneration_pending = False
             loaded = load_project_file(Path(filename))
             self.controller.reset(loaded.snapshot, Path(filename))
             self.canvas.clear_artifacts()

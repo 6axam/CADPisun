@@ -6,6 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
@@ -95,3 +96,37 @@ def test_open_restores_saved_generation_without_running_backend(qtbot, tmp_path,
     assert window.canvas.has_artifact
     assert all(action.isEnabled() for action in window.export_actions)
     assert "Restored generated page" in window.console.toPlainText()
+
+
+def test_visibility_toggle_clears_and_regenerates_the_rendered_page(qtbot) -> None:
+    from handwriting_plotter.gui.main_window import MainWindow, ROLE_KIND
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    assert window.canvas.has_artifact
+
+    def text_node():
+        root = window.project_tree.invisibleRootItem()
+        document = root.child(0).child(0)
+        return next(
+            document.child(index)
+            for index in range(document.childCount())
+            if document.child(index).data(0, ROLE_KIND) == "text"
+        )
+
+    text_node().setCheckState(0, Qt.CheckState.Unchecked)
+    qtbot.waitUntil(lambda: window.controller.snapshot.objects[0].visible is False)
+    qtbot.wait(150)
+    assert not window.canvas.has_artifact
+    assert window.generated_result is None
+    assert "hidden" in window.console.toPlainText().lower()
+
+    text_node().setCheckState(0, Qt.CheckState.Checked)
+    qtbot.waitUntil(
+        lambda: window._generation_worker is None and window.canvas.has_artifact,
+        timeout=10_000,
+    )
+    assert window.generated_revision == window.controller.revision
+    window.controller.reset(window.controller.snapshot)
