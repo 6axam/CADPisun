@@ -38,6 +38,20 @@ def test_composition_builds_one_authoritative_plan_for_positioned_objects() -> N
     assert any(stroke.startswith("second/") for stroke in stroke_ids)
 
 
+def test_text_frame_geometry_does_not_change_generated_artifacts() -> None:
+    first = composition_project()
+    moved_frames = first.model_copy(update={
+        "objects": tuple(
+            item.model_copy(update={"frame_x_mm": 5.0, "frame_y_mm": 5.0})
+            for item in first.objects
+        )
+    })
+    baseline = GuiBackend().build(first)
+    changed = GuiBackend().build(ProjectSnapshot.model_validate(moved_frames.model_dump(), strict=True))
+    assert changed.document_id == baseline.document_id
+    assert changed.files == baseline.files
+
+
 def test_missing_glyph_fails_before_replacing_gui_result(qtbot) -> None:
     from handwriting_plotter.gui.main_window import MainWindow
 

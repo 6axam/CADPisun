@@ -59,16 +59,25 @@ def test_project_rejects_unknown_schema(tmp_path) -> None:
         load_project(path)
 
 
-def test_project_v1_0_is_loaded_and_migrated_in_memory(tmp_path) -> None:
+@pytest.mark.parametrize("schema_version", ["1.0", "1.1"])
+def test_legacy_project_is_loaded_with_text_frames(tmp_path, schema_version) -> None:
     path = tmp_path / "legacy.hplot.json"
     data = sample_project().model_dump(mode="json")
-    data["schema_version"] = "1.0"
+    data["schema_version"] = schema_version
+    data["objects"][0]["x_mm"] = 42.0
+    data["objects"][0]["y_mm"] = 53.0
+    for key in ("frame_x_mm", "frame_y_mm", "frame_width_mm", "frame_height_mm"):
+        data["objects"][0].pop(key)
     path.write_text(json.dumps(data), encoding="utf-8")
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.1"
+    assert loaded.schema_version == "1.2"
     assert loaded.project_id == sample_project().project_id
+    assert loaded.objects[0].frame_x_mm == 42.0
+    assert loaded.objects[0].frame_y_mm == 53.0
+    assert loaded.objects[0].frame_width_mm == 60.0
+    assert loaded.objects[0].frame_height_mm == 30.0
 
 
 def test_generated_result_round_trips_with_verified_artifacts(tmp_path) -> None:
@@ -130,6 +139,25 @@ def test_controller_tracks_revision_dirty_and_undo(qtbot) -> None:
 def test_text_object_rejects_seed_outside_unsigned_64_bit(seed) -> None:
     with pytest.raises(ValueError, match="seed"):
         TextObject(object_id="seed-test", name="Seed", seed=seed)
+
+
+def test_text_object_frame_is_bounded_to_a4_and_independent_of_text_origin() -> None:
+    item = TextObject(
+        object_id="frame-test",
+        name="Frame",
+        x_mm=90,
+        y_mm=100,
+        frame_x_mm=20,
+        frame_y_mm=30,
+        frame_width_mm=70,
+        frame_height_mm=40,
+    )
+    assert (item.frame_x_mm, item.frame_y_mm, item.frame_width_mm, item.frame_height_mm) == (20, 30, 70, 40)
+    with pytest.raises(ValueError, match="frame exceeds page width"):
+        TextObject.model_validate(
+            item.model_copy(update={"frame_x_mm": 180, "frame_width_mm": 40}).model_dump(),
+            strict=True,
+        )
 
 
 def test_main_window_object_actions_update_real_model(qtbot) -> None:

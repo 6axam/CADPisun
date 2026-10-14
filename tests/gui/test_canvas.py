@@ -4,8 +4,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt
+
 from handwriting_plotter.application.service import GenerationRequest, HandwritingPlotterService
 from handwriting_plotter.gui.canvas import PageCanvas
+from handwriting_plotter.gui.document import TextObject
 
 
 @pytest.fixture(scope="module")
@@ -52,3 +55,24 @@ def test_zoom_to_fit_is_stable(qtbot) -> None:
     canvas.resize(500, 500)
     qtbot.wait(1)
     assert canvas.zoom_factor != first
+
+
+def test_text_object_frame_is_drawn_and_highlighted_on_selection(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    item = TextObject(
+        object_id="frame",
+        name="Frame",
+        frame_x_mm=21,
+        frame_y_mm=32,
+        frame_width_mm=74,
+        frame_height_mm=45,
+    )
+
+    canvas.set_object_frames((item,), {item.object_id})
+
+    frame = canvas._object_frames[item.object_id]
+    assert frame.rect().getRect() == (21.0, 32.0, 74.0, 45.0)
+    assert frame.pen().style() == Qt.PenStyle.SolidLine
+    canvas.set_selected_objects(set())
+    assert frame.pen().style() == Qt.PenStyle.DashLine

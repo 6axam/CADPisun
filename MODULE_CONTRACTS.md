@@ -229,7 +229,7 @@ Storage stores immutable inputs/revisions, atomic manifest, каталог II. F
 | DesktopApplicationAdapter | Immutable project snapshot → shared GenerationResult; использует application/layout/stroke/motion adapters |
 | GenerationWorker | Snapshot revision + adapter → success/error signal; widgets не меняются из worker thread |
 | PageCanvas | Backend SVG/PenPlan bytes → scene in PageFrame mm; zoom/pan/fit и diagnostic visibility |
-| ProjectStore | `hp-desktop-project/1.0,1.1` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
+| ProjectStore | `hp-desktop-project/1.0…1.2` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
 
 Старый worker result не применяется к новой revision. Одновременно выполняется
 не больше одной generation job документа. Export копирует проверенные bytes из

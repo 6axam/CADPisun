@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
@@ -47,12 +47,33 @@ class TextObject(StrictModel):
     visible: bool = True
     x_mm: float = Field(default=15.0, ge=0, lt=210)
     y_mm: float = Field(default=15.0, ge=0, lt=297)
+    frame_x_mm: float = Field(default=15.0, ge=0, lt=210)
+    frame_y_mm: float = Field(default=15.0, ge=0, lt=297)
+    frame_width_mm: float = Field(default=60.0, gt=0, le=210)
+    frame_height_mm: float = Field(default=30.0, gt=0, le=297)
     x_height_mm: float = Field(default=3.5, gt=0, le=30)
     line_pitch_mm: float = Field(default=9.0, gt=0, le=100)
     style_id: str = Field(default="test-technical-v1", min_length=1)
     style_revision: str = Field(default="1.0.0", min_length=1)
     seed: int = Field(default=1, ge=0, lt=2**64)
     realism: float = Field(default=0.35, ge=0, le=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_frame_origin_to_text(cls, value):  # noqa: ANN001
+        if isinstance(value, dict):
+            value = dict(value)
+            value.setdefault("frame_x_mm", value.get("x_mm", 15.0))
+            value.setdefault("frame_y_mm", value.get("y_mm", 15.0))
+        return value
+
+    @model_validator(mode="after")
+    def frame_fits_a4(self) -> "TextObject":
+        if self.frame_x_mm + self.frame_width_mm > 210:
+            raise ValueError("text object frame exceeds page width")
+        if self.frame_y_mm + self.frame_height_mm > 297:
+            raise ValueError("text object frame exceeds page height")
+        return self
 
 
 class DisplaySettings(StrictModel):
@@ -62,7 +83,7 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.1"] = "1.1"
+    schema_version: Literal["1.2"] = "1.2"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
@@ -181,11 +202,20 @@ def load_project_file(path: Path) -> LoadedProject:
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
     version = data.get("schema_version")
-    if version not in {"1.0", "1.1"}:
+    if version not in {"1.0", "1.1", "1.2"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
     cache_data = data.pop("generation_cache", None)
-    if version == "1.0":
-        data["schema_version"] = "1.1"
+    if version in {"1.0", "1.1"}:
+        migrated_objects = []
+        for item in data.get("objects", []):
+            migrated = dict(item)
+            migrated.setdefault("frame_x_mm", migrated.get("x_mm", 15.0))
+            migrated.setdefault("frame_y_mm", migrated.get("y_mm", 15.0))
+            migrated.setdefault("frame_width_mm", min(60.0, 210.0 - migrated["frame_x_mm"]))
+            migrated.setdefault("frame_height_mm", min(30.0, 297.0 - migrated["frame_y_mm"]))
+            migrated_objects.append(migrated)
+        data["objects"] = migrated_objects
+        data["schema_version"] = "1.2"
     snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
     if cache_data is None:
         return LoadedProject(snapshot)

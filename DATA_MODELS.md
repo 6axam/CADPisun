@@ -194,14 +194,16 @@ Correction operations: set_transcript, adjust_polygon, split_region, merge_regio
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.1`. Корень содержит `project_id`, пользовательское `name`,
+`schema_version=1.2`. Корень содержит `project_id`, пользовательское `name`,
 `page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
-Версия 1.0 читается и мигрирует в памяти в 1.1; неизвестная версия или лишнее
-поле — ошибка.
+Версии 1.0 и 1.1 читаются и мигрируют в памяти в 1.2; неизвестная версия или
+лишнее поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
 `TextObject`: object_id, name, Unicode text, visible, x_mm/y_mm, x_height_mm,
-line_pitch_mm, pinned style_id/style_revision, seed и realism. `display` v1
+line_pitch_mm, pinned style_id/style_revision, seed и realism, а также
+независимое UI-поле frame_x_mm/frame_y_mm/frame_width_mm/frame_height_mm.
+Изменение поля само по себе не меняет layout, SVG, PenPlan или G-code. `display` v1
 содержит show_travel/show_markers. Object IDs уникальны; абсолютные пути и
 QSettings layout в JSON не встраиваются.
 

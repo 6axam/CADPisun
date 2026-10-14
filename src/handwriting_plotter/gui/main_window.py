@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
+        self.canvas.set_object_frames(self.controller.snapshot.objects)
         self.properties.show_page(self.controller.snapshot.page)
         self._restore_window_state()
         self._update_title()
@@ -313,6 +314,7 @@ class MainWindow(QMainWindow):
         self._refresh_tree(snapshot)
         page = snapshot.page
         self.canvas.set_margins(page.margin_left_mm, page.margin_top_mm, page.margin_right_mm, page.margin_bottom_mm)
+        self.canvas.set_object_frames(snapshot.objects, self._selected_text_ids())
         focus = QApplication.focusWidget()
         if focus is None or not self.properties.isAncestorOf(focus):
             self._show_selected_properties()
@@ -328,10 +330,16 @@ class MainWindow(QMainWindow):
             return
         self._selected_kind = current.data(0, ROLE_KIND) or "project"
         self._selected_value = current.data(0, ROLE_VALUE)
+        self.canvas.set_selected_objects(self._selected_text_ids())
         self._show_selected_properties()
         enabled = self._selected_kind == "text"
         self.delete_action.setEnabled(enabled)
         self.remove_text_button.setEnabled(enabled)
+
+    def _selected_text_ids(self) -> set[str]:
+        if self._selected_kind == "text" and isinstance(self._selected_value, str):
+            return {self._selected_value}
+        return set()
 
     def _show_selected_properties(self) -> None:
         if self._selected_kind == "page":

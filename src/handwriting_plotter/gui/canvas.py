@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
 from .theme import COLORS
 
 
+OBJECT_ID_ROLE = 0
+
+
 class SvgPageItem(QGraphicsItem):
     """Render an SVG into an explicit millimetre-sized scene rectangle."""
 
@@ -63,6 +66,8 @@ class PageCanvas(QGraphicsView):
         self._production_item: SvgPageItem | None = None
         self._preview_item: SvgPageItem | None = None
         self._marker_items: list[QGraphicsItem] = []
+        self._object_frames: dict[str, QGraphicsRectItem] = {}
+        self._selected_object_ids: set[str] = set()
         self._show_travel = False
         self._show_markers = False
         self._page_rect = QRectF(0.0, 0.0, self.PAGE_WIDTH_MM, self.PAGE_HEIGHT_MM)
@@ -128,6 +133,42 @@ class PageCanvas(QGraphicsView):
         self._production_item = None
         self._preview_item = None
         self._marker_items.clear()
+
+    def set_object_frames(self, objects, selected_ids=()) -> None:  # noqa: ANN001
+        for item in self._object_frames.values():
+            if item.scene() is self.scene():
+                self.scene().removeItem(item)
+        self._object_frames.clear()
+        self._selected_object_ids = set(selected_ids)
+        for obj in objects:
+            if not obj.visible:
+                continue
+            frame = QGraphicsRectItem(
+                obj.frame_x_mm,
+                obj.frame_y_mm,
+                obj.frame_width_mm,
+                obj.frame_height_mm,
+            )
+            frame.setData(OBJECT_ID_ROLE, obj.object_id)
+            frame.setBrush(Qt.BrushStyle.NoBrush)
+            frame.setZValue(8)
+            self.scene().addItem(frame)
+            self._object_frames[obj.object_id] = frame
+        self._sync_object_frame_styles()
+
+    def set_selected_objects(self, object_ids) -> None:  # noqa: ANN001
+        self._selected_object_ids = set(object_ids)
+        self._sync_object_frame_styles()
+
+    def _sync_object_frame_styles(self) -> None:
+        for object_id, frame in self._object_frames.items():
+            selected = object_id in self._selected_object_ids
+            color = QColor(COLORS["accent"] if selected else COLORS["muted"])
+            color.setAlpha(255 if selected else 105)
+            pen = QPen(color, 0.45 if selected else 0.25,
+                       Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            frame.setPen(pen)
 
     def set_show_travel(self, visible: bool) -> None:
         self._show_travel = visible
