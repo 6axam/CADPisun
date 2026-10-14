@@ -356,6 +356,26 @@ class DocumentController(QObject):
         )
         self.apply(validated, "Edit text object")
 
+    def move_text_objects(self, object_ids: set[str], dx_mm: float, dy_mm: float) -> None:
+        if not object_ids or (abs(dx_mm) <= 1e-9 and abs(dy_mm) <= 1e-9):
+            return
+        known_ids = {item.object_id for item in self.snapshot.objects}
+        if not object_ids <= known_ids:
+            raise KeyError(sorted(object_ids - known_ids)[0])
+        objects = tuple(
+            item.model_copy(update={
+                "x_mm": item.x_mm + dx_mm,
+                "y_mm": item.y_mm + dy_mm,
+                "frame_x_mm": item.frame_x_mm + dx_mm,
+                "frame_y_mm": item.frame_y_mm + dy_mm,
+            }) if item.object_id in object_ids else item
+            for item in self.snapshot.objects
+        )
+        validated = ProjectSnapshot.model_validate(
+            self.snapshot.model_copy(update={"objects": objects}).model_dump(mode="python"), strict=True
+        )
+        self.apply(validated, "Move text object" if len(object_ids) == 1 else "Move text objects")
+
     def update_page(self, **changes) -> None:  # noqa: ANN003
         page = PageSettings.model_validate(self.snapshot.page.model_copy(update=changes).model_dump(), strict=True)
         self.apply(self.snapshot.model_copy(update={"page": page}), "Edit page")

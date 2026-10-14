@@ -45,6 +45,7 @@ class PageCanvas(QGraphicsView):
     """A zoomable scene whose coordinates are physical millimetres."""
 
     selection_changed = Signal(object)
+    objects_moved = Signal(object, float, float)
 
     PAGE_WIDTH_MM = 210.0
     PAGE_HEIGHT_MM = 297.0
@@ -69,11 +70,14 @@ class PageCanvas(QGraphicsView):
         self._preview_item: SvgPageItem | None = None
         self._marker_items: list[QGraphicsItem] = []
         self._object_frames: dict[str, QGraphicsRectItem] = {}
+        self._object_models: dict[str, object] = {}
         self._selected_object_ids: set[str] = set()
         self._selection_origin: QPointF | None = None
         self._selection_current: QPointF | None = None
         self._selection_additive = False
         self._pressed_object_id: str | None = None
+        self._move_initial_rects: dict[str, QRectF] = {}
+        self._move_delta = QPointF()
         self._selection_item = QGraphicsRectItem()
         self._selection_item.setBrush(Qt.BrushStyle.NoBrush)
         self._selection_item.setZValue(20)
@@ -150,6 +154,7 @@ class PageCanvas(QGraphicsView):
             if item.scene() is self.scene():
                 self.scene().removeItem(item)
         self._object_frames.clear()
+        self._object_models.clear()
         self._selected_object_ids = set(selected_ids)
         for obj in objects:
             if not obj.visible:
@@ -165,6 +170,7 @@ class PageCanvas(QGraphicsView):
             frame.setZValue(8)
             self.scene().addItem(frame)
             self._object_frames[obj.object_id] = frame
+            self._object_models[obj.object_id] = obj
         self._sync_object_frame_styles()
 
     def set_selected_objects(self, object_ids) -> None:  # noqa: ANN001
@@ -200,6 +206,51 @@ class PageCanvas(QGraphicsView):
         self.set_selected_objects(object_ids)
         self.selection_changed.emit(tuple(sorted(object_ids)))
 
+    def _constrain_move_delta(self, object_ids: set[str], dx: float, dy: float) -> QPointF:
+        minimum_dx = max(
+            max(-float(self._object_models[object_id].frame_x_mm), -float(self._object_models[object_id].x_mm))
+            for object_id in object_ids
+        )
+        maximum_dx = min(
+            min(
+                self.PAGE_WIDTH_MM - float(self._object_models[object_id].frame_x_mm)
+                - float(self._object_models[object_id].frame_width_mm),
+                self.PAGE_WIDTH_MM - float(self._object_models[object_id].x_mm) - 0.01,
+            )
+            for object_id in object_ids
+        )
+        minimum_dy = max(
+            max(-float(self._object_models[object_id].frame_y_mm), -float(self._object_models[object_id].y_mm))
+            for object_id in object_ids
+        )
+        maximum_dy = min(
+            min(
+                self.PAGE_HEIGHT_MM - float(self._object_models[object_id].frame_y_mm)
+                - float(self._object_models[object_id].frame_height_mm),
+                self.PAGE_HEIGHT_MM - float(self._object_models[object_id].y_mm) - 0.01,
+            )
+            for object_id in object_ids
+        )
+        return QPointF(max(minimum_dx, min(maximum_dx, dx)), max(minimum_dy, min(maximum_dy, dy)))
+
+    def _preview_move(self, end: QPointF) -> None:
+        if self._selection_origin is None or not self._move_initial_rects:
+            return
+        raw_delta = end - self._selection_origin
+        self._move_delta = self._constrain_move_delta(
+            set(self._move_initial_rects), raw_delta.x(), raw_delta.y()
+        )
+        for object_id, initial in self._move_initial_rects.items():
+            self._object_frames[object_id].setRect(initial.translated(self._move_delta))
+
+    def _reset_pointer_operation(self) -> None:
+        self._selection_item.hide()
+        self._selection_origin = None
+        self._selection_current = None
+        self._pressed_object_id = None
+        self._move_initial_rects.clear()
+        self._move_delta = QPointF()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.NoDrag:
             point = self.mapToScene(event.position().toPoint())
@@ -207,6 +258,16 @@ class PageCanvas(QGraphicsView):
             self._selection_current = point
             self._selection_additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             self._pressed_object_id = self._object_at(point)
+            if self._pressed_object_id is not None:
+                selected = set(self._selected_object_ids)
+                if self._pressed_object_id not in selected:
+                    selected = selected | {self._pressed_object_id} if self._selection_additive else {self._pressed_object_id}
+                    self._publish_selection(selected)
+                self._move_initial_rects = {
+                    object_id: QRectF(self._object_frames[object_id].rect())
+                    for object_id in selected
+                    if object_id in self._object_frames
+                }
             self._selection_item.setRect(QRectF(point, point))
             self._selection_item.hide()
             event.accept()
@@ -218,6 +279,10 @@ class PageCanvas(QGraphicsView):
             self._selection_current = self.mapToScene(event.position().toPoint())
             rect = QRectF(self._selection_origin, self._selection_current).normalized()
             if rect.width() >= 0.5 or rect.height() >= 0.5:
+                if self._move_initial_rects:
+                    self._preview_move(self._selection_current)
+                    event.accept()
+                    return
                 crossing = self._selection_current.x() < self._selection_origin.x()
                 color = QColor("#36c48d" if crossing else COLORS["accent"])
                 color.setAlpha(210)
@@ -235,6 +300,15 @@ class PageCanvas(QGraphicsView):
             end = self.mapToScene(event.position().toPoint())
             rect = QRectF(self._selection_origin, end).normalized()
             dragged = rect.width() >= 0.5 or rect.height() >= 0.5
+            if dragged and self._move_initial_rects:
+                self._preview_move(end)
+                moved_ids = tuple(sorted(self._move_initial_rects))
+                dx, dy = self._move_delta.x(), self._move_delta.y()
+                self._reset_pointer_operation()
+                if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                    self.objects_moved.emit(moved_ids, dx, dy)
+                event.accept()
+                return
             if dragged:
                 selected = self._objects_in_selection(
                     rect,
@@ -250,10 +324,7 @@ class PageCanvas(QGraphicsView):
                     selected.add(self._pressed_object_id)
             else:
                 selected = set(self._selected_object_ids) if self._selection_additive else set()
-            self._selection_item.hide()
-            self._selection_origin = None
-            self._selection_current = None
-            self._pressed_object_id = None
+            self._reset_pointer_operation()
             self._publish_selection(selected)
             event.accept()
             return

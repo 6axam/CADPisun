@@ -80,3 +80,16 @@ def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot
     assert window.controller.snapshot.objects == ()
     window.controller.undo_stack.undo()
     assert {item.object_id for item in window.controller.snapshot.objects} == {"first", "second"}
+
+
+def test_canvas_move_signal_updates_text_and_frame_coordinates(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    item = window.controller.snapshot.objects[0]
+
+    window.canvas.objects_moved.emit((item.object_id,), 7.0, 9.0)
+
+    moved = window.controller.snapshot.objects[0]
+    assert (moved.x_mm, moved.y_mm) == (item.x_mm + 7, item.y_mm + 9)
+    assert (moved.frame_x_mm, moved.frame_y_mm) == (item.frame_x_mm + 7, item.frame_y_mm + 9)
+    window.controller.reset(window.controller.snapshot)

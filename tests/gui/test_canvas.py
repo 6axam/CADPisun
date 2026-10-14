@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 
 from handwriting_plotter.application.service import GenerationRequest, HandwritingPlotterService
 from handwriting_plotter.gui.canvas import PageCanvas
@@ -88,3 +88,47 @@ def test_selection_direction_controls_crossing_semantics(qtbot) -> None:
 
     assert canvas._objects_in_selection(selection, crossing=False) == {"first"}
     assert canvas._objects_in_selection(selection, crossing=True) == {"first", "second"}
+
+
+def test_object_move_preview_keeps_all_selected_frames_on_page(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    first = TextObject(object_id="first", name="First", x_mm=10, y_mm=10, frame_x_mm=10, frame_y_mm=10)
+    second = TextObject(
+        object_id="second", name="Second", x_mm=145, y_mm=250,
+        frame_x_mm=145, frame_y_mm=250, frame_width_mm=60, frame_height_mm=30,
+    )
+    canvas.set_object_frames((first, second), {"first", "second"})
+    canvas._selection_origin = QPointF(20, 20)
+    canvas._move_initial_rects = {
+        object_id: QRectF(frame.rect()) for object_id, frame in canvas._object_frames.items()
+    }
+
+    canvas._preview_move(QPointF(100, 100))
+
+    assert canvas._move_delta == QPointF(5, 17)
+    assert canvas._object_frames["second"].rect().right() == 210
+    assert canvas._object_frames["second"].rect().bottom() == 297
+
+
+def test_dragging_selected_object_emits_physical_move(qtbot) -> None:
+    canvas = PageCanvas()
+    canvas.resize(700, 700)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.zoom_to_fit()
+    item = TextObject(object_id="move", name="Move", x_mm=20, y_mm=20, frame_x_mm=20, frame_y_mm=20)
+    canvas.set_object_frames((item,), {item.object_id})
+    emitted: list[tuple[tuple[str, ...], float, float]] = []
+    canvas.objects_moved.connect(lambda ids, dx, dy: emitted.append((ids, dx, dy)))
+    start = canvas.mapFromScene(QPointF(25, 25))
+    end = canvas.mapFromScene(QPointF(35, 40))
+
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=end)
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    assert emitted
+    assert emitted[-1][0] == ("move",)
+    assert emitted[-1][1] == pytest.approx(10, abs=0.5)
+    assert emitted[-1][2] == pytest.approx(15, abs=0.5)

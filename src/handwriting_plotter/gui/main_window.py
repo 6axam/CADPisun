@@ -43,11 +43,11 @@ class MainWindow(QMainWindow):
         self.generated_result = None
         self.generated_revision: int | None = None
         self._generation_worker: GenerationWorker | None = None
-        self._visibility_regeneration_pending = False
-        self._visibility_timer = QTimer(self)
-        self._visibility_timer.setSingleShot(True)
-        self._visibility_timer.setInterval(120)
-        self._visibility_timer.timeout.connect(self._regenerate_after_visibility_change)
+        self._regeneration_pending = False
+        self._regeneration_timer = QTimer(self)
+        self._regeneration_timer.setSingleShot(True)
+        self._regeneration_timer.setInterval(120)
+        self._regeneration_timer.timeout.connect(self._regenerate_after_change)
         self._selected_kind = "page"
         self._selected_value: object = None
         self._selected_object_ids: set[str] = set()
@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
         self.project_tree.currentItemChanged.connect(self._on_selection_changed)
         self.project_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self.canvas.selection_changed.connect(self._on_canvas_selection_changed)
+        self.canvas.objects_moved.connect(self._on_canvas_objects_moved)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
         self.properties.text_object_changed.connect(self._update_text_object)
         self.properties.page_changed.connect(self._update_page)
@@ -431,25 +432,42 @@ class MainWindow(QMainWindow):
         )
         visibility_changed = item.visible != visible
         self.controller.update_text_object(object_id, name=name, visible=visible)
-        if visibility_changed and (had_current_generation or self._visibility_regeneration_pending):
-            self._visibility_regeneration_pending = True
-            self._visibility_timer.start()
-            self.canvas.clear_artifacts()
-            self.generated_result = None
-            self.generated_revision = None
-            self._update_export_actions()
-            self.statusBar().showMessage("Visibility changed · updating page…")
+        if visibility_changed and (had_current_generation or self._regeneration_pending):
+            self._schedule_regeneration("Visibility changed · updating page…")
 
-    def _regenerate_after_visibility_change(self) -> None:
+    def _schedule_regeneration(self, message: str) -> None:
+        self._regeneration_pending = True
+        self._regeneration_timer.start()
+        self.canvas.clear_artifacts()
+        self.generated_result = None
+        self.generated_revision = None
+        self._update_export_actions()
+        self.statusBar().showMessage(message)
+
+    def _regenerate_after_change(self) -> None:
         if not any(item.visible for item in self.controller.snapshot.objects):
             self.console.setPlainText("All text objects are hidden.")
             self.statusBar().showMessage("All text objects are hidden", 4000)
             return
         if self._generation_worker is not None:
-            self._visibility_timer.start()
+            self._regeneration_timer.start()
             return
-        self._visibility_regeneration_pending = False
+        self._regeneration_pending = False
         self.generate_page()
+
+    def _on_canvas_objects_moved(self, object_ids, dx_mm: float, dy_mm: float) -> None:  # noqa: ANN001
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        try:
+            self.controller.move_text_objects(set(object_ids), dx_mm, dy_mm)
+        except ValueError as exc:
+            self.canvas.set_object_frames(self.controller.snapshot.objects, self._selected_text_ids())
+            self.statusBar().showMessage(str(exc), 5000)
+            return
+        if had_current_generation or self._regeneration_pending:
+            self._schedule_regeneration("Object moved · updating page…")
 
     def _update_text_object(self, object_id: str, changes: dict) -> None:
         try:
@@ -477,8 +495,8 @@ class MainWindow(QMainWindow):
         self._selected_kind, self._selected_value = "page", None
 
     def new_project(self) -> None:
-        self._visibility_timer.stop()
-        self._visibility_regeneration_pending = False
+        self._regeneration_timer.stop()
+        self._regeneration_pending = False
         self._selected_object_ids.clear()
         self._selected_kind, self._selected_value = "page", None
         self.controller.reset(default_project())
@@ -493,8 +511,8 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            self._visibility_timer.stop()
-            self._visibility_regeneration_pending = False
+            self._regeneration_timer.stop()
+            self._regeneration_pending = False
             loaded = load_project_file(Path(filename))
             self._selected_object_ids.clear()
             self._selected_kind, self._selected_value = "page", None

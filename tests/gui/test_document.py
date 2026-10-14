@@ -135,6 +135,25 @@ def test_controller_tracks_revision_dirty_and_undo(qtbot) -> None:
     assert controller.snapshot.objects[0].text == "Нове значення"
 
 
+def test_controller_moves_multiple_text_objects_in_one_undo_step(qtbot) -> None:
+    snapshot = ProjectSnapshot(
+        project_id="move-project",
+        objects=(
+            TextObject(object_id="first", name="First", x_mm=10, y_mm=20, frame_x_mm=5, frame_y_mm=6),
+            TextObject(object_id="second", name="Second", x_mm=30, y_mm=40, frame_x_mm=25, frame_y_mm=26),
+        ),
+    )
+    controller = DocumentController(snapshot)
+
+    controller.move_text_objects({"first", "second"}, 3.5, 4.5)
+
+    assert controller.undo_stack.count() == 1
+    assert [(item.x_mm, item.y_mm) for item in controller.snapshot.objects] == [(13.5, 24.5), (33.5, 44.5)]
+    assert [(item.frame_x_mm, item.frame_y_mm) for item in controller.snapshot.objects] == [(8.5, 10.5), (28.5, 30.5)]
+    controller.undo_stack.undo()
+    assert controller.snapshot == snapshot
+
+
 @pytest.mark.parametrize("seed", [-1, 2**64])
 def test_text_object_rejects_seed_outside_unsigned_64_bit(seed) -> None:
     with pytest.raises(ValueError, match="seed"):
