@@ -6,11 +6,13 @@ import math
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
+import regex
 
 from handwriting_plotter.domain.models import StrictModel, canonical_json_bytes, strict_json_loads
 from handwriting_plotter.geometry.curves import Point2, Stroke, tangent
@@ -78,6 +80,8 @@ class GlyphAnnotation(StrictModel):
     no_join_before: bool = False
     no_join_after: bool = False
     critical_features: tuple[str, ...] = ()
+    boundary_status: Literal["unannotated", "manual"] = "unannotated"
+    character_boundaries_gu: tuple[float, ...] = ()
     review_status: Literal["draft", "reviewed"] = "draft"
 
     @field_validator("source_normalized_sha256", "source_processed_sha256")
@@ -98,6 +102,23 @@ class GlyphAnnotation(StrictModel):
             raise ValueError("stroke roles must follow complete original order")
         if len(self.critical_features) != len(set(self.critical_features)):
             raise ValueError("duplicate critical feature")
+        if unicodedata.normalize("NFC", self.label) != self.label:
+            raise ValueError("annotation label must be NFC")
+        graphemes = regex.findall(r"\X", self.label)
+        if not 1 <= len(graphemes) <= 8:
+            raise ValueError("annotation label must contain 1 to 8 graphemes")
+        if any(char.isspace() for char in self.label):
+            raise ValueError("annotation label must not contain whitespace")
+        if any(not math.isfinite(value) for value in self.character_boundaries_gu):
+            raise ValueError("character boundaries must be finite")
+        if any(right <= left for left, right in zip(
+            self.character_boundaries_gu, self.character_boundaries_gu[1:], strict=False
+        )):
+            raise ValueError("character boundaries must be strictly increasing")
+        if self.boundary_status == "unannotated" and self.character_boundaries_gu:
+            raise ValueError("unannotated sequence cannot claim character boundaries")
+        if self.boundary_status == "manual" and len(self.character_boundaries_gu) != len(graphemes) - 1:
+            raise ValueError("manual boundaries must separate every grapheme")
         return self
 
 
@@ -168,6 +189,8 @@ def validate_annotation(annotation: GlyphAnnotation, glyph: NormalizedGlyph) -> 
         errors.append("ANNOTATION_STROKE_ROLES_INCOMPLETE")
     if any(item not in ids for item in annotation.critical_features):
         errors.append("ANNOTATION_CRITICAL_FEATURE_MISSING")
+    if any(not glyph.bounds.min_x_gu < value < glyph.advance_gu for value in annotation.character_boundaries_gu):
+        errors.append("ANNOTATION_BOUNDARY_OUTSIDE_ADVANCE")
 
     if annotation.join_mode == "none":
         if annotation.body_stroke_id is not None or annotation.deferred_marks or annotation.entry or annotation.exit:
@@ -202,6 +225,36 @@ def validate_annotation(annotation: GlyphAnnotation, glyph: NormalizedGlyph) -> 
             if math.degrees(math.acos(dot)) > 1.0:
                 errors.append(f"ANNOTATION_{name}_TANGENT_MISMATCH")
     return AnnotationValidationReport(tuple(errors), tuple(warnings))
+
+
+def validate_ligature_fallback(
+    annotation: GlyphAnnotation,
+    glyph: NormalizedGlyph,
+    available_individual_keys: set[str],
+) -> AnnotationValidationReport:
+    base = validate_annotation(annotation, glyph)
+    errors = list(base.errors)
+    warnings = list(base.warnings)
+    graphemes = tuple(regex.findall(r"\X", annotation.label))
+    if len(graphemes) < 2:
+        errors.append("LIGATURE_REQUIRES_MULTIPLE_GRAPHEMES")
+    if annotation.boundary_status != "manual":
+        warnings.append("LIGATURE_BOUNDARIES_UNANNOTATED")
+    missing = tuple(item for item in graphemes if item not in available_individual_keys)
+    if missing:
+        errors.append("LIGATURE_MISSING_INDIVIDUAL_FALLBACK:" + ",".join(missing))
+    return AnnotationValidationReport(tuple(errors), tuple(warnings))
+
+
+def build_recorded_ligature(
+    annotation: GlyphAnnotation,
+    glyph: NormalizedGlyph,
+    available_individual_keys: set[str],
+) -> GlyphVariantFile:
+    report = validate_ligature_fallback(annotation, glyph, available_individual_keys)
+    if not report.passed:
+        raise ValueError(";".join(report.errors))
+    return annotation_to_glyph_variant(annotation, glyph)
 
 
 def annotation_to_glyph_variant(annotation: GlyphAnnotation, glyph: NormalizedGlyph) -> GlyphVariantFile:

@@ -414,6 +414,7 @@ class HandwritingStudio(QWidget):
         limits_layout.addWidget(self.anchor_vertical_spin)
         limits_layout.addWidget(self.anchor_angle_spin)
         self.annotation_tangent_value = QLabel("—")
+        self.annotation_boundaries_edit = QLineEdit()
         self.annotation_save_button = QPushButton()
         self.annotation_partner_combo = QComboBox()
         self.annotation_preview_button = QPushButton()
@@ -435,6 +436,7 @@ class HandwritingStudio(QWidget):
             ("studio.annotation_partners", self.anchor_partners_edit),
             ("studio.annotation_limits", limits_row),
             ("studio.annotation_tangents", self.annotation_tangent_value),
+            ("studio.annotation_boundaries", self.annotation_boundaries_edit),
             ("studio.annotation_pair", pair_row),
         ):
             label = QLabel()
@@ -842,6 +844,7 @@ class HandwritingStudio(QWidget):
         self.annotation_stroke_combo.clear()
         self.annotation_body_combo.clear()
         self.annotation_tangent_value.setText("—")
+        self.annotation_boundaries_edit.clear()
         self.join_preview.clear()
         self._annotation_status = ""
 
@@ -899,6 +902,9 @@ class HandwritingStudio(QWidget):
                 self.anchor_gap_spin.setValue(anchor.max_gap_gu)
                 self.anchor_vertical_spin.setValue(anchor.max_vertical_delta_gu)
                 self.anchor_angle_spin.setValue(anchor.max_angle_deg)
+            self.annotation_boundaries_edit.setText(
+                ", ".join(f"{value:g}" for value in annotation.character_boundaries_gu)
+            )
             self._annotation_status = tr(self.language, "studio.annotation_reopened").format(
                 revision=annotation.revision
             )
@@ -971,6 +977,12 @@ class HandwritingStudio(QWidget):
                 no_join_before=self.no_join_before_check.isChecked(),
                 no_join_after=self.no_join_after_check.isChecked(),
                 critical_features=tuple(item for item in deferred if self._annotation_roles.get(item) == "mark"),
+                boundary_status=("manual" if self.annotation_boundaries_edit.text().strip() else "unannotated"),
+                character_boundaries_gu=tuple(
+                    float(value.strip())
+                    for value in self.annotation_boundaries_edit.text().split(",")
+                    if value.strip()
+                ),
             )
             self.annotation_store.save(annotation)
         except Exception as exc:

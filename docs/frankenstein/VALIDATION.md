@@ -137,6 +137,20 @@ draft GlyphVariant format. The real join engine is exercised for an accepted
 connector, an explicit forced pen lift, and a gap rejection; Studio renders the
 pair and reopens the saved annotation.
 
+### Phase 09 recorded multi-character ligatures
+
+```bash
+uv run pytest -q tests/capture/test_annotation.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `5 passed in 0.53s`; full regression `195 passed in 16.86s`.
+The acceptance fixture records `ма` as one sequence, stores one manual character
+boundary, requires individual `м`/`а` fallback, and builds an existing
+multi-grapheme GlyphVariant. Layout of `мама` selects exactly two recorded
+ligatures and carries their original stroke through two PenPlan draws; repeated
+compilation is byte-model deterministic. Missing fallback is rejected.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

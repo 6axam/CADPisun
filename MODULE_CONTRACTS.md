@@ -293,6 +293,13 @@ decision `shaping.joins.connect`; UI показывает connector или то�
 reason. Ни preview, ни editor не исправляют несовместимый anchor автоматическим
 reversal, reordering или новым connector metadata.
 
+`validate_ligature_fallback` принимает только explicit multi-grapheme annotation
+и требует individual key для каждого grapheme. Manual character boundaries
+имеют ровно N−1 positions; unannotated boundaries не фабрикуются.
+`build_recorded_ligature` возвращает тот же draft `GlyphVariantFile`, после чего
+обычные resolve/shape/layout/PenPlan stages выбирают longest eligible key или
+детерминированно используют individual fallback.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

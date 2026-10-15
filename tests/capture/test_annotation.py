@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +11,7 @@ from handwriting_plotter.capture.annotation import (
     GlyphAnnotation,
     StrokeRoleAssignment,
     annotation_to_glyph_variant,
+    build_recorded_ligature,
     create_anchor_annotation,
     preview_join,
     validate_annotation,
@@ -33,6 +35,12 @@ from handwriting_plotter.capture.models import (
 from handwriting_plotter.capture.processing import ProcessedRepository, ProcessingParameters, process_sample
 from handwriting_plotter.capture.repository import CaptureRepository
 from handwriting_plotter.styles.models import to_variant
+from handwriting_plotter.geometry.curves import Line, Point2, Stroke
+from handwriting_plotter.layout.pages import layout_document
+from handwriting_plotter.shaping.variants import VariationSpec
+from handwriting_plotter.strokes.compile import Draw, compile_page
+from handwriting_plotter.styles.models import GlyphVariant, JoinSpec, StyleManifest, StyleSnapshot
+from handwriting_plotter.text.normalize import normalize
 
 
 
@@ -244,3 +252,73 @@ def test_pair_preview_reports_connected_lifted_and_rejected_with_real_join_engin
     assert lifted.reason == "JOIN_FORBIDDEN"
     assert rejected.decision == "rejected"
     assert rejected.reason == "GAP_TOO_LARGE"
+
+
+def test_recorded_ma_ligature_is_longest_match_and_reaches_pen_plan_with_fallback(tmp_path: Path) -> None:
+    single = _sample("м", ((30.0, 220.0), (55.0, 120.0), (80.0, 220.0)))
+    data = single.model_dump(mode="python")
+    data.update({"sample_id": "sample-ma", "label": "ма", "classification": "sequence"})
+    sequence = CaptureSample.model_validate(data, strict=True)
+    _, processed = _persist_processed(tmp_path, sequence)
+    profile = StyleMetricProfile.from_sample("personal", sequence)
+    normalized_glyph = normalize_processed_glyph(
+        processed.processed, processed.sha256, sequence, profile,
+        variant_id="ma-recorded", label="ма",
+        override=GlyphMetricOverride(variant_id="ma-recorded", advance_gu=900.0),
+    )
+    normalized = NormalizedRepository(tmp_path).store(normalized_glyph)
+    body_id = normalized_glyph.strokes[0].id
+    annotation = GlyphAnnotation(
+        source_normalized_sha256=normalized.sha256,
+        source_processed_sha256=processed.sha256,
+        variant_id="ma-recorded",
+        label="ма",
+        context_tags=frozenset({"isolated", "initial", "medial", "final"}),
+        stroke_order=(body_id,),
+        stroke_roles=(StrokeRoleAssignment(stroke_id=body_id, role="body"),),
+        join_mode="none",
+        no_join_before=True,
+        no_join_after=True,
+        boundary_status="manual",
+        character_boundaries_gu=(450.0,),
+    )
+    ligature_file = build_recorded_ligature(annotation, normalized_glyph, {"м", "а"})
+    ligature = to_variant(ligature_file)
+    with pytest.raises(ValueError, match="LIGATURE_MISSING_INDIVIDUAL_FALLBACK"):
+        build_recorded_ligature(annotation, normalized_glyph, {"м"})
+
+    none = JoinSpec("none", None, (), None, None, True, True)
+    individual = {
+        key: GlyphVariant(
+            f"{key}-single", key,
+            (Stroke("body", (Line(Point2(0, 0), Point2(350, 700)),),
+                    role="body", direction_provenance="authored"),),
+            500.0, frozenset({"isolated", "initial", "medial", "final"}), none, (),
+        )
+        for key in ("м", "а")
+    }
+    manifest = StyleManifest.model_validate({
+        "format": "hp-style", "schema_version": "1.0", "style_id": "recorded", "revision": "0.1.0",
+        "display_name": "Recorded test", "scripts": ("Cyrillic",),
+        "license_record": {"license_id": "personal-test-only", "name": "Personal", "redistribution_allowed": False},
+        "glyph_frame": "GlyphFrame",
+        "metrics": {"x_height_gu": 1000.0, "ascender_gu": profile.ascender_gu,
+                    "descender_gu": profile.descender_gu, "space_advance_gu": 900.0,
+                    "line_gap_gu": 500.0, "supported_x_height_mm": (2.5, 5.0)},
+        "coverage": ("м", "а", "ма"), "glyph_files": (), "join_rules": {},
+        "variation_policy": {}, "file_hashes": {}, "approved": False,
+        "production_eligible": False, "test_only": True,
+    })
+    style = StyleSnapshot(
+        manifest,
+        MappingProxyType({"м": (individual["м"],), "а": (individual["а"],), "ма": (ligature,)}),
+        "recorded-style-hash",
+    )
+
+    document = layout_document(normalize("мама"), style, seed=17, variation=VariationSpec(0))
+    plan = compile_page(document.pages[0], document.document_id)
+    draws = [operation for operation in plan.operations if isinstance(operation, Draw)]
+
+    assert len(draws) == 2
+    assert all(body_id in stroke_id for draw in draws for stroke_id in draw.stroke_ids)
+    assert compile_page(document.pages[0], document.document_id) == plan

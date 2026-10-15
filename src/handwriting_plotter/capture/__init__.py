@@ -4,8 +4,10 @@ from .annotation import (
     AnnotationStore,
     GlyphAnnotation,
     PairJoinPreview,
+    build_recorded_ligature,
     create_anchor_annotation,
     preview_join,
+    validate_ligature_fallback,
 )
 
 from .models import (
@@ -62,8 +64,10 @@ __all__ = [
     "WritingGuides",
     "load_capture_bytes",
     "create_anchor_annotation",
+    "build_recorded_ligature",
     "normalize_processed_glyph",
     "process_sample",
     "preview_join",
+    "validate_ligature_fallback",
     "serialize_capture",
 ]

@@ -337,6 +337,18 @@ Anchor metadata явно хранит compatibility classes и gap/vertical/angl
 причиной существующего geometry-aware join engine. Preview не публикует и не
 сохраняет выдуманный connector в glyph geometry.
 
+Для label из 2…8 graphemes аннотация может иметь
+`boundary_status=manual` и ровно N−1 strictly increasing
+`character_boundaries_gu` внутри glyph advance. `unannotated` обязан хранить
+пустой список и не утверждает успешную segmentation. Boundaries являются review
+metadata; recorded strokes остаются единым ordered movement sequence.
+
+Recorded ligature публикуется как обычный `GlyphVariant.key` с несколькими NFC
+graphemes и участвует в существующем longest-match resolver. До создания
+кандидата каждый отдельный grapheme key обязан присутствовать как fallback;
+отсутствие sequence key автоматически оставляет individual glyphs и обычную
+join logic. Отдельного string replacement слоя нет.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

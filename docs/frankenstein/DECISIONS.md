@@ -81,3 +81,15 @@ connector or diagnostic is the behavior publication will receive. A failed
 join remains a lift/rejection and never triggers path reversal or an invented
 connector.
 
+## F-ADR-011: Represent recorded ligatures as ordinary longest-match keys
+
+Status: accepted, 2026-10-15.
+
+An explicitly labeled 2–8 grapheme capture remains one directed stroke
+sequence and becomes a normal multi-grapheme GlyphVariant key. The existing
+resolver supplies deterministic longest-match selection and individual-glyph
+fallback, so no string replacement engine is added. Optional character
+boundaries are manual review metadata with an explicit unannotated state. A
+ligature cannot advance toward publication unless every constituent grapheme
+also has an individual candidate.
+
