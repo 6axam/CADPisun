@@ -1,20 +1,21 @@
 # Project Frankenstein — progress
 
-Last updated: 2026-10-14.
+Last updated: 2026-10-15.
 
 ## Current checkpoint
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 06 — stroke normalization and processing
-- Last completed phase: 05 — glyph variant management
+- Phase: 07 — metrics, baselines and glyph geometry
+- Last completed phase: 06 — stroke normalization and processing
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
 - Phase 03 commit: `1dd1204`
 - Phase 04 commit: `f0ca242`
-- Phase 05 commit: see the commit named `feat: manage multiple captured glyph variants` (recorded at the next checkpoint).
-- Next concrete action: implement duplicate filtering, resampling, smoothing, simplification, fitting and measured source deviation.
+- Phase 05 commit: `5b0bc0c`
+- Phase 06 commit: see the commit named `feat: process captured handwriting into directed vector strokes` (recorded at the next checkpoint).
+- Next concrete action: transform reviewed logical-pixel derivatives into GlyphFrame units with explicit baseline/x-height metrics and bearings.
 
 ## Validation ledger
 
@@ -31,6 +32,9 @@ Last updated: 2026-10-14.
 | 2026-10-14 | Phase 04 full Linux headless regression | 171 passed in 13.81 s |
 | 2026-10-14 | Phase 05 draft/variant focused suites | 7 passed in 1.29 s |
 | 2026-10-14 | Phase 05 full Linux headless regression | 174 passed in 12.65 s |
+| 2026-10-15 | Phase 06 processing/Qt focused suites | 18 passed in 2.56 s |
+| 2026-10-15 | Phase 06 full Linux headless regression | 183 passed in 13.86 s |
+| 2026-10-15 | Phase 06 strict-tolerance processing benchmark | median 0.5574 s over 7 runs |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -102,9 +106,29 @@ poor input, or remove it from the editable draft. Preferred/review/delete
 changes append history events. Deleted captures remain byte-verified in the raw
 repository and are recovered in the audit catalog after restart.
 
-### Phase 06 — IN_PROGRESS
+### Phase 06 — DONE
 
 - Keep the processing module Qt-free and derivatives linked to capture SHA-256.
 - Certify maximum source-to-result deviation for every processed stroke.
 - Preserve direction, boundaries, corners, loops, and small marks without path reversal.
+
+The Qt-free pipeline filters consecutive duplicates, resamples while retaining
+source vertices, optionally smooths non-corner points, simplifies protected
+spans, and fits existing Line/Quadratic/Cubic primitives. Every candidate is
+checked against the original directed polyline with a conservative symmetric
+error upper bound; a candidate that exceeds the requested tolerance falls back
+to less simplified geometry instead of weakening the tolerance.
+
+`hp-processed-capture/1.0` derivatives are canonical, immutable,
+content-addressed, parameter-complete, and linked to their verified raw SHA-256.
+Studio overlays Raw/Processed geometry, invalidates stale overlays when source
+or parameters change, restores saved derivatives, and removes processing
+without modifying raw points. The acceptance suite processes one sample at two
+tolerances and verifies both links and error limits.
+
+### Phase 07 — IN_PROGRESS
+
+- Keep the raw logical-pixel frame explicit and immutable.
+- Map guides and reviewed processed geometry into existing GlyphFrame `gu` conventions.
+- Persist advances and side bearings without distorting natural proportions.
 

@@ -82,6 +82,29 @@ The acceptance test records three geometrically different `м` samples, renders
 three thumbnails, selects one preferred, reopens it, tombstones another, and
 verifies that every immutable raw file still exists after Studio restart.
 
+### Phase 06 stroke normalization and processing
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_processing.py tests/gui/test_capture_widget.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `18 passed in 2.56s`; full regression `183 passed in 13.86s`.
+Acceptance evidence covers two tolerances linked to one raw SHA-256, certified
+per-stroke error limits, deterministic output, Line/Quadratic/Cubic fitting,
+duplicate filtering, corner/loop/mark preservation, immutable round-trip,
+tamper rejection, Raw/Processed overlay, parameter invalidation, undo, and
+reopen. The resampling budget is rejected before allocating an excessive
+derived point array. Persistence also rejects a derivative when its verified
+raw capture/sample source is absent. No physical tablet/touch hardware was used.
+
+The confirmed hot path was repeated point-to-polyline distance evaluation. A
+profile of the strict 0.35 px fixture initially spent 7.324 s in a helper that
+allocated a `Point2` for every projection. Direct scalar squared-distance
+evaluation reduced the unprofiled seven-run median to `0.5574s` (individual
+runs 0.5506–0.5706 s) without changing the error bound or serialized result.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

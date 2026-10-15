@@ -31,6 +31,8 @@ from handwriting_plotter.capture.models import (
     PointerType,
     WritingGuides,
 )
+from handwriting_plotter.geometry.curves import Stroke
+from handwriting_plotter.geometry.flatten import FlattenLimits, flatten_segment
 
 from .theme import COLORS
 
@@ -66,6 +68,9 @@ class HandwritingCaptureWidget(QWidget):
         self._writing_guides: WritingGuides | None = None
         self._show_points = False
         self._show_directions = False
+        self._processed_strokes: tuple[Stroke, ...] = ()
+        self._show_raw = True
+        self._show_processed = True
         self._zoom_factor = 1.0
         self._pan = QPointF()
         self._pan_origin: QPointF | None = None
@@ -74,6 +79,10 @@ class HandwritingCaptureWidget(QWidget):
     @property
     def strokes(self) -> tuple[CaptureStroke, ...]:
         return tuple(self._strokes)
+
+    @property
+    def processed_strokes(self) -> tuple[Stroke, ...]:
+        return self._processed_strokes
 
     @property
     def has_active_stroke(self) -> bool:
@@ -154,6 +163,22 @@ class HandwritingCaptureWidget(QWidget):
 
     def set_show_directions(self, enabled: bool) -> None:
         self._show_directions = bool(enabled)
+        self.update()
+
+    def set_processed_strokes(self, strokes: tuple[Stroke, ...]) -> None:
+        self._processed_strokes = tuple(strokes)
+        self.update()
+
+    def clear_processed(self) -> None:
+        self._processed_strokes = ()
+        self.update()
+
+    def set_show_raw(self, enabled: bool) -> None:
+        self._show_raw = bool(enabled)
+        self.update()
+
+    def set_show_processed(self, enabled: bool) -> None:
+        self._show_processed = bool(enabled)
         self.update()
 
     def set_zoom_factor(self, value: float) -> None:
@@ -318,11 +343,28 @@ class HandwritingCaptureWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(COLORS["paper"]))
         self._paint_guides(painter)
-        stroke_pen = QPen(QColor("#20242a"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
-                          Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(stroke_pen)
-        for points in (*[stroke.points for stroke in self._strokes], tuple(self._active_points)):
-            self._paint_points(painter, points)
+        if self._show_raw:
+            raw_color = "#858b94" if self._processed_strokes and self._show_processed else "#20242a"
+            stroke_pen = QPen(QColor(raw_color), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                              Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(stroke_pen)
+            for points in (*[stroke.points for stroke in self._strokes], tuple(self._active_points)):
+                self._paint_points(painter, points)
+        if self._show_processed and self._processed_strokes:
+            painter.setPen(QPen(
+                QColor(COLORS["accent"]), 2.4, Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin,
+            ))
+            for stroke in self._processed_strokes:
+                for segment in stroke.segments:
+                    lines, _ = flatten_segment(
+                        segment, 0.05, FlattenLimits(max_chord_length=2.0, max_segments=100_000)
+                    )
+                    for line in lines:
+                        painter.drawLine(
+                            self._from_capture(line.p0.x, line.p0.y),
+                            self._from_capture(line.p1.x, line.p1.y),
+                        )
 
     def _paint_guides(self, painter: QPainter) -> None:
         reference = self.coordinate_reference
@@ -478,6 +520,7 @@ class HandwritingCaptureWidget(QWidget):
         return f"{prefix}-{uuid.uuid4().hex}"
 
     def _publish_change(self) -> None:
+        self._processed_strokes = ()
         point_count = sum(len(stroke.points) for stroke in self._strokes) + len(self._active_points)
         self.strokes_changed.emit(len(self._strokes), point_count)
         self.update()

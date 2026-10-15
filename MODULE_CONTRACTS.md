@@ -241,6 +241,26 @@ accepted/rejected и delete создают следующую запись histo
 восстановление сохраняют tombstones. Reopen всегда повторно загружает raw bytes
 по capture_sha256.
 
+### 12.2 Capture processing boundary
+
+`capture/processing.py` не импортирует Qt. `process_sample(sample,
+source_capture_sha256, parameters)` детерминированно возвращает
+`ProcessedCapture` в том же logical-pixel frame. Он сохраняет one-to-one
+порядок/IDs/boundaries strokes, captured direction и endpoints, не объединяет
+и не разворачивает paths. Характерные corners и loop anchor защищаются от
+smoothing/simplification. Point mark остаётся отдельным directed mark.
+
+Перед возвратом pipeline измеряет symmetric source/result deviation с
+ограниченным шагом и добавляет conservative sampling/curve-flattening margin.
+Результат с upper bound выше declared tolerance отвергается; fallback может
+уменьшить simplification вплоть до исходной polyline, но не ослабляет tolerance.
+До выделения resampled arrays проверяется общий point budget.
+`ProcessedRepository` canonical-сериализует `hp-processed-capture/1.0`,
+публикует его atomic content-addressed write под source hash, а при load снова
+проверяет derivative hash, существование/hash raw capture и source sample link.
+UI отвечает только за выбор параметров
+и Raw/Processed overlay; отмена overlay не вызывает удаление raw bytes.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

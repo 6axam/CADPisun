@@ -33,6 +33,12 @@ from PySide6.QtWidgets import (
 
 from handwriting_plotter.capture.models import CaptureProvenance, CaptureSession, WritingGuides
 from handwriting_plotter.capture.drafts import DraftCatalog, DraftEvent, DraftStore, VariantDraft
+from handwriting_plotter.capture.processing import (
+    ProcessedRecord,
+    ProcessedRepository,
+    ProcessingParameters,
+    process_sample,
+)
 from handwriting_plotter.capture.queue import CaptureQueueState, CaptureQueueStore
 from handwriting_plotter.capture.repository import CaptureRecord, CaptureRepository
 from handwriting_plotter.version import __version__
@@ -68,9 +74,12 @@ class HandwritingStudio(QWidget):
         self.root = root
         self.language = language
         self.repository = CaptureRepository(root)
+        self.processed_repository = ProcessedRepository(root)
         self.queue_store = CaptureQueueStore(root)
         self.draft_store = DraftStore(root)
         self._records: list[CaptureRecord] = []
+        self._processed_record: ProcessedRecord | None = None
+        self._processing_status = ""
         self._load_errors: list[str] = []
         try:
             self.queue_state = self.queue_store.load("default")
@@ -195,6 +204,32 @@ class HandwritingStudio(QWidget):
             view_controls.addWidget(widget)
         view_controls.addStretch(1)
         center_layout.addLayout(view_controls)
+        processing_controls = QHBoxLayout()
+        self.tolerance_label = QLabel()
+        self.tolerance_spin = QDoubleSpinBox()
+        self.tolerance_spin.setObjectName("studio-processing-tolerance")
+        self.tolerance_spin.setRange(0.05, 100.0)
+        self.tolerance_spin.setDecimals(2)
+        self.tolerance_spin.setSingleStep(0.1)
+        self.tolerance_spin.setValue(1.0)
+        self.smoothing_label = QLabel()
+        self.smoothing_spin = QSpinBox()
+        self.smoothing_spin.setRange(0, 8)
+        self.process_button = QPushButton()
+        self.process_button.setObjectName("studio-process")
+        self.undo_processing_button = QPushButton()
+        self.undo_processing_button.setObjectName("studio-undo-processing")
+        self.raw_check = QCheckBox()
+        self.raw_check.setChecked(True)
+        self.processed_check = QCheckBox()
+        self.processed_check.setChecked(True)
+        for widget in (
+            self.tolerance_label, self.tolerance_spin, self.smoothing_label, self.smoothing_spin,
+            self.process_button, self.undo_processing_button, self.raw_check, self.processed_check,
+        ):
+            processing_controls.addWidget(widget)
+        processing_controls.addStretch(1)
+        center_layout.addLayout(processing_controls)
         upper.addWidget(center)
 
         right = QWidget()
@@ -223,6 +258,8 @@ class HandwritingStudio(QWidget):
         self.review_value = QLabel("draft")
         self.hash_value = QLabel("—")
         self.hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.processed_hash_value = QLabel("—")
+        self.processed_hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._property_rows = (
             ("studio.label", self.label_edit),
             ("studio.variant", self.variant_edit),
@@ -236,6 +273,7 @@ class HandwritingStudio(QWidget):
             ("studio.pressure", self.pressure_value),
             ("studio.review", self.review_value),
             ("studio.raw_hash", self.hash_value),
+            ("studio.processed_hash", self.processed_hash_value),
         )
         self._property_labels: dict[str, QLabel] = {}
         for key, widget in self._property_rows:
@@ -304,6 +342,12 @@ class HandwritingStudio(QWidget):
         self.delete_variant_button.clicked.connect(self._delete_selected_variant)
         self.points_check.toggled.connect(self.capture_canvas.set_show_points)
         self.directions_check.toggled.connect(self.capture_canvas.set_show_directions)
+        self.raw_check.toggled.connect(self.capture_canvas.set_show_raw)
+        self.processed_check.toggled.connect(self.capture_canvas.set_show_processed)
+        self.process_button.clicked.connect(self.process_current)
+        self.undo_processing_button.clicked.connect(self.undo_processing)
+        self.tolerance_spin.valueChanged.connect(self._processing_parameters_changed)
+        self.smoothing_spin.valueChanged.connect(self._processing_parameters_changed)
         self.zoom_out_button.clicked.connect(
             lambda: self.capture_canvas.set_zoom_factor(self.capture_canvas.zoom_factor / 1.25)
         )
@@ -347,6 +391,12 @@ class HandwritingStudio(QWidget):
         self.queue_preset.blockSignals(False)
         self.points_check.setText(tr(language, "studio.points_toggle"))
         self.directions_check.setText(tr(language, "studio.directions_toggle"))
+        self.tolerance_label.setText(tr(language, "studio.tolerance"))
+        self.smoothing_label.setText(tr(language, "studio.smoothing"))
+        self.process_button.setText(tr(language, "studio.process"))
+        self.undo_processing_button.setText(tr(language, "studio.undo_processing"))
+        self.raw_check.setText(tr(language, "studio.raw_toggle"))
+        self.processed_check.setText(tr(language, "studio.processed_toggle"))
         self._refresh_collection()
         self._refresh_variants()
         self._refresh_queue_status()
@@ -393,11 +443,96 @@ class HandwritingStudio(QWidget):
             return None
         self._records.append(record)
         self._add_record_to_draft(record)
+        self._clear_processing_state()
         self.hash_value.setText(record.sha256)
         self._refresh_collection()
         self._refresh_variants()
         self._refresh_diagnostics(tr(self.language, "studio.saved").format(hash=record.sha256[:12]))
         return record
+
+    def process_current(self) -> ProcessedRecord | None:
+        """Process the visible raw sample and persist a linked derivative."""
+        digest = self.hash_value.text()
+        if len(digest) != 64:
+            raw_record = self.save_sample()
+            if raw_record is None:
+                return None
+            digest = raw_record.sha256
+        record = next((item for item in self._records if item.sha256 == digest), None)
+        if record is None:
+            self._processing_status = tr(self.language, "studio.processing_source_missing")
+            self._refresh_diagnostics()
+            return None
+        try:
+            parameters = ProcessingParameters(
+                max_deviation_px=self.tolerance_spin.value(),
+                smoothing_passes=self.smoothing_spin.value(),
+            )
+            processed = process_sample(record.session.samples[0], digest, parameters)
+            processed_record = self.processed_repository.store(processed)
+        except Exception as exc:
+            self._processing_status = f"{tr(self.language, 'studio.processing_failed')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        self._processed_record = processed_record
+        self.capture_canvas.set_processed_strokes(processed.to_strokes())
+        self.processed_hash_value.setText(processed_record.sha256)
+        maximum = max(report.certified_max_deviation_px for report in processed.reports)
+        self._processing_status = tr(self.language, "studio.processed").format(
+            hash=processed_record.sha256[:12], error=maximum,
+        )
+        self._refresh_diagnostics()
+        return processed_record
+
+    def undo_processing(self) -> bool:
+        """Remove the derivative from the view while retaining immutable raw data."""
+        if self._processed_record is None:
+            return False
+        self._processed_record = None
+        self.capture_canvas.clear_processed()
+        self.processed_hash_value.setText("—")
+        self._processing_status = tr(self.language, "studio.processing_undone")
+        self._refresh_diagnostics()
+        return True
+
+    def _restore_latest_processed(self, source_hash: str) -> None:
+        self._clear_processing_state()
+        try:
+            records = self.processed_repository.list_for_source(source_hash)
+        except Exception as exc:
+            self._processing_status = f"{tr(self.language, 'studio.processing_failed')}\n{exc}"
+            return
+        if not records:
+            return
+        record = records[-1]
+        self._processed_record = record
+        parameters = record.processed.parameters
+        for spin, value in (
+            (self.tolerance_spin, parameters.max_deviation_px),
+            (self.smoothing_spin, parameters.smoothing_passes),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.capture_canvas.set_processed_strokes(record.processed.to_strokes())
+        self.processed_hash_value.setText(record.sha256)
+        maximum = max(item.certified_max_deviation_px for item in record.processed.reports)
+        self._processing_status = tr(self.language, "studio.processed_reopened").format(
+            hash=record.sha256[:12], error=maximum,
+        )
+
+    def _clear_processing_state(self) -> None:
+        self._processed_record = None
+        self.capture_canvas.clear_processed()
+        self.processed_hash_value.setText("—")
+        self._processing_status = ""
+
+    def _processing_parameters_changed(self) -> None:
+        if self._processed_record is None:
+            return
+        self._clear_processing_state()
+        self._processing_status = tr(self.language, "studio.processing_parameters_changed")
+        self._refresh_diagnostics()
 
     def save_and_next(self) -> CaptureRecord | None:
         record = self.save_sample()
@@ -435,6 +570,7 @@ class HandwritingStudio(QWidget):
             if isinstance(advance, (int, float)) and not isinstance(advance, bool):
                 self.advance_spin.setValue(float(advance))
         self.hash_value.setText(record.sha256)
+        self._restore_latest_processed(record.sha256)
         self._sync_guide_controls()
         self._refresh_diagnostics(tr(self.language, "studio.opened").format(hash=record.sha256[:12]))
         self._refresh_variants()
@@ -488,12 +624,24 @@ class HandwritingStudio(QWidget):
                 self._set_queue_state(current_index=self.queue_state.tokens.index(token))
 
     def _label_changed(self, label: str) -> None:
+        if len(self.hash_value.text()) == 64:
+            self.hash_value.setText("—")
+            self._clear_processing_state()
+            self._processing_status = tr(self.language, "studio.processing_invalidated")
         if not self.variant_edit.hasFocus():
             self.variant_edit.setText(self._suggest_variant_id(label.strip()))
         self._refresh_diagnostics()
         self._refresh_variants()
 
     def _capture_changed(self, strokes: int, points: int) -> None:
+        had_processed = self._processed_record is not None
+        self._processed_record = None
+        self.capture_canvas.clear_processed()
+        self.processed_hash_value.setText("—")
+        if len(self.hash_value.text()) == 64:
+            self.hash_value.setText("—")
+        if had_processed:
+            self._processing_status = tr(self.language, "studio.processing_invalidated")
         self.stroke_count_value.setText(str(strokes))
         self.point_count_value.setText(str(points))
         self.pressure_value.setText(
@@ -510,6 +658,7 @@ class HandwritingStudio(QWidget):
         self.capture_canvas.clear()
         self.hash_value.setText("—")
         self.review_value.setText("draft")
+        self._clear_processing_state()
         self._sync_guide_controls()
 
     def _sync_guide_controls(self) -> None:
@@ -531,6 +680,8 @@ class HandwritingStudio(QWidget):
                 baseline_y=baseline,
                 descender_y=max(current.descender_y, baseline),
             ))
+            self.hash_value.setText("—")
+            self._clear_processing_state()
         except ValueError as exc:
             self._refresh_diagnostics(str(exc))
 
@@ -547,9 +698,13 @@ class HandwritingStudio(QWidget):
         if label and self.capture_canvas.strokes:
             messages.append(tr(self.language, "studio.valid_raw"))
         messages.append(tr(self.language, "studio.raw_notice"))
+        if self._processing_status:
+            messages.append(self._processing_status)
         self.diagnostics.setPlainText("\n".join(messages))
         self.save_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.save_next_button.setEnabled(bool(label and self.capture_canvas.strokes))
+        self.process_button.setEnabled(bool(label and self.capture_canvas.strokes))
+        self.undo_processing_button.setEnabled(self._processed_record is not None)
 
     def _queue_counts(self) -> dict[str, int]:
         counts = {token: 0 for token in self.queue_state.tokens}

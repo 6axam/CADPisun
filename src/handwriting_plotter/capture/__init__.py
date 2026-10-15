@@ -11,6 +11,13 @@ from .models import (
     WritingGuides,
 )
 from .repository import CaptureRecord, CaptureRepository, load_capture_bytes, serialize_capture
+from .processing import (
+    ProcessedCapture,
+    ProcessedRecord,
+    ProcessedRepository,
+    ProcessingParameters,
+    process_sample,
+)
 
 __all__ = [
     "CapturePoint",
@@ -22,7 +29,12 @@ __all__ = [
     "CaptureStroke",
     "CoordinateReference",
     "DeviceCapabilities",
+    "ProcessedCapture",
+    "ProcessedRecord",
+    "ProcessedRepository",
+    "ProcessingParameters",
     "WritingGuides",
     "load_capture_bytes",
+    "process_sample",
     "serialize_capture",
 ]

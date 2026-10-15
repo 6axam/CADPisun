@@ -42,3 +42,16 @@ Status: accepted, 2026-10-14.
 
 A user may explicitly review a limited personal draft and publish it for technical use, but the generated manifest remains `test_only=true` and `production_eligible=false`. Synthetic fixtures never claim human authorship or independent approval. Product release gates in the existing architecture remain unchanged.
 
+## F-ADR-008: Certify capture processing before persistence
+
+Status: accepted, 2026-10-15.
+
+Processing remains an independently testable Python module and uses the existing
+Line, Quadratic, Cubic, and Stroke IR without adding Ink Stroke Modeler's native
+runtime. Corner-aware resampling and Douglas–Peucker simplification may propose
+geometry, but a symmetric deviation check with an explicit sampling and
+flattening margin decides whether it is accepted. The pipeline falls back to
+less simplified geometry instead of increasing the requested tolerance. Raw
+logical pixels remain their own frame until Phase 07; no false `gu` unit is
+assigned to a processed derivative.
+

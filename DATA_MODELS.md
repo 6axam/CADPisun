@@ -265,6 +265,32 @@ history. Для одного label допускается не более одн
 Delete создаёт tombstone и history event; исходный capture остаётся доступен по
 hash. Только последующий builder решает, какие accepted candidates публиковать.
 
+### 9.3 Processed online capture v1
+
+`hp-processed-capture/1.0` — canonical UTF-8 JSON неизменяемого производного
+артефакта. Он обязательно содержит `source_capture_sha256`, `source_sample_id`,
+исходные размеры logical-pixel frame, полный `ProcessingParameters`, ordered
+`StrokeModel` и соответствующий каждому штриху `StrokeProcessingReport`.
+Координаты остаются в raw logical pixels до явного преобразования Phase 07 и
+не выдаются за `gu` или `mm`.
+
+Pipeline фиксирован версией algorithm: consecutive duplicate filtering,
+edge-preserving resampling, optional corner-aware smoothing, Douglas–Peucker
+simplification по spans между защищёнными углами, Line/Quadratic/Cubic fitting
+и проверка directed geometry. Каждый output stroke имеет тот же ID, первый и
+последний point и captured direction, что source stroke; объединение strokes и
+reversal запрещены. Замкнутые paths сохраняют отдельный дальний anchor, а
+zero-travel pen tap представляется ограниченной out-and-back mark geometry.
+
+Report хранит raw/filtered/resampled counts, fitting kind, segment count,
+sampling resolution, measured symmetric deviation и conservative certified
+upper bound. `certified_max_deviation_px <= parameters.max_deviation_px` —
+обязательный инвариант модели. Derivative сохраняется content-addressed и
+атомарно; изменение tolerance или других параметров создаёт другой файл, не
+изменяя raw capture. GUI может убрать processed overlay, но это не удаляет raw
+или уже сохранённый derivative. Лимиты: 32 MiB/derivative и не более 2 000 000
+предварительно рассчитанных resampled points на один вызов processing.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

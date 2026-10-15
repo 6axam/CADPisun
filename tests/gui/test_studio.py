@@ -197,3 +197,41 @@ def test_three_variants_can_be_browsed_preferred_reopened_and_removed(qtbot, tmp
     assert reopened.variant_list.count() == 2
     assert next(item for item in reopened.draft_catalog.variants if item.variant_id == selected_id).preferred
 
+
+def test_raw_and_processed_comparison_persists_two_tolerances_and_undoes_safely(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1200, 760)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    raw_record = studio.save_sample()
+    assert raw_record is not None
+    raw_strokes = studio.capture_canvas.strokes
+
+    studio.tolerance_spin.setValue(0.5)
+    fine = studio.process_current()
+    assert fine is not None
+    assert fine.processed.source_capture_sha256 == raw_record.sha256
+    assert studio.capture_canvas.processed_strokes
+    assert all(report.certified_max_deviation_px <= 0.5 for report in fine.processed.reports)
+
+    studio.tolerance_spin.setValue(2.0)
+    assert studio.capture_canvas.processed_strokes == ()
+    coarse = studio.process_current()
+    assert coarse is not None
+    assert coarse.sha256 != fine.sha256
+    assert coarse.processed.source_capture_sha256 == raw_record.sha256
+    assert len(studio.processed_repository.list_for_source(raw_record.sha256)) == 2
+
+    assert studio.undo_processing()
+    assert studio.capture_canvas.processed_strokes == ()
+    assert studio.capture_canvas.strokes == raw_strokes
+    assert studio.repository.load(raw_record.sha256) == raw_record.session
+
+    reopened = HandwritingStudio(tmp_path)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened.capture_canvas.processed_strokes
+    assert reopened.processed_hash_value.text() in {fine.sha256, coarse.sha256}
+
