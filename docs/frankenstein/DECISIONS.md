@@ -68,3 +68,16 @@ a glyph to fill its own vertical box. Physical preview uses the architecture's
 nominal gu-to-mm conversion and is labeled in millimetres rather than pretending
 to be monitor-calibrated 1:1 output.
 
+## F-ADR-010: Make joins an explicit reviewed annotation
+
+Status: accepted, 2026-10-15.
+
+Capture order and normalized geometry remain immutable while an editable,
+source-linked annotation assigns stroke roles, one body, deferred marks,
+anchors, compatibility classes, and forced pen lifts. Tangents are derived from
+the actual directed path and revalidated rather than authored independently.
+Pair preview delegates to the existing placement and join engine so its
+connector or diagnostic is the behavior publication will receive. A failed
+join remains a lift/rejection and never triggers path reversal or an invented
+connector.
+

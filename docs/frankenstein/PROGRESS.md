@@ -6,8 +6,8 @@ Last updated: 2026-10-15.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 08 — manual glyph annotation and joins
-- Last completed phase: 07 — metrics, baselines and glyph geometry
+- Phase: 09 — multi-character samples and ligatures
+- Last completed phase: 08 — manual glyph annotation and joins
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
@@ -15,8 +15,9 @@ Last updated: 2026-10-15.
 - Phase 04 commit: `f0ca242`
 - Phase 05 commit: `5b0bc0c`
 - Phase 06 commit: `b33b48c`
-- Phase 07 commit: see the commit named `feat: normalize captured glyph metrics` (recorded at the next checkpoint).
-- Next concrete action: add manual stroke roles, body/mark ordering, join anchors, no-join flags and review validation.
+- Phase 07 commit: `f08da52`
+- Phase 08 commit: see the commit named `feat: annotate handwriting joins and pen-lift rules` (recorded at the next checkpoint).
+- Next concrete action: preserve and publish explicitly recorded multi-grapheme samples as optional ligature candidates with single-glyph fallback.
 
 ## Validation ledger
 
@@ -38,6 +39,8 @@ Last updated: 2026-10-15.
 | 2026-10-15 | Phase 06 strict-tolerance processing benchmark | median 0.5574 s over 7 runs |
 | 2026-10-15 | Phase 07 metrics/Studio focused suites | 12 passed in 3.00 s |
 | 2026-10-15 | Phase 07 full Linux headless regression | 189 passed in 15.40 s |
+| 2026-10-15 | Phase 08 annotation/Studio focused suites | 12 passed in 3.48 s |
+| 2026-10-15 | Phase 08 full Linux headless regression | 194 passed in 13.76 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -148,9 +151,27 @@ the tall `а`, proving that no per-glyph bounding-box height normalization runs.
 Studio provides a real GlyphFrame preview with millimetre dimensions and
 restores the immutable normalized derivative after restart.
 
-### Phase 08 — IN_PROGRESS
+### Phase 08 — DONE
 
 - Keep annotation manual and auditable; never infer joins from appearance alone.
 - Persist stroke roles, mark scheduling and anchor constraints separately from geometry sources.
 - Validate annotation against the normalized glyph before publication.
+
+`hp-glyph-annotation/1.0` stores exact normalized/processed source hashes,
+original stroke order, manual roles, one body, ordered deferred marks, actual
+endpoint tangents, anchor constraints, context tags, critical marks and forced
+pen lifts. Contiguous revisions are revalidated against the full immutable
+source chain. Conversion produces only a draft existing `GlyphVariantFile`.
+
+Studio exposes functional stroke-role/body/anchor/no-join controls, shows the
+derived tangent vectors, and persists/reopens annotation revisions. Pair preview
+uses the existing placement and geometry-aware join engine and visually reports
+`connected`, intentional `pen_lift`, or `rejected` with the exact engine reason.
+Tests cover all three decisions and prove multistroke/mark order is unchanged.
+
+### Phase 09 — IN_PROGRESS
+
+- Treat sequence captures as explicit candidates, never inferred text substitutions.
+- Keep individual-glyph fallback mandatory and longest-match behavior deterministic.
+- Preserve the recorded sequence as one directed multi-stroke unit with provenance.
 

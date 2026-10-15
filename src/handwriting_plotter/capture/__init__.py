@@ -1,5 +1,13 @@
 """Strict online-handwriting capture models and immutable persistence."""
 
+from .annotation import (
+    AnnotationStore,
+    GlyphAnnotation,
+    PairJoinPreview,
+    create_anchor_annotation,
+    preview_join,
+)
+
 from .models import (
     CapturePoint,
     CaptureProvenance,
@@ -29,6 +37,7 @@ from .processing import (
 )
 
 __all__ = [
+    "AnnotationStore",
     "CapturePoint",
     "CaptureProvenance",
     "CaptureRecord",
@@ -39,10 +48,12 @@ __all__ = [
     "CoordinateReference",
     "DeviceCapabilities",
     "GlyphMetricOverride",
+    "GlyphAnnotation",
     "MetricProfileStore",
     "NormalizedGlyph",
     "NormalizedRecord",
     "NormalizedRepository",
+    "PairJoinPreview",
     "ProcessedCapture",
     "ProcessedRecord",
     "ProcessedRepository",
@@ -50,7 +61,9 @@ __all__ = [
     "StyleMetricProfile",
     "WritingGuides",
     "load_capture_bytes",
+    "create_anchor_annotation",
     "normalize_processed_glyph",
     "process_sample",
+    "preview_join",
     "serialize_capture",
 ]

@@ -316,6 +316,27 @@ physical preview x-height. Bounds и bearings пересчитываются п�
 `x_mm=x_gu*h/1000`, `y_mm=-y_gu*h/1000`; это явная размерная модель, а не
 предположение о реальном DPI монитора.
 
+### 9.5 Manual glyph annotation v1
+
+`hp-glyph-annotation/1.0` — editable contiguous revision, связанная с exact
+normalized/processed SHA-256. `stroke_order` обязан точно совпадать с immutable
+normalized geometry; `stroke_roles` перечисляет те же IDs в том же порядке.
+Допустимые ручные роли draft: body, mark, punctuation. Geometry, direction и
+порядок pen lifts аннотация не меняет.
+
+`join_mode=none` не содержит body/deferred/anchor data и означает pen lift.
+`single_body_deferred_marks` требует ровно один body; все остальные strokes
+являются marks и перечислены в original order. Entry выбирает только начало
+body, exit — только конец. Unit tangent вычисляется из реального первого или
+последнего segment и при load должен совпасть с geometry в пределах 1°.
+Anchor metadata явно хранит compatibility classes и gap/vertical/angle limits;
+`no_join_before/after` имеет приоритет.
+
+`PairJoinPreview` имеет units=mm и возвращает `connected` с настоящим connector,
+`pen_lift` для явного запрета/отсутствующей join semantics либо `rejected` с
+причиной существующего geometry-aware join engine. Preview не публикует и не
+сохраняет выдуманный connector в glyph geometry.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

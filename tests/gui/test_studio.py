@@ -272,3 +272,43 @@ def test_studio_normalizes_with_shared_metrics_and_reopens_physical_preview(qtbo
     assert reopened.normalization_preview.glyph is not None
     assert reopened.normalized_hash_value.text() == normalized.sha256
 
+
+def test_studio_saves_manual_join_annotation_and_shows_actual_pair_diagnostic(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1500, 1000)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    assert studio.save_sample() is not None
+    assert studio.process_current() is not None
+    assert studio.set_style_metrics_from_current() is not None
+    normalized = studio.normalize_current()
+    assert normalized is not None
+    studio.annotation_mode_combo.setCurrentText("single_body_deferred_marks")
+    studio.annotation_body_combo.setCurrentIndex(0)
+    studio.annotation_entry_check.setChecked(True)
+    studio.annotation_exit_check.setChecked(True)
+
+    annotation = studio.save_annotation()
+
+    assert annotation is not None
+    assert annotation.body_stroke_id == normalized.glyph.strokes[0].id
+    assert annotation.stroke_order == tuple(item.id for item in normalized.glyph.strokes)
+    assert annotation.entry is not None
+    assert annotation.exit is not None
+    assert studio.annotation_tangent_value.text() != "—"
+    assert studio.annotation_partner_combo.count() == 1
+
+    result = studio.preview_annotation_pair()
+    assert result is not None
+    assert result.decision in {"connected", "pen_lift", "rejected"}
+    assert result.reason in studio.diagnostics.toPlainText()
+    assert studio.join_preview._strokes
+
+    reopened = HandwritingStudio(tmp_path)
+    reopened.resize(1500, 1000)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened._annotation == annotation
+

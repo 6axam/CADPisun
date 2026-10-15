@@ -32,6 +32,14 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.capture.models import CaptureProvenance, CaptureSession, WritingGuides
+from handwriting_plotter.capture.annotation import (
+    AnnotationStore,
+    GlyphAnnotation,
+    StrokeRoleAssignment,
+    annotation_to_glyph_variant,
+    create_anchor_annotation,
+    preview_join,
+)
 from handwriting_plotter.capture.drafts import DraftCatalog, DraftEvent, DraftStore, VariantDraft
 from handwriting_plotter.capture.metrics import (
     GlyphMetricOverride,
@@ -53,7 +61,7 @@ from handwriting_plotter.version import __version__
 
 from .capture_widget import HandwritingCaptureWidget
 from .i18n import Language, tr
-from .normalization_preview import NormalizationPreview
+from .normalization_preview import JoinPairPreview, NormalizationPreview
 
 UKRAINIAN_QUEUE = tuple("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
 RUSSIAN_QUEUE = tuple("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
@@ -86,6 +94,7 @@ class HandwritingStudio(QWidget):
         self.processed_repository = ProcessedRepository(root)
         self.metric_store = MetricProfileStore(root)
         self.normalized_repository = NormalizedRepository(root)
+        self.annotation_store = AnnotationStore(root)
         self.queue_store = CaptureQueueStore(root)
         self.draft_store = DraftStore(root)
         self._records: list[CaptureRecord] = []
@@ -93,6 +102,9 @@ class HandwritingStudio(QWidget):
         self._processing_status = ""
         self._normalized_record: NormalizedRecord | None = None
         self._normalization_status = ""
+        self._annotation: GlyphAnnotation | None = None
+        self._annotation_roles: dict[str, str] = {}
+        self._annotation_status = ""
         self._load_errors: list[str] = []
         try:
             self.queue_state = self.queue_store.load("default")
@@ -356,6 +368,81 @@ class HandwritingStudio(QWidget):
         self.normalization_preview = NormalizationPreview()
         right_layout.addWidget(self.normalization_title)
         right_layout.addWidget(self.normalization_preview)
+        self.annotation_group = QGroupBox()
+        annotation_form = QFormLayout(self.annotation_group)
+        self.annotation_stroke_combo = QComboBox()
+        role_row = QWidget()
+        role_layout = QHBoxLayout(role_row)
+        role_layout.setContentsMargins(0, 0, 0, 0)
+        self.annotation_role_combo = QComboBox()
+        self.annotation_role_combo.addItems(("body", "mark", "punctuation"))
+        self.assign_role_button = QPushButton()
+        role_layout.addWidget(self.annotation_role_combo)
+        role_layout.addWidget(self.assign_role_button)
+        self.annotation_mode_combo = QComboBox()
+        self.annotation_mode_combo.addItems(("none", "single_body_deferred_marks"))
+        self.annotation_body_combo = QComboBox()
+        anchor_row = QWidget()
+        anchor_layout = QHBoxLayout(anchor_row)
+        anchor_layout.setContentsMargins(0, 0, 0, 0)
+        self.annotation_entry_check = QCheckBox()
+        self.annotation_exit_check = QCheckBox()
+        anchor_layout.addWidget(self.annotation_entry_check)
+        anchor_layout.addWidget(self.annotation_exit_check)
+        no_join_row = QWidget()
+        no_join_layout = QHBoxLayout(no_join_row)
+        no_join_layout.setContentsMargins(0, 0, 0, 0)
+        self.no_join_before_check = QCheckBox()
+        self.no_join_after_check = QCheckBox()
+        no_join_layout.addWidget(self.no_join_before_check)
+        no_join_layout.addWidget(self.no_join_after_check)
+        self.anchor_class_edit = QLineEdit("cursive")
+        self.anchor_partners_edit = QLineEdit("cursive")
+        limits_row = QWidget()
+        limits_layout = QHBoxLayout(limits_row)
+        limits_layout.setContentsMargins(0, 0, 0, 0)
+        self.anchor_gap_spin = QDoubleSpinBox()
+        self.anchor_gap_spin.setRange(1.0, 5000.0)
+        self.anchor_gap_spin.setValue(500.0)
+        self.anchor_vertical_spin = QDoubleSpinBox()
+        self.anchor_vertical_spin.setRange(0.0, 5000.0)
+        self.anchor_vertical_spin.setValue(200.0)
+        self.anchor_angle_spin = QDoubleSpinBox()
+        self.anchor_angle_spin.setRange(1.0, 180.0)
+        self.anchor_angle_spin.setValue(60.0)
+        limits_layout.addWidget(self.anchor_gap_spin)
+        limits_layout.addWidget(self.anchor_vertical_spin)
+        limits_layout.addWidget(self.anchor_angle_spin)
+        self.annotation_tangent_value = QLabel("—")
+        self.annotation_save_button = QPushButton()
+        self.annotation_partner_combo = QComboBox()
+        self.annotation_preview_button = QPushButton()
+        pair_row = QWidget()
+        pair_layout = QHBoxLayout(pair_row)
+        pair_layout.setContentsMargins(0, 0, 0, 0)
+        pair_layout.addWidget(self.annotation_partner_combo, 1)
+        pair_layout.addWidget(self.annotation_preview_button)
+        self.join_preview = JoinPairPreview()
+        self._annotation_labels: dict[str, QLabel] = {}
+        for key, widget in (
+            ("studio.annotation_stroke", self.annotation_stroke_combo),
+            ("studio.annotation_role", role_row),
+            ("studio.annotation_mode", self.annotation_mode_combo),
+            ("studio.annotation_body", self.annotation_body_combo),
+            ("studio.annotation_anchors", anchor_row),
+            ("studio.annotation_no_join", no_join_row),
+            ("studio.annotation_class", self.anchor_class_edit),
+            ("studio.annotation_partners", self.anchor_partners_edit),
+            ("studio.annotation_limits", limits_row),
+            ("studio.annotation_tangents", self.annotation_tangent_value),
+            ("studio.annotation_pair", pair_row),
+        ):
+            label = QLabel()
+            self._annotation_labels[key] = label
+            annotation_form.addRow(label, widget)
+        annotation_form.addRow(self.annotation_save_button)
+        annotation_form.addRow(self.join_preview)
+        right_layout.addWidget(self.annotation_group)
         upper.addWidget(right)
         upper.setStretchFactor(0, 1)
         upper.setStretchFactor(1, 4)
@@ -417,6 +504,10 @@ class HandwritingStudio(QWidget):
             spin.valueChanged.connect(self._normalization_parameters_changed)
         self.variant_edit.textChanged.connect(self._normalization_parameters_changed)
         self.context_combo.currentIndexChanged.connect(self._normalization_parameters_changed)
+        self.annotation_stroke_combo.currentIndexChanged.connect(self._annotation_stroke_selected)
+        self.assign_role_button.clicked.connect(self._assign_annotation_role)
+        self.annotation_save_button.clicked.connect(self.save_annotation)
+        self.annotation_preview_button.clicked.connect(self.preview_annotation_pair)
         self.zoom_out_button.clicked.connect(
             lambda: self.capture_canvas.set_zoom_factor(self.capture_canvas.zoom_factor / 1.25)
         )
@@ -474,6 +565,17 @@ class HandwritingStudio(QWidget):
         self.normalize_button.setText(tr(language, "studio.normalize"))
         self.normalization_title.setText(tr(language, "studio.normalization_preview"))
         self.normalization_preview.set_empty_text(tr(language, "studio.no_normalized_glyph"))
+        self.annotation_group.setTitle(tr(language, "studio.annotation_title"))
+        for key, label in self._annotation_labels.items():
+            label.setText(tr(language, key))
+        self.assign_role_button.setText(tr(language, "studio.annotation_assign"))
+        self.annotation_entry_check.setText(tr(language, "studio.annotation_entry"))
+        self.annotation_exit_check.setText(tr(language, "studio.annotation_exit"))
+        self.no_join_before_check.setText(tr(language, "studio.annotation_no_before"))
+        self.no_join_after_check.setText(tr(language, "studio.annotation_no_after"))
+        self.annotation_save_button.setText(tr(language, "studio.annotation_save"))
+        self.annotation_preview_button.setText(tr(language, "studio.annotation_preview"))
+        self.join_preview.set_empty_text(tr(language, "studio.annotation_no_preview"))
         self._refresh_collection()
         self._refresh_variants()
         self._refresh_queue_status()
@@ -619,6 +721,7 @@ class HandwritingStudio(QWidget):
         self._normalized_record = normalized_record
         self.normalized_hash_value.setText(normalized_record.sha256)
         self.normalization_preview.set_glyph(glyph)
+        self._load_annotation_for_normalized(normalized_record)
         advance_mm = glyph.advance_gu * glyph.preview_x_height_mm / 1000.0
         self._normalization_status = tr(self.language, "studio.normalized").format(
             hash=normalized_record.sha256[:12], advance=advance_mm,
@@ -717,6 +820,7 @@ class HandwritingStudio(QWidget):
         self._normalized_record = record
         self.normalized_hash_value.setText(record.sha256)
         self.normalization_preview.set_glyph(record.glyph)
+        self._load_annotation_for_normalized(record)
         self._normalization_status = tr(self.language, "studio.normalized_reopened").format(
             hash=record.sha256[:12]
         )
@@ -733,6 +837,13 @@ class HandwritingStudio(QWidget):
         self.normalized_hash_value.setText("—")
         self.normalization_preview.set_glyph(None)
         self._normalization_status = ""
+        self._annotation = None
+        self._annotation_roles = {}
+        self.annotation_stroke_combo.clear()
+        self.annotation_body_combo.clear()
+        self.annotation_tangent_value.setText("—")
+        self.join_preview.clear()
+        self._annotation_status = ""
 
     def _processing_parameters_changed(self) -> None:
         if self._processed_record is None:
@@ -747,6 +858,193 @@ class HandwritingStudio(QWidget):
         self._clear_normalization_state()
         self._normalization_status = tr(self.language, "studio.normalization_parameters_changed")
         self._refresh_diagnostics()
+
+    def _load_annotation_for_normalized(self, record: NormalizedRecord) -> None:
+        glyph = record.glyph
+        ids = tuple(item.id for item in glyph.strokes)
+        self._annotation_roles = {
+            stroke_id: ("body" if index == 0 else "mark")
+            for index, stroke_id in enumerate(ids)
+        }
+        self.annotation_stroke_combo.blockSignals(True)
+        self.annotation_body_combo.blockSignals(True)
+        self.annotation_stroke_combo.clear()
+        self.annotation_body_combo.clear()
+        self.annotation_stroke_combo.addItems(ids)
+        self.annotation_body_combo.addItems(ids)
+        self.annotation_stroke_combo.blockSignals(False)
+        self.annotation_body_combo.blockSignals(False)
+        self._annotation_stroke_selected()
+        try:
+            annotation = self.annotation_store.load(record.sha256)
+        except FileNotFoundError:
+            annotation = None
+        except Exception as exc:
+            self._annotation_status = f"{tr(self.language, 'studio.annotation_invalid')}\n{exc}"
+            annotation = None
+        if annotation is not None:
+            self._annotation = annotation
+            self._annotation_roles = {item.stroke_id: item.role for item in annotation.stroke_roles}
+            self.annotation_mode_combo.setCurrentText(annotation.join_mode)
+            if annotation.body_stroke_id:
+                self.annotation_body_combo.setCurrentText(annotation.body_stroke_id)
+            self.annotation_entry_check.setChecked(annotation.entry is not None)
+            self.annotation_exit_check.setChecked(annotation.exit is not None)
+            self.no_join_before_check.setChecked(annotation.no_join_before)
+            self.no_join_after_check.setChecked(annotation.no_join_after)
+            anchor = annotation.entry or annotation.exit
+            if anchor is not None:
+                self.anchor_class_edit.setText(anchor.class_id)
+                self.anchor_partners_edit.setText(", ".join(anchor.allowed_partner_classes))
+                self.anchor_gap_spin.setValue(anchor.max_gap_gu)
+                self.anchor_vertical_spin.setValue(anchor.max_vertical_delta_gu)
+                self.anchor_angle_spin.setValue(anchor.max_angle_deg)
+            self._annotation_status = tr(self.language, "studio.annotation_reopened").format(
+                revision=annotation.revision
+            )
+            self._show_annotation_tangents(annotation)
+            self._annotation_stroke_selected()
+        self._refresh_annotation_partners()
+
+    def _annotation_stroke_selected(self) -> None:
+        stroke_id = self.annotation_stroke_combo.currentText()
+        role = self._annotation_roles.get(stroke_id, "body")
+        self.annotation_role_combo.setCurrentText(role)
+
+    def _assign_annotation_role(self) -> None:
+        stroke_id = self.annotation_stroke_combo.currentText()
+        if not stroke_id:
+            return
+        self._annotation_roles[stroke_id] = self.annotation_role_combo.currentText()
+        self._annotation_status = tr(self.language, "studio.annotation_role_set").format(
+            stroke=stroke_id, role=self.annotation_role_combo.currentText()
+        )
+        self._refresh_diagnostics()
+
+    def save_annotation(self) -> GlyphAnnotation | None:
+        record = self._normalized_record
+        if record is None:
+            self._annotation_status = tr(self.language, "studio.annotation_requires_normalized")
+            self._refresh_diagnostics()
+            return None
+        glyph = record.glyph
+        ids = tuple(item.id for item in glyph.strokes)
+        mode = self.annotation_mode_combo.currentText()
+        body = self.annotation_body_combo.currentText() if mode == "single_body_deferred_marks" else None
+        partners = tuple(
+            value.strip() for value in self.anchor_partners_edit.text().split(",") if value.strip()
+        )
+        revision = 1 if self._annotation is None else self._annotation.revision + 1
+        try:
+            anchor_kwargs = {
+                "class_id": self.anchor_class_edit.text().strip(),
+                "allowed_partner_classes": partners,
+                "max_gap_gu": self.anchor_gap_spin.value(),
+                "max_vertical_delta_gu": self.anchor_vertical_spin.value(),
+                "max_angle_deg": self.anchor_angle_spin.value(),
+            }
+            entry = (
+                create_anchor_annotation(glyph, body, "start", **anchor_kwargs)
+                if body and self.annotation_entry_check.isChecked() else None
+            )
+            exit_anchor = (
+                create_anchor_annotation(glyph, body, "end", **anchor_kwargs)
+                if body and self.annotation_exit_check.isChecked() else None
+            )
+            deferred = tuple(item for item in ids if item != body) if body else ()
+            annotation = GlyphAnnotation(
+                source_normalized_sha256=record.sha256,
+                source_processed_sha256=glyph.source_processed_sha256,
+                variant_id=glyph.variant_id,
+                label=glyph.label,
+                revision=revision,
+                context_tags=frozenset({self.context_combo.currentText()}),
+                stroke_order=ids,
+                stroke_roles=tuple(StrokeRoleAssignment(
+                    stroke_id=item, role=self._annotation_roles.get(item, "mark")
+                ) for item in ids),
+                join_mode=mode,
+                body_stroke_id=body,
+                deferred_marks=deferred,
+                entry=entry,
+                exit=exit_anchor,
+                no_join_before=self.no_join_before_check.isChecked(),
+                no_join_after=self.no_join_after_check.isChecked(),
+                critical_features=tuple(item for item in deferred if self._annotation_roles.get(item) == "mark"),
+            )
+            self.annotation_store.save(annotation)
+        except Exception as exc:
+            self._annotation_status = f"{tr(self.language, 'studio.annotation_invalid')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        self._annotation = annotation
+        self._show_annotation_tangents(annotation)
+        self._annotation_status = tr(self.language, "studio.annotation_saved").format(
+            revision=annotation.revision
+        )
+        self._refresh_annotation_partners()
+        self._refresh_diagnostics()
+        return annotation
+
+    def _show_annotation_tangents(self, annotation: GlyphAnnotation) -> None:
+        def value(anchor) -> str:  # noqa: ANN001
+            if anchor is None:
+                return "—"
+            return f"({anchor.tangent.x:.3f}, {anchor.tangent.y:.3f})"
+        self.annotation_tangent_value.setText(
+            f"{tr(self.language, 'studio.annotation_entry')}: {value(annotation.entry)}   "
+            f"{tr(self.language, 'studio.annotation_exit')}: {value(annotation.exit)}"
+        )
+
+    def _refresh_annotation_partners(self) -> None:
+        selected = self.annotation_partner_combo.currentData()
+        self.annotation_partner_combo.clear()
+        try:
+            annotations = self.annotation_store.list_all()
+        except Exception as exc:
+            self._annotation_status = f"{tr(self.language, 'studio.annotation_invalid')}\n{exc}"
+            return
+        for item in annotations:
+            self.annotation_partner_combo.addItem(
+                f"{item.label} · {item.variant_id}", item.source_normalized_sha256
+            )
+        if selected is not None:
+            index = self.annotation_partner_combo.findData(selected)
+            if index >= 0:
+                self.annotation_partner_combo.setCurrentIndex(index)
+
+    def preview_annotation_pair(self):  # noqa: ANN201
+        left_annotation = self._annotation or self.save_annotation()
+        normalized_hash = self.annotation_partner_combo.currentData()
+        if left_annotation is None or not isinstance(normalized_hash, str):
+            self._annotation_status = tr(self.language, "studio.annotation_partner_missing")
+            self._refresh_diagnostics()
+            return None
+        try:
+            right_annotation = self.annotation_store.load(normalized_hash)
+            left_glyph = self.normalized_repository.load(
+                left_annotation.source_processed_sha256, left_annotation.source_normalized_sha256
+            )
+            right_glyph = self.normalized_repository.load(
+                right_annotation.source_processed_sha256, right_annotation.source_normalized_sha256
+            )
+            left_file = annotation_to_glyph_variant(left_annotation, left_glyph)
+            right_file = annotation_to_glyph_variant(right_annotation, right_glyph)
+            result = preview_join(
+                left_file, right_file, x_height_mm=self.physical_size_spin.value()
+            )
+        except Exception as exc:
+            self._annotation_status = f"{tr(self.language, 'studio.annotation_invalid')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        status = tr(self.language, f"studio.join.{result.decision}").format(reason=result.reason)
+        self.join_preview.set_pair(
+            left_file, right_file, result, status,
+            x_height_mm=self.physical_size_spin.value(),
+        )
+        self._annotation_status = status
+        self._refresh_diagnostics()
+        return result
 
     def save_and_next(self) -> CaptureRecord | None:
         record = self.save_sample()
@@ -914,6 +1212,8 @@ class HandwritingStudio(QWidget):
             messages.append(self._processing_status)
         if self._normalization_status:
             messages.append(self._normalization_status)
+        if self._annotation_status:
+            messages.append(self._annotation_status)
         self.diagnostics.setPlainText("\n".join(messages))
         self.save_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.save_next_button.setEnabled(bool(label and self.capture_canvas.strokes))
@@ -921,6 +1221,8 @@ class HandwritingStudio(QWidget):
         self.undo_processing_button.setEnabled(self._processed_record is not None)
         self.normalize_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.set_metrics_button.setEnabled(bool(label and self.capture_canvas.strokes))
+        self.annotation_save_button.setEnabled(self._normalized_record is not None)
+        self.annotation_preview_button.setEnabled(self._annotation is not None)
 
     def _queue_counts(self) -> dict[str, int]:
         counts = {token: 0 for token in self.queue_state.tokens}

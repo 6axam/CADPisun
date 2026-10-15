@@ -257,7 +257,7 @@ def _point_model(point: Point2) -> PointModel:
     return PointModel(x=point.x, y=point.y)
 
 
-def _segment_model(segment: Segment) -> SegmentModel:
+def segment_to_model(segment: Segment) -> SegmentModel:
     if isinstance(segment, Line):
         return LineModel(kind="line", p0=_point_model(segment.p0), p1=_point_model(segment.p1))
     if isinstance(segment, Quadratic):
@@ -402,7 +402,7 @@ def normalize_processed_glyph(
         context_tag=context_tag,
         strokes=tuple(StrokeModel(
             id=stroke.id,
-            segments=tuple(_segment_model(segment) for segment in stroke.segments),
+            segments=tuple(segment_to_model(segment) for segment in stroke.segments),
             source_refs=stroke.source_refs,
             role=stroke.role,
             direction_provenance=stroke.direction_provenance,

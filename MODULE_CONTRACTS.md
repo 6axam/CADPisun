@@ -278,6 +278,21 @@ bearings. `NormalizedGlyph.physical_preview_strokes()` выполняет явн
 физические размеры и ручные controls; изменение параметров инвалидирует только
 preview/normalized derivative, не raw или processed sources.
 
+### 12.4 Manual annotation and pair preview boundary
+
+`capture/annotation.py` не импортирует Qt. `validate_annotation(annotation,
+normalized_glyph)` проверяет exact source/order/roles, one-body rule, original
+deferred-mark order, critical refs и endpoint/tangent agreement. AnnotationStore
+записывает только следующую contiguous revision после повторной проверки всей
+raw→processed→normalized source chain.
+
+`annotation_to_glyph_variant` создаёт draft existing `GlyphVariantFile`, не
+меняя geometry и не повышая review status. `preview_join(left,right)` размещает
+эти variants через существующий `place_glyph` и вызывает production join
+decision `shaping.joins.connect`; UI показывает connector или точную reject/lift
+reason. Ни preview, ни editor не исправляют несовместимый anchor автоматическим
+reversal, reordering или новым connector metadata.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

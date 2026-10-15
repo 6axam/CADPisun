@@ -144,6 +144,19 @@ baseline offset, затем нажмите **Normalize**. Справа появ�
 метрик и ссылки на raw/processed SHA-256. Изменение controls убирает устаревший
 preview и требует повторной нормализации, не меняя исходные файлы.
 
+В **Manual joins and pen lifts** каждый исходный stroke остаётся на своём месте.
+Выберите stroke, назначьте ему role body/mark/punctuation и укажите единственный
+body для режима `single_body_deferred_marks`. Остальные mark strokes будут
+отложены в исходном порядке. Entry/Exit всегда относятся к реальному началу и
+концу body; вычисленные tangent vectors показаны рядом и не вводятся на глаз.
+
+Anchor class, разрешённые partner classes и ограничения gap/vertical/angle
+задаются вручную. **No join before/after** создаёт явный pen lift. После **Save
+annotation** выберите другой анотированный variant и нажмите **Preview pair**.
+Studio запускает тот же geometry-aware join engine, что и генератор, рисует
+реальный connector при успехе и показывает точный reason для pen lift либо
+reject. Невалидную пару Studio не «улучшает» выдуманным соединением.
+
 ## Строка состояния и диагностика
 
 Внизу слева показываются фактически измеряемая частота перерисовки холста и

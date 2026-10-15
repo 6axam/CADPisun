@@ -121,6 +121,22 @@ left/right bearings, baseline offset, gu→mm preview, contiguous metric profile
 revisions, analytical bound validation, source/hash verification, tamper
 rejection, GUI preview, and restart recovery.
 
+### Phase 08 manual annotation and join diagnostics
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_annotation.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `12 passed in 3.48s`; full regression `194 passed in 13.76s`.
+Evidence covers exact multistroke order, body/mark roles, deferred marks,
+critical features, geometry-derived entry/exit tangents, invalid tangent/order
+rejection, contiguous persisted revisions, and conversion to the existing
+draft GlyphVariant format. The real join engine is exercised for an accepted
+connector, an explicit forced pen lift, and a gap rejection; Studio renders the
+pair and reopens the saved annotation.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.
