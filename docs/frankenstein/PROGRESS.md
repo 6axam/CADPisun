@@ -6,8 +6,8 @@ Last updated: 2026-10-15.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 10 — personal StylePack builder
-- Last completed phase: 09 — multi-character samples and ligatures
+- Phase: 11 — first complete end-to-end workflow
+- Last completed phase: 10 — personal StylePack builder
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
@@ -17,8 +17,9 @@ Last updated: 2026-10-15.
 - Phase 06 commit: `b33b48c`
 - Phase 07 commit: `f08da52`
 - Phase 08 commit: `65ecc97`
-- Phase 09 commit: see the commit named `feat: support recorded cursive ligatures` (recorded at the next checkpoint).
-- Next concrete action: assemble reviewed annotations and normalized derivatives into an immutable, loadable test-only StylePack revision.
+- Phase 09 commit: `59e05ad`
+- Phase 10 commit: see the commit named `feat: publish captured handwriting as versioned StylePacks` (recorded at the next checkpoint).
+- Next concrete action: record/assemble the five-glyph corpus, generate the four required words through the published user StylePack, and verify SVG/G-code round trips and determinism.
 
 ## Validation ledger
 
@@ -44,6 +45,8 @@ Last updated: 2026-10-15.
 | 2026-10-15 | Phase 08 full Linux headless regression | 194 passed in 13.76 s |
 | 2026-10-15 | Phase 09 ligature/PenPlan focused suite | 5 passed in 0.53 s |
 | 2026-10-15 | Phase 09 full Linux headless regression | 195 passed in 16.86 s |
+| 2026-10-15 | Phase 10 builder/styles/Studio focused suites | 19 passed in 3.38 s |
+| 2026-10-15 | Phase 10 full Linux headless regression | 198 passed in 17.02 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -190,9 +193,33 @@ individual letters and the recorded sequence. Existing longest-match resolution
 selects two `ма` variants; the compiled PenPlan contains two preserved draws and
 is deterministic. Removing the sequence naturally exercises individual glyphs.
 
-### Phase 10 — IN_PROGRESS
+### Phase 10 — DONE
 
 - Build only from reviewed, source-verified normalized annotations.
 - Publish through FileStyleRepository with canonical hashes and a new immutable revision.
 - Keep Level B output explicitly test-only and production-ineligible.
+
+`PersonalStylePackBuilder` accepts only variants whose editable catalog state is
+accepted and whose source-linked annotation has a separate explicit reviewed
+revision. Validation reloads the full immutable source chain, requires one
+metric profile, isolated coverage, and ligature fallbacks. Publication writes
+canonical glyph, license, review and provenance records, hashes every payload,
+and delegates the atomic immutable revision to `FileStyleRepository`.
+
+Studio exposes the review confirmation and validate/publish controls. User
+revisions live under the platform application-data `styles/` root. A composite
+repository discovers built-in and user packs, rejects duplicate references,
+and preserves explicit missing project references. After publication the normal
+Document Workspace picker and generation backend refresh without restart.
+
+The acceptance path records, processes, normalizes, annotates, accepts and
+publishes one real Qt-captured test sample. The resulting `personal@0.1.0`
+reloads through the regular repository, remains `approved=false`,
+`test_only=true`, and `production_eligible=false`, and cannot be overwritten.
+
+### Phase 11 — IN_PROGRESS
+
+- Exercise one published five-glyph personal revision through normal document generation.
+- Verify all four required Ukrainian words in SVG and virtual G-code.
+- Record deterministic artifact hashes and restart/reopen evidence.
 

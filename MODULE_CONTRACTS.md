@@ -57,6 +57,20 @@ v1.0. Здесь указаны декларативные сигнатуры, �
 | import_capture (II-A) | raw bytes, format_id, Calibration → Outcome<OnlineCapture> |
 | publish_style | approved StyleDraft, expected_parent_revision → Outcome<StyleRevision> |
 
+`PersonalStylePackBuilder.validate` принимает только явно accepted variants с
+reviewed annotation, сверяет raw → processed → normalized hashes, единый metric
+profile, isolated context и individual fallback для multi-grapheme keys.
+`publish` создаёт canonical glyph/review/provenance/license files, вычисляет их
+SHA-256 и делегирует единственную mutation в `FileStyleRepository.publish`.
+Писать разрешено только в platform user-data `styles/`; пакетные assets
+остаются read-only.
+
+`CompositeStyleRepository` принимает отдельные built-in и user roots. Каждая
+явная `(style_id, revision)` ссылка должна существовать ровно в одном root;
+отсутствие возвращает `STYLE_NOT_FOUND`, совпадение в двух roots —
+`AMBIGUOUS_STYLE_REFERENCE`. Фактическая загрузка каждого кандидата остаётся за
+`FileStyleRepository`, поэтому составной каталог не обходит hash validation.
+
 SVG import v1: только `svg/g/path` с numeric width/viewBox и path commands M/L/H/V/Q/T/C/S/Z; supported transforms translate/scale/rotate/matrix через нормализацию, shear только явная matrix. CSS, use/symbol, text, images, masks, clipPath, filters, external refs отвергаются. Каждый M начинает stroke; subpath order сохраняется. A не принимается до отдельного адаптера. Запрещены DTD/entity expansion; authoring exports с DOCTYPE предварительно нормализуются контролируемым редактором, не исполняющим внешние ресурсы. `fill=none` обязателен, но недостаточен для centerline eligibility — требуется author review.
 
 SVG font importer читает glyph key/advance и вручную заданные baseline/x-height; поддержка multi-character key не означает automatic ligature correctness. Отсутствующие anchors → join none. Самостоятельно не изобретать entry/exit по bbox. Максимум SVG input 20 MiB, XML depth 64, 100 000 paths, 2 000 000 path coordinates; стиль целиком ≤100 MiB и ≤100 000 variants. превышение → RESOURCE_LIMIT.

@@ -151,6 +151,24 @@ multi-grapheme GlyphVariant. Layout of `мама` selects exactly two recorded
 ligatures and carries their original stroke through two PenPlan draws; repeated
 compilation is byte-model deterministic. Missing fallback is rejected.
 
+### Phase 10 personal StylePack builder
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_style_builder.py tests/styles/test_styles.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `19 passed in 3.38s`; full regression `198 passed in 17.02s`.
+Evidence covers an explicit local-user sample review, source-chain verification,
+canonical glyph/review/provenance/license payloads, normal repository reload,
+immutable revision conflict, and ambiguous composite-root rejection. The Qt
+workflow records and publishes one test sample; a separate integration test
+refreshes the normal style picker, retains all built-in styles, selects the
+user revision for a text object, and generates through the composite backend.
+The published manifest stays non-production and test-only. These tests ran on
+Linux with Qt offscreen; no local Windows execution is claimed.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.version import __version__
+from handwriting_plotter.application.resources import style_root
 
 from .backend import GuiBackend, generation_source_hash
 from .canvas import PageCanvas
@@ -59,12 +60,13 @@ class MainWindow(QMainWindow):
         self.setObjectName("main-window")
         self.resize(1440, 900)
         self.setDockNestingEnabled(True)
-        self.styles = discover_styles()
         self.settings = settings or QSettings("Handwriting Plotter", "Handwriting Plotter")
         self.language = normalize_language(self.settings.value("ui/language", "en"))
         self.user_data_root = user_data_root or handwriting_data_root()
+        self.user_style_root = self.user_data_root / "styles"
+        self.styles = discover_styles(self.user_style_root)
         self.controller = DocumentController(default_project(), self)
-        self.backend = GuiBackend()
+        self.backend = GuiBackend(style_roots=(style_root(), self.user_style_root))
         self.thread_pool = QThreadPool.globalInstance()
         self.generated_result = None
         self.generated_revision: int | None = None
@@ -108,7 +110,15 @@ class MainWindow(QMainWindow):
         self.workspace_stack.setObjectName("workspace-stack")
         self.workspace_stack.addWidget(self.canvas)
         self.workspace_stack.addWidget(self.studio)
+        self.studio.style_published.connect(self._style_published)
         self.setCentralWidget(self.workspace_stack)
+
+    def _style_published(self, style_id: str, revision: str) -> None:
+        self.styles = discover_styles(self.user_style_root)
+        self.properties.set_styles(self.styles)
+        self.backend = GuiBackend(style_roots=(style_root(), self.user_style_root))
+        self._refresh_tree(self.controller.snapshot)
+        self._show_status(f"Style published · {style_id}@{revision}")
 
     def _build_docks(self) -> None:
         project_panel = QWidget()

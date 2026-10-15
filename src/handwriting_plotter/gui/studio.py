@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import regex
-from PySide6.QtCore import QPointF, QSize, QStandardPaths, Qt
+from PySide6.QtCore import QPointF, QSize, QStandardPaths, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QSpinBox,
     QVBoxLayout,
@@ -57,6 +58,7 @@ from handwriting_plotter.capture.processing import (
 )
 from handwriting_plotter.capture.queue import CaptureQueueState, CaptureQueueStore
 from handwriting_plotter.capture.repository import CaptureRecord, CaptureRepository
+from handwriting_plotter.capture.style_builder import PersonalStylePackBuilder, StylePackBuildRequest
 from handwriting_plotter.version import __version__
 
 from .capture_widget import HandwritingCaptureWidget
@@ -79,6 +81,8 @@ def handwriting_data_root() -> Path:
 class HandwritingStudio(QWidget):
     """One functional local-first workspace around immutable raw captures."""
 
+    style_published = Signal(str, str)
+
     def __init__(
         self,
         root: Path,
@@ -95,6 +99,7 @@ class HandwritingStudio(QWidget):
         self.metric_store = MetricProfileStore(root)
         self.normalized_repository = NormalizedRepository(root)
         self.annotation_store = AnnotationStore(root)
+        self.style_builder = PersonalStylePackBuilder(root)
         self.queue_store = CaptureQueueStore(root)
         self.draft_store = DraftStore(root)
         self._records: list[CaptureRecord] = []
@@ -416,6 +421,7 @@ class HandwritingStudio(QWidget):
         self.annotation_tangent_value = QLabel("—")
         self.annotation_boundaries_edit = QLineEdit()
         self.annotation_save_button = QPushButton()
+        self.annotation_accept_button = QPushButton()
         self.annotation_partner_combo = QComboBox()
         self.annotation_preview_button = QPushButton()
         pair_row = QWidget()
@@ -443,9 +449,44 @@ class HandwritingStudio(QWidget):
             self._annotation_labels[key] = label
             annotation_form.addRow(label, widget)
         annotation_form.addRow(self.annotation_save_button)
+        annotation_form.addRow(self.annotation_accept_button)
         annotation_form.addRow(self.join_preview)
         right_layout.addWidget(self.annotation_group)
-        upper.addWidget(right)
+
+        self.publication_group = QGroupBox()
+        publication_form = QFormLayout(self.publication_group)
+        self.publication_style_id = QLineEdit(self.draft_catalog.style_id)
+        self.publication_style_id.setReadOnly(True)
+        self.publication_revision = QLineEdit("0.1.0")
+        self.publication_author = QLineEdit()
+        self.publication_review_confirm = QCheckBox()
+        self.publication_validate_button = QPushButton()
+        self.publication_publish_button = QPushButton()
+        self.publication_status = QLabel("—")
+        self.publication_status.setWordWrap(True)
+        self._publication_labels: dict[str, QLabel] = {}
+        for key, widget in (
+            ("studio.publication_style_id", self.publication_style_id),
+            ("studio.publication_revision", self.publication_revision),
+            ("studio.publication_author", self.publication_author),
+            ("studio.publication_review", self.publication_review_confirm),
+            ("studio.publication_status", self.publication_status),
+        ):
+            label = QLabel()
+            self._publication_labels[key] = label
+            publication_form.addRow(label, widget)
+        publication_actions = QWidget()
+        publication_actions_layout = QHBoxLayout(publication_actions)
+        publication_actions_layout.setContentsMargins(0, 0, 0, 0)
+        publication_actions_layout.addWidget(self.publication_validate_button)
+        publication_actions_layout.addWidget(self.publication_publish_button)
+        publication_form.addRow(publication_actions)
+        right_layout.addWidget(self.publication_group)
+        right_scroll = QScrollArea()
+        right_scroll.setObjectName("studio-right-scroll")
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right)
+        upper.addWidget(right_scroll)
         upper.setStretchFactor(0, 1)
         upper.setStretchFactor(1, 4)
         upper.setStretchFactor(2, 1)
@@ -509,7 +550,10 @@ class HandwritingStudio(QWidget):
         self.annotation_stroke_combo.currentIndexChanged.connect(self._annotation_stroke_selected)
         self.assign_role_button.clicked.connect(self._assign_annotation_role)
         self.annotation_save_button.clicked.connect(self.save_annotation)
+        self.annotation_accept_button.clicked.connect(self.accept_current_annotation)
         self.annotation_preview_button.clicked.connect(self.preview_annotation_pair)
+        self.publication_validate_button.clicked.connect(self.validate_style_draft)
+        self.publication_publish_button.clicked.connect(self.publish_style_draft)
         self.zoom_out_button.clicked.connect(
             lambda: self.capture_canvas.set_zoom_factor(self.capture_canvas.zoom_factor / 1.25)
         )
@@ -576,8 +620,15 @@ class HandwritingStudio(QWidget):
         self.no_join_before_check.setText(tr(language, "studio.annotation_no_before"))
         self.no_join_after_check.setText(tr(language, "studio.annotation_no_after"))
         self.annotation_save_button.setText(tr(language, "studio.annotation_save"))
+        self.annotation_accept_button.setText(tr(language, "studio.annotation_accept"))
         self.annotation_preview_button.setText(tr(language, "studio.annotation_preview"))
         self.join_preview.set_empty_text(tr(language, "studio.annotation_no_preview"))
+        self.publication_group.setTitle(tr(language, "studio.publication_title"))
+        for key, label in self._publication_labels.items():
+            label.setText(tr(language, key))
+        self.publication_review_confirm.setText(tr(language, "studio.publication_review_confirm"))
+        self.publication_validate_button.setText(tr(language, "studio.publication_validate"))
+        self.publication_publish_button.setText(tr(language, "studio.publication_publish"))
         self._refresh_collection()
         self._refresh_variants()
         self._refresh_queue_status()
@@ -908,6 +959,8 @@ class HandwritingStudio(QWidget):
             self._annotation_status = tr(self.language, "studio.annotation_reopened").format(
                 revision=annotation.revision
             )
+            if annotation.review_status == "reviewed":
+                self.review_value.setText("accepted · self-reviewed")
             self._show_annotation_tangents(annotation)
             self._annotation_stroke_selected()
         self._refresh_annotation_partners()
@@ -990,6 +1043,7 @@ class HandwritingStudio(QWidget):
             self._refresh_diagnostics()
             return None
         self._annotation = annotation
+        self.review_value.setText("draft")
         self._show_annotation_tangents(annotation)
         self._annotation_status = tr(self.language, "studio.annotation_saved").format(
             revision=annotation.revision
@@ -997,6 +1051,94 @@ class HandwritingStudio(QWidget):
         self._refresh_annotation_partners()
         self._refresh_diagnostics()
         return annotation
+
+    def accept_current_annotation(self) -> GlyphAnnotation | None:
+        """Record an explicit local-user review of the current immutable derivative."""
+        annotation = self.save_annotation()
+        record = self._normalized_record
+        if annotation is None or record is None:
+            return None
+        try:
+            values = annotation.model_dump(mode="python")
+            values.update({"revision": annotation.revision + 1, "review_status": "reviewed"})
+            reviewed = GlyphAnnotation.model_validate(values, strict=True)
+            self.annotation_store.save(reviewed)
+            draft = next(
+                item for item in self.draft_catalog.variants
+                if item.capture_sha256 == record.glyph.source_capture_sha256
+                and item.variant_id == reviewed.variant_id
+                and not item.deleted
+            )
+            self.draft_catalog = self.draft_catalog.update_status(
+                draft.variant_id, "accepted", self._now_utc()
+            )
+            self.draft_store.save(self.draft_catalog)
+        except Exception as exc:
+            self._annotation_status = f"{tr(self.language, 'studio.annotation_invalid')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        self._annotation = reviewed
+        self.review_value.setText("accepted · self-reviewed")
+        self._annotation_status = tr(self.language, "studio.annotation_accepted").format(
+            revision=reviewed.revision
+        )
+        self._refresh_variants()
+        self._refresh_diagnostics()
+        return reviewed
+
+    def _publication_request(self) -> StylePackBuildRequest:
+        return StylePackBuildRequest(
+            style_id=self.publication_style_id.text().strip(),
+            revision=self.publication_revision.text().strip(),
+            display_name=self.style_name.text().strip() or self.draft_catalog.display_name,
+            author_id=self.publication_author.text().strip(),
+            user_confirmed_review=self.publication_review_confirm.isChecked(),
+        )
+
+    def validate_style_draft(self):  # noqa: ANN201
+        try:
+            report = self.style_builder.validate(self._publication_request(), self.draft_catalog)
+        except Exception as exc:
+            self.publication_status.setText(
+                f"{tr(self.language, 'studio.publication_invalid')}\n{exc}"
+            )
+            return None
+        if report.passed:
+            self.publication_status.setText(
+                tr(self.language, "studio.publication_valid").format(
+                    variants=len(report.variant_ids), coverage=len(report.coverage)
+                )
+            )
+        else:
+            self.publication_status.setText(
+                f"{tr(self.language, 'studio.publication_invalid')}\n" + "\n".join(report.errors)
+            )
+        return report
+
+    def publish_style_draft(self):  # noqa: ANN201
+        try:
+            request = self._publication_request()
+            latest_path = self.style_builder.user_style_root / request.style_id / "latest"
+            expected_parent = (
+                latest_path.read_text(encoding="ascii").strip() if latest_path.is_file() else None
+            )
+            published = self.style_builder.publish(
+                request, self.draft_catalog, expected_parent_revision=expected_parent
+            )
+        except Exception as exc:
+            self.publication_status.setText(
+                f"{tr(self.language, 'studio.publication_failed')}\n{exc}"
+            )
+            return None
+        self.publication_status.setText(
+            tr(self.language, "studio.publication_published").format(
+                style=published.style_id,
+                revision=published.revision,
+                hash=published.revision_hash[:12],
+            )
+        )
+        self.style_published.emit(published.style_id, published.revision)
+        return published
 
     def _show_annotation_tangents(self, annotation: GlyphAnnotation) -> None:
         def value(anchor) -> str:  # noqa: ANN001
@@ -1234,6 +1376,7 @@ class HandwritingStudio(QWidget):
         self.normalize_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.set_metrics_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.annotation_save_button.setEnabled(self._normalized_record is not None)
+        self.annotation_accept_button.setEnabled(self._normalized_record is not None)
         self.annotation_preview_button.setEnabled(self._annotation is not None)
 
     def _queue_counts(self) -> dict[str, int]:

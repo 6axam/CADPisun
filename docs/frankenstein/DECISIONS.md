@@ -93,3 +93,15 @@ boundaries are manual review metadata with an explicit unannotated state. A
 ligature cannot advance toward publication unless every constituent grapheme
 also has an individual candidate.
 
+## F-ADR-012: Separate sample self-review from product approval
+
+Status: accepted, 2026-10-15.
+
+The local author must explicitly accept each source-linked annotation and check
+one publication confirmation before the loader-compatible glyph files receive
+`review_status=approved`. That status means only that the sample was selected
+for this technical revision. The StyleManifest stays `approved=false`,
+`test_only=true`, and `production_eligible=false`; provenance records the local
+self-review rather than claiming an independent reviewer. The builder never
+promotes draft or synthetic data automatically.
+

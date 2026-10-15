@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from PySide6.QtCore import QPointF, QSettings
 
 from handwriting_plotter.gui.main_window import MainWindow
 from handwriting_plotter.gui.studio import HandwritingStudio
+from handwriting_plotter.application.resources import style_root
 
 
 def _draw_sample(studio: HandwritingStudio, offset: float = 0.0) -> None:
@@ -306,9 +309,64 @@ def test_studio_saves_manual_join_annotation_and_shows_actual_pair_diagnostic(qt
     assert result.reason in studio.diagnostics.toPlainText()
     assert studio.join_preview._strokes
 
+    reviewed = studio.accept_current_annotation()
+    assert reviewed is not None and reviewed.review_status == "reviewed"
+    studio.publication_author.setText("local-test-user")
+    studio.publication_review_confirm.setChecked(True)
+    report = studio.validate_style_draft()
+    assert report is not None and report.passed
+    published = studio.publish_style_draft()
+    assert published is not None
+    assert published.package_path == tmp_path / "styles" / "personal" / "0.1.0"
+
     reopened = HandwritingStudio(tmp_path)
     reopened.resize(1500, 1000)
     qtbot.addWidget(reopened)
     assert reopened.open_latest_for_label("м")
-    assert reopened._annotation == annotation
+    assert reopened._annotation == reviewed
+
+
+def test_published_user_style_refreshes_normal_picker_and_backend(qtbot, tmp_path: Path) -> None:
+    user_data = tmp_path / "user-data"
+    settings = QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(settings, user_data_root=user_data)
+    qtbot.addWidget(window)
+    window.show()
+    built_in_references = {item.reference for item in window.styles if item.source == "built-in"}
+    assert built_in_references
+
+    source_manifest = next(style_root().glob("*/*/manifest.json"))
+    target = user_data / "styles" / "personal-ui-test" / "0.1.0"
+    target.parent.mkdir(parents=True)
+    shutil.copytree(source_manifest.parent, target)
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    manifest.update({
+        "style_id": "personal-ui-test",
+        "revision": "0.1.0",
+        "display_name": "Personal UI test",
+        "approved": False,
+        "production_eligible": False,
+        "test_only": True,
+    })
+    (target / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+    window.studio.style_published.emit("personal-ui-test", "0.1.0")
+
+    user_reference = ("personal-ui-test", "0.1.0")
+    assert user_reference in {item.reference for item in window.styles if item.valid}
+    assert built_in_references <= {item.reference for item in window.styles}
+    object_id = window.controller.snapshot.objects[0].object_id
+    window._selected_kind, window._selected_value = "text", object_id
+    window._show_selected_properties()
+    index = window.properties.style_field.findData("personal-ui-test" + "\0" + "0.1.0")
+    assert index >= 0
+    window.properties.style_field.setCurrentIndex(index)
+    qtbot.waitUntil(
+        lambda: window.controller.snapshot.objects[0].style_id == "personal-ui-test"
+    )
+    assert window.controller.snapshot.objects[0].style_revision == "0.1.0"
+    assert window.backend.build(window.controller.snapshot).test_only_style is True
+    window.controller.reset(window.controller.snapshot)
 

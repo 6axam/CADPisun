@@ -119,3 +119,23 @@ class FileStyleRepository:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
+
+class CompositeStyleRepository:
+    """Resolve immutable style references across distinct verified roots."""
+
+    def __init__(self, roots: tuple[Path, ...]) -> None:
+        if not roots:
+            raise ValueError("STYLE_ROOTS_REQUIRED")
+        self.roots = tuple(Path(root) for root in roots)
+
+    def load(self, style_id: str, revision: str) -> StyleSnapshot:
+        matches = [
+            root for root in self.roots
+            if (FileStyleRepository(root).style_path(style_id, revision) / "manifest.json").is_file()
+        ]
+        if not matches:
+            raise FileNotFoundError(f"STYLE_NOT_FOUND:{style_id}@{revision}")
+        if len(matches) != 1:
+            raise ValueError(f"AMBIGUOUS_STYLE_REFERENCE:{style_id}@{revision}")
+        return FileStyleRepository(matches[0]).load(style_id, revision)
+

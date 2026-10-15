@@ -75,6 +75,21 @@ Polyline — представление Stroke как последователь
 
 `format=hp-style`, `schema_version=1.0`, style_id, revision (immutable), display_name, scripts, license_record, glyph_frame, metrics, coverage, glyph index, join_rules, variation_policy, file_hashes.
 
+Редактируемый `hp-style-draft/1.0` хранится отдельно от опубликованной
+ревизии. Он ссылается на immutable raw/processed/normalized SHA-256 и содержит
+selection, preferred/rejected/deleted state и review history. Публикация
+принимает только пару `VariantDraft.review_status=accepted` и
+`GlyphAnnotation.review_status=reviewed`, повторно проверяет всю цепочку
+источников и создаёт новый каталог `<style_id>/<revision>`; существующая
+ревизия никогда не перезаписывается.
+
+Локальное подтверждение автора переводит glyph-файл в техническое
+`review_status=approved`, необходимое существующему loader, но не делает весь
+почерк продуктово одобренным. Для пользовательских Level B пакетов manifest
+всегда имеет `approved=false`, `test_only=true` и
+`production_eligible=false`; provenance явно называет self-review и исходные
+normalized SHA-256.
+
 Metrics: x_height_gu=1000; ascender/descender envelope из всех variants; space_advance_gu (по умолчанию 900), line_gap recommendation, supported x_height_mm range (первоначальная цель 2.5…5.0 mm, до приёмки не подтверждённый диапазон). Все variants лежат в объявленном envelope, включая marks и возможные connectors.
 
 `coverage` — точный список NFC keys, не диапазон «Cyrillic». Минимальный набор:
@@ -89,7 +104,7 @@ Unicode union не дублирует одинаковые code points межд�
 
 `join_rules`: class pairs с allow/deny, исключения по keys/variant IDs, clearance envelope, лимиты. Deny имеет приоритет. В default `ua-school-v1`: scripts не соединяются друг с другом; цифры, апострофы и пунктуация не соединяются с буквами. Это разрывает connected run, но не обязательно lexical word.
 
-Пакет на диске: manifest.json, glyphs/<safe-id>.json, licenses/<id>.txt, review/coverage.json, review/pairs.json, provenance.json. В JSON key хранится явно; имя файла не источник Unicode semantics. В MVP импортируется каталог, не исполняемый plugin и не произвольный zip.
+Пакет на диске: manifest.json, glyphs/<safe-id>.json, licenses/<id>.txt, review/coverage.json, review/pairs.json, provenance.json. Все payload-файлы перечислены с SHA-256 в manifest. В JSON key хранится явно; имя файла не источник Unicode semantics. В MVP импортируется каталог, не исполняемый plugin и не произвольный zip.
 
 ## 4. Текст и генерация
 

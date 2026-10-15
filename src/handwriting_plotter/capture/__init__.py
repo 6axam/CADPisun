@@ -37,6 +37,12 @@ from .processing import (
     ProcessingParameters,
     process_sample,
 )
+from .style_builder import (
+    PersonalStylePackBuilder,
+    PublishedStylePack,
+    StylePackBuildReport,
+    StylePackBuildRequest,
+)
 
 __all__ = [
     "AnnotationStore",
@@ -60,6 +66,10 @@ __all__ = [
     "ProcessedRecord",
     "ProcessedRepository",
     "ProcessingParameters",
+    "PersonalStylePackBuilder",
+    "PublishedStylePack",
+    "StylePackBuildReport",
+    "StylePackBuildRequest",
     "StyleMetricProfile",
     "WritingGuides",
     "load_capture_bytes",

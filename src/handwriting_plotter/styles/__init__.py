@@ -1,7 +1,7 @@
 """Immutable style packages and validation."""
 
 from .models import GlyphVariant, StyleSnapshot
-from .repository import FileStyleRepository
+from .repository import CompositeStyleRepository, FileStyleRepository
 
-__all__ = ["FileStyleRepository", "GlyphVariant", "StyleSnapshot"]
+__all__ = ["CompositeStyleRepository", "FileStyleRepository", "GlyphVariant", "StyleSnapshot"]
 
