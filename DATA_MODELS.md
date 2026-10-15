@@ -291,6 +291,31 @@ upper bound. `certified_max_deviation_px <= parameters.max_deviation_px` —
 или уже сохранённый derivative. Лимиты: 32 MiB/derivative и не более 2 000 000
 предварительно рассчитанных resampled points на один вызов processing.
 
+### 9.4 Shared style metrics and normalized glyph v1
+
+`hp-style-metrics/1.0` — редактируемый revisioned профиль одного draft style.
+Он хранит source logical-pixel frame, общие ascender/x-height/baseline/descender
+guides, `x_height_gu=1000`, default advance/bearings/space/line gap и диапазон
+physical x-height. Revision заменяется атомарно и может увеличиваться только на
+один. Один профиль применяется ко всем glyphs; bbox отдельной буквы никогда не
+задаёт её vertical scale.
+
+CaptureFrame → GlyphFrame: uniform `scale=1000/(baseline_px-x_height_y_px)`,
+`x_gu=x_px*scale+horizontal_translation`,
+`y_gu=(baseline_px-y_px)*scale+manual_baseline_offset_gu`. Horizontal translation
+ставит analytical ink minimum на explicit left bearing. Advance задаётся
+вручную либо common default и обязан вместить ink plus minimum right bearing.
+Ascender/descender envelope вычисляется из общих guides; выход geometry за него
+явно отвергается до ручной коррекции metrics.
+
+`hp-normalized-glyph/1.0` — immutable content-addressed derivative с raw и
+processed SHA-256, полным metric profile snapshot/hash, units=`gu`, ordered
+directed strokes, analytical bounds, advance, фактическими bearings, context и
+physical preview x-height. Bounds и bearings пересчитываются при load и должны
+совпасть с объявленными. Physical preview использует
+`x_mm=x_gu*h/1000`, `y_mm=-y_gu*h/1000`; это явная размерная модель, а не
+предположение о реальном DPI монитора.
+
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 
 ## 10. Вспомогательные типы публичных контрактов

@@ -6,16 +6,17 @@ Last updated: 2026-10-15.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 07 — metrics, baselines and glyph geometry
-- Last completed phase: 06 — stroke normalization and processing
+- Phase: 08 — manual glyph annotation and joins
+- Last completed phase: 07 — metrics, baselines and glyph geometry
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
 - Phase 03 commit: `1dd1204`
 - Phase 04 commit: `f0ca242`
 - Phase 05 commit: `5b0bc0c`
-- Phase 06 commit: see the commit named `feat: process captured handwriting into directed vector strokes` (recorded at the next checkpoint).
-- Next concrete action: transform reviewed logical-pixel derivatives into GlyphFrame units with explicit baseline/x-height metrics and bearings.
+- Phase 06 commit: `b33b48c`
+- Phase 07 commit: see the commit named `feat: normalize captured glyph metrics` (recorded at the next checkpoint).
+- Next concrete action: add manual stroke roles, body/mark ordering, join anchors, no-join flags and review validation.
 
 ## Validation ledger
 
@@ -35,6 +36,8 @@ Last updated: 2026-10-15.
 | 2026-10-15 | Phase 06 processing/Qt focused suites | 18 passed in 2.56 s |
 | 2026-10-15 | Phase 06 full Linux headless regression | 183 passed in 13.86 s |
 | 2026-10-15 | Phase 06 strict-tolerance processing benchmark | median 0.5574 s over 7 runs |
+| 2026-10-15 | Phase 07 metrics/Studio focused suites | 12 passed in 3.00 s |
+| 2026-10-15 | Phase 07 full Linux headless regression | 189 passed in 15.40 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -126,9 +129,28 @@ or parameters change, restores saved derivatives, and removes processing
 without modifying raw points. The acceptance suite processes one sample at two
 tolerances and verifies both links and error limits.
 
-### Phase 07 — IN_PROGRESS
+### Phase 07 — DONE
 
 - Keep the raw logical-pixel frame explicit and immutable.
 - Map guides and reviewed processed geometry into existing GlyphFrame `gu` conventions.
 - Persist advances and side bearings without distorting natural proportions.
+
+`hp-style-metrics/1.0` now fixes a shared logical-pixel frame and common guide
+calibration for a draft style. `hp-normalized-glyph/1.0` applies the same
+uniform `1000 gu / source x-height` transform to every glyph, stores analytical
+bounds and actual bearings, and verifies raw/processed/profile hashes before
+persistence. Manual advance, bearing, baseline-offset, and physical-preview
+values are explicit and versioned.
+
+The five-glyph acceptance fixture (`а`, `м`, `н`, `о`, `и`) shares one baseline
+and x-height reference. Its smaller `о` remains proportionally shorter than
+the tall `а`, proving that no per-glyph bounding-box height normalization runs.
+Studio provides a real GlyphFrame preview with millimetre dimensions and
+restores the immutable normalized derivative after restart.
+
+### Phase 08 — IN_PROGRESS
+
+- Keep annotation manual and auditable; never infer joins from appearance alone.
+- Persist stroke roles, mark scheduling and anchor constraints separately from geometry sources.
+- Validate annotation against the normalized glyph before publication.
 

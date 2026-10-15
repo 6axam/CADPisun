@@ -105,6 +105,22 @@ allocated a `Point2` for every projection. Direct scalar squared-distance
 evaluation reduced the unprofiled seven-run median to `0.5574s` (individual
 runs 0.5506–0.5706 s) without changing the error bound or serialized result.
 
+### Phase 07 shared metrics and GlyphFrame normalization
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/capture/test_metrics.py tests/gui/test_studio.py
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Results: `12 passed in 3.00s`; full regression `189 passed in 15.40s`.
+The core acceptance test normalizes `а`, `м`, `н`, `о`, and `и` through one
+shared guide profile, verifies baseline/x-height mapping and proves that the
+short `о` is not independently stretched. Further checks cover manual advance,
+left/right bearings, baseline offset, gu→mm preview, contiguous metric profile
+revisions, analytical bound validation, source/hash verification, tamper
+rejection, GUI preview, and restart recovery.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

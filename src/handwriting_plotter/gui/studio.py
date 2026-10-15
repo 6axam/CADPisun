@@ -33,6 +33,14 @@ from PySide6.QtWidgets import (
 
 from handwriting_plotter.capture.models import CaptureProvenance, CaptureSession, WritingGuides
 from handwriting_plotter.capture.drafts import DraftCatalog, DraftEvent, DraftStore, VariantDraft
+from handwriting_plotter.capture.metrics import (
+    GlyphMetricOverride,
+    MetricProfileStore,
+    NormalizedRecord,
+    NormalizedRepository,
+    StyleMetricProfile,
+    normalize_processed_glyph,
+)
 from handwriting_plotter.capture.processing import (
     ProcessedRecord,
     ProcessedRepository,
@@ -45,6 +53,7 @@ from handwriting_plotter.version import __version__
 
 from .capture_widget import HandwritingCaptureWidget
 from .i18n import Language, tr
+from .normalization_preview import NormalizationPreview
 
 UKRAINIAN_QUEUE = tuple("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
 RUSSIAN_QUEUE = tuple("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
@@ -75,11 +84,15 @@ class HandwritingStudio(QWidget):
         self.language = language
         self.repository = CaptureRepository(root)
         self.processed_repository = ProcessedRepository(root)
+        self.metric_store = MetricProfileStore(root)
+        self.normalized_repository = NormalizedRepository(root)
         self.queue_store = CaptureQueueStore(root)
         self.draft_store = DraftStore(root)
         self._records: list[CaptureRecord] = []
         self._processed_record: ProcessedRecord | None = None
         self._processing_status = ""
+        self._normalized_record: NormalizedRecord | None = None
+        self._normalization_status = ""
         self._load_errors: list[str] = []
         try:
             self.queue_state = self.queue_store.load("default")
@@ -99,6 +112,13 @@ class HandwritingStudio(QWidget):
         except Exception as exc:
             self._load_errors.append(str(exc))
             self.draft_catalog = DraftCatalog(style_id="personal", display_name="Personal handwriting")
+        try:
+            self.metric_profile: StyleMetricProfile | None = self.metric_store.load("personal")
+        except FileNotFoundError:
+            self.metric_profile = None
+        except Exception as exc:
+            self._load_errors.append(str(exc))
+            self.metric_profile = None
         self._build_ui()
         self._connect()
         self._reload_records()
@@ -230,6 +250,39 @@ class HandwritingStudio(QWidget):
             processing_controls.addWidget(widget)
         processing_controls.addStretch(1)
         center_layout.addLayout(processing_controls)
+        normalization_controls = QHBoxLayout()
+        self.physical_size_label = QLabel()
+        self.physical_size_spin = QDoubleSpinBox()
+        self.physical_size_spin.setRange(2.5, 5.0)
+        self.physical_size_spin.setDecimals(2)
+        self.physical_size_spin.setValue(
+            self.metric_profile.preview_x_height_mm if self.metric_profile is not None else 3.5
+        )
+        self.left_bearing_label = QLabel()
+        self.left_bearing_spin = QDoubleSpinBox()
+        self.left_bearing_spin.setRange(0.0, 2000.0)
+        self.left_bearing_spin.setValue(50.0)
+        self.right_bearing_label = QLabel()
+        self.right_bearing_spin = QDoubleSpinBox()
+        self.right_bearing_spin.setRange(0.0, 2000.0)
+        self.right_bearing_spin.setValue(50.0)
+        self.baseline_offset_label = QLabel()
+        self.baseline_offset_spin = QDoubleSpinBox()
+        self.baseline_offset_spin.setRange(-500.0, 500.0)
+        self.baseline_offset_spin.setValue(0.0)
+        self.set_metrics_button = QPushButton()
+        self.normalize_button = QPushButton()
+        self.normalize_button.setObjectName("studio-normalize")
+        for widget in (
+            self.physical_size_label, self.physical_size_spin,
+            self.left_bearing_label, self.left_bearing_spin,
+            self.right_bearing_label, self.right_bearing_spin,
+            self.baseline_offset_label, self.baseline_offset_spin,
+            self.set_metrics_button, self.normalize_button,
+        ):
+            normalization_controls.addWidget(widget)
+        normalization_controls.addStretch(1)
+        center_layout.addLayout(normalization_controls)
         upper.addWidget(center)
 
         right = QWidget()
@@ -260,6 +313,8 @@ class HandwritingStudio(QWidget):
         self.hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.processed_hash_value = QLabel("—")
         self.processed_hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.normalized_hash_value = QLabel("—")
+        self.normalized_hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._property_rows = (
             ("studio.label", self.label_edit),
             ("studio.variant", self.variant_edit),
@@ -274,6 +329,7 @@ class HandwritingStudio(QWidget):
             ("studio.review", self.review_value),
             ("studio.raw_hash", self.hash_value),
             ("studio.processed_hash", self.processed_hash_value),
+            ("studio.normalized_hash", self.normalized_hash_value),
         )
         self._property_labels: dict[str, QLabel] = {}
         for key, widget in self._property_rows:
@@ -296,6 +352,10 @@ class HandwritingStudio(QWidget):
         right_layout.addWidget(self.variants_title)
         right_layout.addWidget(self.variant_list, 1)
         right_layout.addLayout(variant_actions)
+        self.normalization_title = QLabel()
+        self.normalization_preview = NormalizationPreview()
+        right_layout.addWidget(self.normalization_title)
+        right_layout.addWidget(self.normalization_preview)
         upper.addWidget(right)
         upper.setStretchFactor(0, 1)
         upper.setStretchFactor(1, 4)
@@ -348,6 +408,15 @@ class HandwritingStudio(QWidget):
         self.undo_processing_button.clicked.connect(self.undo_processing)
         self.tolerance_spin.valueChanged.connect(self._processing_parameters_changed)
         self.smoothing_spin.valueChanged.connect(self._processing_parameters_changed)
+        self.normalize_button.clicked.connect(self.normalize_current)
+        self.set_metrics_button.clicked.connect(self.set_style_metrics_from_current)
+        for spin in (
+            self.physical_size_spin, self.left_bearing_spin,
+            self.right_bearing_spin, self.baseline_offset_spin, self.advance_spin,
+        ):
+            spin.valueChanged.connect(self._normalization_parameters_changed)
+        self.variant_edit.textChanged.connect(self._normalization_parameters_changed)
+        self.context_combo.currentIndexChanged.connect(self._normalization_parameters_changed)
         self.zoom_out_button.clicked.connect(
             lambda: self.capture_canvas.set_zoom_factor(self.capture_canvas.zoom_factor / 1.25)
         )
@@ -397,6 +466,14 @@ class HandwritingStudio(QWidget):
         self.undo_processing_button.setText(tr(language, "studio.undo_processing"))
         self.raw_check.setText(tr(language, "studio.raw_toggle"))
         self.processed_check.setText(tr(language, "studio.processed_toggle"))
+        self.physical_size_label.setText(tr(language, "studio.physical_size"))
+        self.left_bearing_label.setText(tr(language, "studio.left_bearing"))
+        self.right_bearing_label.setText(tr(language, "studio.right_bearing"))
+        self.baseline_offset_label.setText(tr(language, "studio.baseline_offset"))
+        self.set_metrics_button.setText(tr(language, "studio.set_style_metrics"))
+        self.normalize_button.setText(tr(language, "studio.normalize"))
+        self.normalization_title.setText(tr(language, "studio.normalization_preview"))
+        self.normalization_preview.set_empty_text(tr(language, "studio.no_normalized_glyph"))
         self._refresh_collection()
         self._refresh_variants()
         self._refresh_queue_status()
@@ -475,6 +552,7 @@ class HandwritingStudio(QWidget):
             self._refresh_diagnostics()
             return None
         self._processed_record = processed_record
+        self._clear_normalization_state()
         self.capture_canvas.set_processed_strokes(processed.to_strokes())
         self.processed_hash_value.setText(processed_record.sha256)
         maximum = max(report.certified_max_deviation_px for report in processed.reports)
@@ -484,13 +562,117 @@ class HandwritingStudio(QWidget):
         self._refresh_diagnostics()
         return processed_record
 
+    def normalize_current(self) -> NormalizedRecord | None:
+        processed_record = self._processed_record or self.process_current()
+        if processed_record is None:
+            return None
+        raw_record = next(
+            (item for item in self._records
+             if item.sha256 == processed_record.processed.source_capture_sha256),
+            None,
+        )
+        if raw_record is None:
+            self._normalization_status = tr(self.language, "studio.normalization_source_missing")
+            self._refresh_diagnostics()
+            return None
+        if self.metric_profile is None and self.set_style_metrics_from_current() is None:
+            return None
+        assert self.metric_profile is not None
+        if abs(self.metric_profile.preview_x_height_mm - self.physical_size_spin.value()) > 1e-9:
+            values = self.metric_profile.model_dump(mode="python")
+            values.update({
+                "revision": self.metric_profile.revision + 1,
+                "preview_x_height_mm": self.physical_size_spin.value(),
+            })
+            try:
+                self.metric_profile = StyleMetricProfile.model_validate(values, strict=True)
+                self.metric_store.save(self.metric_profile)
+            except Exception as exc:
+                self._normalization_status = f"{tr(self.language, 'studio.normalization_failed')}\n{exc}"
+                self._refresh_diagnostics()
+                return None
+        sample = raw_record.session.samples[0]
+        variant_id = self.variant_edit.text().strip() or self._suggest_variant_id(sample.label)
+        override = GlyphMetricOverride(
+            variant_id=variant_id,
+            advance_gu=self.advance_spin.value(),
+            left_bearing_gu=self.left_bearing_spin.value(),
+            minimum_right_bearing_gu=self.right_bearing_spin.value(),
+            baseline_offset_gu=self.baseline_offset_spin.value(),
+        )
+        try:
+            glyph = normalize_processed_glyph(
+                processed_record.processed,
+                processed_record.sha256,
+                sample,
+                self.metric_profile,
+                variant_id=variant_id,
+                label=sample.label,
+                context_tag=self.context_combo.currentText(),
+                override=override,
+            )
+            normalized_record = self.normalized_repository.store(glyph)
+        except Exception as exc:
+            self._normalization_status = f"{tr(self.language, 'studio.normalization_failed')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        self._normalized_record = normalized_record
+        self.normalized_hash_value.setText(normalized_record.sha256)
+        self.normalization_preview.set_glyph(glyph)
+        advance_mm = glyph.advance_gu * glyph.preview_x_height_mm / 1000.0
+        self._normalization_status = tr(self.language, "studio.normalized").format(
+            hash=normalized_record.sha256[:12], advance=advance_mm,
+        )
+        self._refresh_diagnostics()
+        return normalized_record
+
+    def set_style_metrics_from_current(self) -> StyleMetricProfile | None:
+        digest = self.hash_value.text()
+        if len(digest) != 64:
+            record = self.save_sample()
+            if record is None:
+                return None
+        else:
+            record = next((item for item in self._records if item.sha256 == digest), None)
+            if record is None:
+                self._normalization_status = tr(self.language, "studio.normalization_source_missing")
+                self._refresh_diagnostics()
+                return None
+        sample = record.session.samples[0]
+        revision = 1 if self.metric_profile is None else self.metric_profile.revision + 1
+        previous = self.metric_profile
+        try:
+            profile = StyleMetricProfile.from_sample(
+                "personal", sample, preview_x_height_mm=self.physical_size_spin.value()
+            )
+            values = profile.model_dump(mode="python")
+            values.update({
+                "revision": revision,
+                "default_advance_gu": self.advance_spin.value(),
+                "default_left_bearing_gu": self.left_bearing_spin.value(),
+                "minimum_right_bearing_gu": self.right_bearing_spin.value(),
+                "space_advance_gu": previous.space_advance_gu if previous else 900.0,
+                "line_gap_gu": previous.line_gap_gu if previous else 500.0,
+            })
+            profile = StyleMetricProfile.model_validate(values, strict=True)
+            self.metric_store.save(profile)
+        except Exception as exc:
+            self._normalization_status = f"{tr(self.language, 'studio.normalization_failed')}\n{exc}"
+            self._refresh_diagnostics()
+            return None
+        self.metric_profile = profile
+        self._clear_normalization_state()
+        self._normalization_status = tr(self.language, "studio.style_metrics_saved").format(
+            revision=profile.revision
+        )
+        self._refresh_diagnostics()
+        return profile
+
     def undo_processing(self) -> bool:
         """Remove the derivative from the view while retaining immutable raw data."""
         if self._processed_record is None:
             return False
-        self._processed_record = None
-        self.capture_canvas.clear_processed()
-        self.processed_hash_value.setText("—")
+        self._clear_processing_state()
         self._processing_status = tr(self.language, "studio.processing_undone")
         self._refresh_diagnostics()
         return True
@@ -520,18 +702,50 @@ class HandwritingStudio(QWidget):
         self._processing_status = tr(self.language, "studio.processed_reopened").format(
             hash=record.sha256[:12], error=maximum,
         )
+        self._restore_latest_normalized(record.sha256)
+
+    def _restore_latest_normalized(self, processed_hash: str) -> None:
+        self._clear_normalization_state()
+        try:
+            records = self.normalized_repository.list_for_processed(processed_hash)
+        except Exception as exc:
+            self._normalization_status = f"{tr(self.language, 'studio.normalization_failed')}\n{exc}"
+            return
+        if not records:
+            return
+        record = records[-1]
+        self._normalized_record = record
+        self.normalized_hash_value.setText(record.sha256)
+        self.normalization_preview.set_glyph(record.glyph)
+        self._normalization_status = tr(self.language, "studio.normalized_reopened").format(
+            hash=record.sha256[:12]
+        )
 
     def _clear_processing_state(self) -> None:
         self._processed_record = None
         self.capture_canvas.clear_processed()
         self.processed_hash_value.setText("—")
         self._processing_status = ""
+        self._clear_normalization_state()
+
+    def _clear_normalization_state(self) -> None:
+        self._normalized_record = None
+        self.normalized_hash_value.setText("—")
+        self.normalization_preview.set_glyph(None)
+        self._normalization_status = ""
 
     def _processing_parameters_changed(self) -> None:
         if self._processed_record is None:
             return
         self._clear_processing_state()
         self._processing_status = tr(self.language, "studio.processing_parameters_changed")
+        self._refresh_diagnostics()
+
+    def _normalization_parameters_changed(self, *_args) -> None:
+        if self._normalized_record is None:
+            return
+        self._clear_normalization_state()
+        self._normalization_status = tr(self.language, "studio.normalization_parameters_changed")
         self._refresh_diagnostics()
 
     def save_and_next(self) -> CaptureRecord | None:
@@ -635,9 +849,7 @@ class HandwritingStudio(QWidget):
 
     def _capture_changed(self, strokes: int, points: int) -> None:
         had_processed = self._processed_record is not None
-        self._processed_record = None
-        self.capture_canvas.clear_processed()
-        self.processed_hash_value.setText("—")
+        self._clear_processing_state()
         if len(self.hash_value.text()) == 64:
             self.hash_value.setText("—")
         if had_processed:
@@ -700,11 +912,15 @@ class HandwritingStudio(QWidget):
         messages.append(tr(self.language, "studio.raw_notice"))
         if self._processing_status:
             messages.append(self._processing_status)
+        if self._normalization_status:
+            messages.append(self._normalization_status)
         self.diagnostics.setPlainText("\n".join(messages))
         self.save_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.save_next_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.process_button.setEnabled(bool(label and self.capture_canvas.strokes))
         self.undo_processing_button.setEnabled(self._processed_record is not None)
+        self.normalize_button.setEnabled(bool(label and self.capture_canvas.strokes))
+        self.set_metrics_button.setEnabled(bool(label and self.capture_canvas.strokes))
 
     def _queue_counts(self) -> dict[str, int]:
         counts = {token: 0 for token in self.queue_state.tokens}

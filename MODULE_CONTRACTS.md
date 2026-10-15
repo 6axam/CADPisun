@@ -261,6 +261,23 @@ smoothing/simplification. Point mark остаётся отдельным directe
 UI отвечает только за выбор параметров
 и Raw/Processed overlay; отмена overlay не вызывает удаление raw bytes.
 
+### 12.3 Glyph metric normalization boundary
+
+`capture/metrics.py` не импортирует Qt. `normalize_processed_glyph(processed,
+processed_sha256, raw_sample, shared_profile, variant metadata/override)`
+проверяет sample/frame identity и применяет один affine scale из shared
+baseline/x-height guides ко всем control/end points. Он может менять только
+horizontal origin/bearings, declared advance и явный baseline offset; per-glyph
+vertical bbox scaling запрещён.
+
+`MetricProfileStore` атомарно хранит contiguous editable profile revisions.
+`NormalizedRepository` до store/load повторно проверяет raw SHA/sample,
+processed SHA/source link, profile hash, analytical bounds, envelope и
+bearings. `NormalizedGlyph.physical_preview_strokes()` выполняет явное gu→mm
+преобразование с инверсией Y. GUI показывает отдельный GlyphFrame preview,
+физические размеры и ручные controls; изменение параметров инвалидирует только
+preview/normalized derivative, не raw или processed sources.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI

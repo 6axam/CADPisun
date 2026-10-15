@@ -235,3 +235,40 @@ def test_raw_and_processed_comparison_persists_two_tolerances_and_undoes_safely(
     assert reopened.capture_canvas.processed_strokes
     assert reopened.processed_hash_value.text() in {fine.sha256, coarse.sha256}
 
+
+def test_studio_normalizes_with_shared_metrics_and_reopens_physical_preview(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1300, 800)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    raw = studio.save_sample()
+    assert raw is not None
+    processed = studio.process_current()
+    assert processed is not None
+    studio.physical_size_spin.setValue(4.0)
+    studio.left_bearing_spin.setValue(60.0)
+    studio.right_bearing_spin.setValue(60.0)
+
+    profile = studio.set_style_metrics_from_current()
+    normalized = studio.normalize_current()
+
+    assert profile is not None
+    assert profile.x_height_gu == 1000.0
+    assert normalized is not None
+    assert normalized.glyph.units == "gu"
+    assert normalized.glyph.metric_profile_sha256
+    assert normalized.glyph.preview_x_height_mm == 4.0
+    assert normalized.glyph.left_bearing_gu == 60.0
+    assert studio.normalization_preview.glyph == normalized.glyph
+    assert studio.normalized_hash_value.text() == normalized.sha256
+    assert studio.repository.load(raw.sha256) == raw.session
+
+    reopened = HandwritingStudio(tmp_path)
+    reopened.resize(1300, 800)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened.normalization_preview.glyph is not None
+    assert reopened.normalized_hash_value.text() == normalized.sha256
+

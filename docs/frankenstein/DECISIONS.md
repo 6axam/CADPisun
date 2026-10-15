@@ -55,3 +55,16 @@ less simplified geometry instead of increasing the requested tolerance. Raw
 logical pixels remain their own frame until Phase 07; no false `gu` unit is
 assigned to a processed derivative.
 
+## F-ADR-009: Normalize a style from shared guides, never glyph bounds
+
+Status: accepted, 2026-10-15.
+
+The first explicit or captured style metric profile fixes one logical-pixel
+frame and shared ascender, x-height, baseline, and descender guides. Every glyph
+uses the same uniform `1000 gu / source x-height` scale. Individual analytical
+bounds determine only horizontal placement and bearing checks. Manual overrides
+may change advance, bearings, or an explicit baseline offset; they never stretch
+a glyph to fill its own vertical box. Physical preview uses the architecture's
+nominal gu-to-mm conversion and is labeled in millimetres rather than pretending
+to be monitor-calibrated 1:1 output.
+
