@@ -210,18 +210,22 @@ Correction operations: set_transcript, adjust_polygon, split_region, merge_regio
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.3`. Корень содержит `project_id`, пользовательское `name`,
+`schema_version=1.4`. Корень содержит `project_id`, пользовательское `name`,
 `page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
-Версии 1.0–1.2 читаются и мигрируют в памяти в 1.3; неизвестная версия или
+Версии 1.0–1.3 читаются и мигрируют в памяти в 1.4; неизвестная версия или
 лишнее поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
-`TextObject`: object_id, name, Unicode text, visible, x_mm/y_mm, x_height_mm,
-line_pitch_mm, pinned style_id/style_revision, seed и realism, а также
-независимое UI-поле frame_x_mm/frame_y_mm/frame_width_mm/frame_height_mm.
-Изменение поля само по себе не меняет layout, SVG, PenPlan или G-code. `display` v1
-содержит show_travel/show_markers. Object IDs уникальны; абсолютные пути и
-QSettings layout в JSON не встраиваются.
+`TextObject`: object_id, name, Unicode text, visible, абсолютная точка начала
+x_mm/y_mm, x_height_mm, line_pitch_mm, character_spacing_mm, rotation_deg,
+pinned style_id/style_revision, seed и realism, а также рабочее поле
+frame_x_mm/frame_y_mm/frame_width_mm/frame_height_mm, display_diameter_mm и
+color_group 0…15. Точка начала показывается в UI относительно рабочего поля,
+но сохраняется в PageFrame для совместимости. Все ink bounds после поворота
+обязаны лежать внутри рабочего поля; иначе объект целиком исключается из
+PenPlan/SVG/G-code и записывается в `overflow_object_ids`. `display` v1 содержит
+show_travel/show_markers. Object IDs уникальны; абсолютные пути и QSettings
+layout в JSON не встраиваются.
 
 Каждый элемент `objects[]` имеет discriminator `kind`. `kind=text` обозначает
 `TextObject`. `kind=grid` обозначает `GridObject`: object_id, name, visible,

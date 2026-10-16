@@ -59,6 +59,10 @@ class TextObject(StrictModel):
     frame_height_mm: float = Field(default=30.0, gt=0, le=297)
     x_height_mm: float = Field(default=3.5, gt=0, le=30)
     line_pitch_mm: float = Field(default=9.0, gt=0, le=100)
+    character_spacing_mm: float = Field(default=0.0, ge=0, le=30)
+    rotation_deg: float = Field(default=0.0, ge=-180, le=180)
+    display_diameter_mm: float = Field(default=3.0, ge=1, le=20)
+    color_group: int = Field(default=0, ge=0, lt=16)
     style_id: str = Field(default="test-technical-v1", min_length=1)
     style_revision: str = Field(default="1.0.0", min_length=1)
     seed: int = Field(default=1, ge=0, lt=2**64)
@@ -116,7 +120,7 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.3"] = "1.3"
+    schema_version: Literal["1.4"] = "1.4"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
@@ -235,22 +239,27 @@ def load_project_file(path: Path) -> LoadedProject:
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
     version = data.get("schema_version")
-    if version not in {"1.0", "1.1", "1.2", "1.3"}:
+    if version not in {"1.0", "1.1", "1.2", "1.3", "1.4"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
     cache_data = data.pop("generation_cache", None)
-    if version in {"1.0", "1.1", "1.2"}:
+    if version in {"1.0", "1.1", "1.2", "1.3"}:
         migrated_objects = []
         for item in data.get("objects", []):
             migrated = dict(item)
             migrated.setdefault("kind", "text")
             if migrated["kind"] == "text":
-                migrated.setdefault("frame_x_mm", migrated.get("x_mm", 15.0))
-                migrated.setdefault("frame_y_mm", migrated.get("y_mm", 15.0))
-                migrated.setdefault("frame_width_mm", min(60.0, 210.0 - migrated["frame_x_mm"]))
-                migrated.setdefault("frame_height_mm", min(30.0, 297.0 - migrated["frame_y_mm"]))
+                if version in {"1.0", "1.1", "1.2"}:
+                    migrated.setdefault("frame_x_mm", migrated.get("x_mm", 15.0))
+                    migrated.setdefault("frame_y_mm", migrated.get("y_mm", 15.0))
+                    migrated.setdefault("frame_width_mm", min(60.0, 210.0 - migrated["frame_x_mm"]))
+                    migrated.setdefault("frame_height_mm", min(30.0, 297.0 - migrated["frame_y_mm"]))
+                migrated.setdefault("character_spacing_mm", 0.0)
+                migrated.setdefault("rotation_deg", 0.0)
+                migrated.setdefault("display_diameter_mm", 3.0)
+                migrated.setdefault("color_group", 0)
             migrated_objects.append(migrated)
         data["objects"] = migrated_objects
-        data["schema_version"] = "1.3"
+        data["schema_version"] = "1.4"
     snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
     if cache_data is None:
         return LoadedProject(snapshot)

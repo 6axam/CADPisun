@@ -25,6 +25,7 @@ class PageSpec:
     margin_bottom_mm: float = 15.0
     x_height_mm: float = 3.5
     line_pitch_mm: float = 9.0
+    character_spacing_mm: float = 0.0
     paragraph_gap_mm: float = 4.0
     pen_width_mm: float = 0.35
     alignment: str = "left"
@@ -35,7 +36,7 @@ class PageSpec:
         values = (
             self.width_mm, self.height_mm, self.margin_left_mm, self.margin_right_mm,
             self.margin_top_mm, self.margin_bottom_mm, self.x_height_mm,
-            self.line_pitch_mm, self.paragraph_gap_mm, self.pen_width_mm,
+            self.line_pitch_mm, self.character_spacing_mm, self.paragraph_gap_mm, self.pen_width_mm,
         )
         if any(value < 0 for value in values) or self.width_mm <= 0 or self.height_mm <= 0:
             raise ValueError("invalid page dimensions")
@@ -128,6 +129,7 @@ def _split_word(
             seed=seed,
             x_height_mm=spec.x_height_mm,
             pen_width_mm=spec.pen_width_mm,
+            character_spacing_mm=spec.character_spacing_mm,
             variation=variation,
         )
         if _occupied(candidate, spec.pen_width_mm)[2] <= spec.printable_width:
@@ -288,6 +290,7 @@ def layout_document(
                     seed=seed,
                     x_height_mm=page_spec.x_height_mm,
                     pen_width_mm=page_spec.pen_width_mm,
+                    character_spacing_mm=page_spec.character_spacing_mm,
                     variation=variation,
                 )
                 left, _, width = _occupied(block_shape, page_spec.pen_width_mm)
@@ -321,6 +324,7 @@ def layout_document(
             seed=seed,
             x_height_mm=page_spec.x_height_mm,
             pen_width_mm=page_spec.pen_width_mm,
+            character_spacing_mm=page_spec.character_spacing_mm,
             variation=variation,
         )
         left, _, width = _occupied(shape, page_spec.pen_width_mm)

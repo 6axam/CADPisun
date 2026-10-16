@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
 from handwriting_plotter.gui.document import GridObject, ProjectSnapshot, TextObject
+from handwriting_plotter.geometry.bounds import curve_bounds
+from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic
 from handwriting_plotter.gui.theme import COLORS
 
 
@@ -18,8 +20,14 @@ def composition_project() -> ProjectSnapshot:
     return ProjectSnapshot(
         project_id="composition-test",
         objects=(
-            TextObject(object_id="first", name="First", text="Alpha", x_mm=20, y_mm=25, seed=7),
-            TextObject(object_id="second", name="Second", text="Beta", x_mm=100, y_mm=90, seed=9),
+            TextObject(
+                object_id="first", name="First", text="Alpha", x_mm=20, y_mm=25,
+                frame_x_mm=15, frame_y_mm=20, frame_width_mm=70, frame_height_mm=35, seed=7,
+            ),
+            TextObject(
+                object_id="second", name="Second", text="Beta", x_mm=100, y_mm=90,
+                frame_x_mm=95, frame_y_mm=85, frame_width_mm=70, frame_height_mm=35, seed=9,
+            ),
         ),
     )
 
@@ -63,18 +71,94 @@ def test_generation_progress_reports_running_success_and_failure(qtbot) -> None:
     assert COLORS["danger"] in window.generation_progress.styleSheet()
 
 
-def test_text_frame_geometry_does_not_change_generated_artifacts() -> None:
+def test_text_frame_geometry_changes_generated_artifacts() -> None:
     first = composition_project()
     moved_frames = first.model_copy(update={
         "objects": tuple(
-            item.model_copy(update={"frame_x_mm": 5.0, "frame_y_mm": 5.0})
+            item.model_copy(update={"frame_width_mm": item.frame_width_mm - 5.0})
             for item in first.objects
         )
     })
     baseline = GuiBackend().build(first)
     changed = GuiBackend().build(ProjectSnapshot.model_validate(moved_frames.model_dump(), strict=True))
-    assert changed.document_id == baseline.document_id
-    assert changed.files == baseline.files
+    assert changed.document_id != baseline.document_id
+    assert changed.files != baseline.files
+
+
+def _segment_from_json(data):
+    point = lambda value: Point2(value["x"], value["y"])
+    if data["kind"] == "line":
+        return Line(point(data["p0"]), point(data["p1"]))
+    if data["kind"] == "quadratic":
+        return Quadratic(point(data["p0"]), point(data["c1"]), point(data["p1"]))
+    return Cubic(point(data["p0"]), point(data["c1"]), point(data["c2"]), point(data["p1"]))
+
+
+def _draw_bounds(result):
+    plan = json.loads(result.files["page-0001.plan.json"])
+    parts = [
+        curve_bounds(_segment_from_json(segment))
+        for operation in plan["operations"] if operation["op"] == "draw"
+        for segment in operation["segments"]
+    ]
+    if not parts:
+        return None
+    bounds = parts[0]
+    for part in parts[1:]:
+        bounds = bounds.union(part)
+    return bounds
+
+
+def test_generation_keeps_ink_inside_object_working_area() -> None:
+    item = TextObject(
+        object_id="bounded", name="Bounded", text="Alpha Beta",
+        x_mm=30, y_mm=40,
+        frame_x_mm=25, frame_y_mm=35, frame_width_mm=80, frame_height_mm=35,
+    )
+    result = GuiBackend().build(ProjectSnapshot(project_id="bounded-project", objects=(item,)))
+    bounds = _draw_bounds(result)
+
+    assert result.report["complete"] is True
+    assert result.report["overflow_object_ids"] == []
+    assert bounds is not None
+    assert bounds.min_x >= item.frame_x_mm
+    assert bounds.max_x <= item.frame_x_mm + item.frame_width_mm
+    assert bounds.min_y >= item.frame_y_mm
+    assert bounds.max_y <= item.frame_y_mm + item.frame_height_mm
+
+
+def test_overflowing_object_is_omitted_and_reported() -> None:
+    item = TextObject(
+        object_id="overflow", name="Overflow", text="Alpha " * 40,
+        x_mm=20, y_mm=20,
+        frame_x_mm=20, frame_y_mm=20, frame_width_mm=15, frame_height_mm=8,
+    )
+    result = GuiBackend().build(ProjectSnapshot(project_id="overflow-project", objects=(item,)))
+
+    assert result.report["complete"] is False
+    assert result.report["overflow_object_ids"] == ["overflow"]
+    assert "OBJECT_FRAME_OVERFLOW:overflow" in result.report["diagnostics"]
+    assert _draw_bounds(result) is None
+
+
+def test_character_spacing_and_rotation_change_geometry_deterministically() -> None:
+    base = TextObject(
+        object_id="transform", name="Transform", text="Alpha",
+        x_mm=60, y_mm=80,
+        frame_x_mm=40, frame_y_mm=50, frame_width_mm=100, frame_height_mm=100,
+        realism=0,
+    )
+    plain = GuiBackend().build(ProjectSnapshot(project_id="transform-project", objects=(base,)))
+    spaced_item = base.model_copy(update={"character_spacing_mm": 1.5})
+    spaced = GuiBackend().build(ProjectSnapshot(project_id="transform-project", objects=(spaced_item,)))
+    rotated_item = spaced_item.model_copy(update={"rotation_deg": 90.0})
+    rotated = GuiBackend().build(ProjectSnapshot(project_id="transform-project", objects=(rotated_item,)))
+
+    assert _draw_bounds(spaced).max_x > _draw_bounds(plain).max_x
+    assert _draw_bounds(rotated) != _draw_bounds(spaced)
+    assert rotated.files == GuiBackend().build(
+        ProjectSnapshot(project_id="transform-project", objects=(rotated_item,))
+    ).files
 
 
 def test_layout_grid_is_strictly_excluded_from_all_generated_artifacts() -> None:

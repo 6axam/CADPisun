@@ -42,6 +42,7 @@ class WordShaper:
         seed: int,
         x_height_mm: float,
         pen_width_mm: float = 0.35,
+        character_spacing_mm: float = 0.0,
         variation: VariationSpec = VariationSpec(),
     ) -> ShapedWord:
         if not graphemes:
@@ -51,7 +52,9 @@ class WordShaper:
         diagnostics: list[str] = []
         x = 0.0
         previous_by_key: dict[str, str] = {}
-        for match in matches:
+        if character_spacing_mm < 0:
+            raise ValueError("NEGATIVE_CHARACTER_SPACING")
+        for match_index, match in enumerate(matches):
             selected = select_variant(
                 match,
                 seed=seed,
@@ -63,6 +66,8 @@ class WordShaper:
             glyph = place_glyph(match, selected, x, x_height_mm, effective)
             placed.append(glyph)
             x += glyph.advance_mm
+            if match_index < len(matches) - 1:
+                x += character_spacing_mm
 
         groups: list[ExecutionGroup] = []
         index = 0
