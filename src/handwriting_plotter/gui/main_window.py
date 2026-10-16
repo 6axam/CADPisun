@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.version import __version__
+from handwriting_plotter.application.resources import style_root
 
 from .backend import GuiBackend, generation_source_hash
 from .canvas import PageCanvas
@@ -42,6 +44,7 @@ from .exporting import export_artifact
 from .i18n import Language, normalize_language, tr
 from .properties import PropertiesPanel
 from .styles import discover_styles
+from .studio import HandwritingStudio, handwriting_data_root
 from .theme import COLORS
 from .workers import GenerationWorker
 
@@ -52,16 +55,18 @@ ROLE_VALUE = ROLE_KIND + 1
 class MainWindow(QMainWindow):
     """Dockable engineering workspace backed by an undoable project model."""
 
-    def __init__(self, settings: QSettings | None = None) -> None:
+    def __init__(self, settings: QSettings | None = None, *, user_data_root: Path | None = None) -> None:
         super().__init__()
         self.setObjectName("main-window")
         self.resize(1440, 900)
         self.setDockNestingEnabled(True)
-        self.styles = discover_styles()
         self.settings = settings or QSettings("Handwriting Plotter", "Handwriting Plotter")
         self.language = normalize_language(self.settings.value("ui/language", "en"))
+        self.user_data_root = user_data_root or handwriting_data_root()
+        self.user_style_root = self.user_data_root / "styles"
+        self.styles = discover_styles(self.user_style_root)
         self.controller = DocumentController(default_project(), self)
-        self.backend = GuiBackend()
+        self.backend = GuiBackend(style_roots=(style_root(), self.user_style_root))
         self.thread_pool = QThreadPool.globalInstance()
         self.generated_result = None
         self.generated_revision: int | None = None
@@ -79,6 +84,7 @@ class MainWindow(QMainWindow):
         self._tree_signature: tuple | None = None
         self._canvas_objects_signature: tuple | None = None
         self._margin_signature: tuple[float, float, float, float] | None = None
+        self._document_dock_visibility: dict[str, bool] = {}
         self._build_canvas()
         self._build_docks()
         self._build_actions()
@@ -99,7 +105,20 @@ class MainWindow(QMainWindow):
 
     def _build_canvas(self) -> None:
         self.canvas = PageCanvas(self)
-        self.setCentralWidget(self.canvas)
+        self.studio = HandwritingStudio(self.user_data_root, language=self.language, parent=self)
+        self.workspace_stack = QStackedWidget(self)
+        self.workspace_stack.setObjectName("workspace-stack")
+        self.workspace_stack.addWidget(self.canvas)
+        self.workspace_stack.addWidget(self.studio)
+        self.studio.style_published.connect(self._style_published)
+        self.setCentralWidget(self.workspace_stack)
+
+    def _style_published(self, style_id: str, revision: str) -> None:
+        self.styles = discover_styles(self.user_style_root)
+        self.properties.set_styles(self.styles)
+        self.backend = GuiBackend(style_roots=(style_root(), self.user_style_root))
+        self._refresh_tree(self.controller.snapshot)
+        self._show_status(f"Style published · {style_id}@{revision}")
 
     def _build_docks(self) -> None:
         project_panel = QWidget()
@@ -140,6 +159,18 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
 
     def _build_actions(self) -> None:
+        self.workspace_group = QActionGroup(self)
+        self.workspace_group.setExclusive(True)
+        self.document_workspace_action = self._action(
+            self._t("action.workspace.document"), lambda: self.set_workspace("document")
+        )
+        self.studio_workspace_action = self._action(
+            self._t("action.workspace.studio"), lambda: self.set_workspace("studio")
+        )
+        for action in (self.document_workspace_action, self.studio_workspace_action):
+            action.setCheckable(True)
+            self.workspace_group.addAction(action)
+        self.document_workspace_action.setChecked(True)
         self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
         self.open_action = self._action(self._t("action.open"), self.open_project, QKeySequence.StandardKey.Open)
         self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
@@ -194,6 +225,8 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         self.workspace_toolbar = self.addToolBar(self._t("toolbar.workspace"))
         self.workspace_toolbar.setObjectName("workspace-toolbar")
+        self.workspace_toolbar.addActions((self.document_workspace_action, self.studio_workspace_action))
+        self.workspace_toolbar.addSeparator()
         self.workspace_toolbar.addActions([self.new_action, self.open_action, self.save_action])
         self.workspace_toolbar.addSeparator()
         self.workspace_toolbar.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
@@ -342,6 +375,8 @@ class MainWindow(QMainWindow):
         self.machine_menu.setTitle(self._t("menu.machine"))
         self.help_menu.setTitle(self._t("menu.help"))
         action_keys = {
+            self.document_workspace_action: "action.workspace.document",
+            self.studio_workspace_action: "action.workspace.studio",
             self.new_action: "action.new",
             self.open_action: "action.open",
             self.save_action: "action.save",
@@ -396,8 +431,30 @@ class MainWindow(QMainWindow):
             self._t("canvas.preview_stale"),
         )
         self.properties.set_language(self.language)
+        self.studio.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
         self._show_status(self._t("status.ready"), timeout=2500)
+
+    def set_workspace(self, workspace: str) -> None:
+        if workspace not in {"document", "studio"}:
+            raise ValueError("UNKNOWN_WORKSPACE")
+        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        if workspace == "studio":
+            if self.workspace_stack.currentWidget() is self.canvas:
+                self._document_dock_visibility = {
+                    dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+                }
+            self.workspace_stack.setCurrentWidget(self.studio)
+            for dock in docks:
+                dock.hide()
+            self.studio_workspace_action.setChecked(True)
+            self.telemetry_label.hide()
+        else:
+            self.workspace_stack.setCurrentWidget(self.canvas)
+            for dock in docks:
+                dock.setVisible(self._document_dock_visibility.get(dock.objectName(), True))
+            self.document_workspace_action.setChecked(True)
+            self.telemetry_label.show()
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -1011,6 +1068,30 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state, 1)
+        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        visibility_keys = {
+            dock.objectName(): f"main/document_docks/{dock.objectName()}/visible"
+            for dock in docks
+        }
+        has_explicit_visibility = any(self.settings.contains(key) for key in visibility_keys.values())
+        if has_explicit_visibility:
+            for dock in docks:
+                key = visibility_keys[dock.objectName()]
+                visible = self.settings.value(
+                    key,
+                    dock.toggleViewAction().isChecked(),
+                    type=bool,
+                )
+                dock.setVisible(visible)
+        elif state is not None and not any(dock.toggleViewAction().isChecked() for dock in docks):
+            # Older builds saved Studio's temporary all-hidden state as the
+            # Document layout. Recover that state once without overriding a
+            # user's explicitly persisted per-dock choices in newer builds.
+            for dock in docks:
+                dock.show()
+        self._document_dock_visibility = {
+            dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+        }
         show_travel = self.settings.value("canvas/show_travel", False, type=bool)
         show_markers = self.settings.value("canvas/show_markers", False, type=bool)
         self.travel_action.setChecked(show_travel)
@@ -1019,6 +1100,18 @@ class MainWindow(QMainWindow):
         self.canvas.set_show_markers(show_markers)
 
     def _save_window_state(self) -> None:
+        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        if self.workspace_stack.currentWidget() is self.studio:
+            visibility = self._document_dock_visibility
+        else:
+            visibility = {
+                dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+            }
+        for dock in docks:
+            self.settings.setValue(
+                f"main/document_docks/{dock.objectName()}/visible",
+                visibility.get(dock.objectName(), True),
+            )
         self.settings.setValue("main/geometry", self.saveGeometry())
         self.settings.setValue("main/state", self.saveState(1))
         self.settings.setValue("canvas/show_travel", self.travel_action.isChecked())

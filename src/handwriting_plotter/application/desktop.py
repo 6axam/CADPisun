@@ -23,7 +23,7 @@ from handwriting_plotter.shaping.variants import VariationSpec
 from handwriting_plotter.storage.serialization import primitive
 from handwriting_plotter.strokes.compile import compile_page
 from handwriting_plotter.strokes.simulate import simulate_pen_plan
-from handwriting_plotter.styles.repository import FileStyleRepository
+from handwriting_plotter.styles.repository import CompositeStyleRepository, FileStyleRepository
 from handwriting_plotter.text.coverage import check_coverage
 from handwriting_plotter.text.normalize import normalize
 from handwriting_plotter.version import ENGINE_VERSION
@@ -87,7 +87,12 @@ class DesktopApplicationAdapter:
     """Build one authoritative page from ordered positioned blocks."""
 
     def __init__(self, styles=None, profile=None) -> None:  # noqa: ANN001
-        self.style_repository = FileStyleRepository(styles or default_style_root())
+        if styles is None or isinstance(styles, (str, bytes)) or hasattr(styles, "__fspath__"):
+            self.style_repository = FileStyleRepository(styles or default_style_root())
+        elif isinstance(styles, tuple):
+            self.style_repository = CompositeStyleRepository(styles)
+        else:
+            self.style_repository = styles
         self.profile_path = profile or virtual_profile_path()
 
     def build(self, request: CompositionRequest) -> GenerationResult:

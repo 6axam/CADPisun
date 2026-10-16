@@ -138,6 +138,8 @@ class PropertiesPanel(QWidget):
         self.line_pitch_field = _millimetre_spin(0.5, 100)
         self.style_field = QComboBox()
         for style in self._styles:
+            if not style.valid:
+                continue
             label = f"{style.display_name} · {style.revision}"
             self.style_field.addItem(label, f"{style.style_id}\0{style.revision}")
         self.seed_field = QLineEdit()
@@ -282,7 +284,13 @@ class PropertiesPanel(QWidget):
         self.x_height_field.setValue(item.x_height_mm)
         self.line_pitch_field.setValue(item.line_pitch_mm)
         index = self.style_field.findData(f"{item.style_id}\0{item.style_revision}")
-        self.style_field.setCurrentIndex(max(index, 0))
+        if index < 0:
+            self.style_field.addItem(
+                f"Missing · {item.style_id}@{item.style_revision}",
+                f"{item.style_id}\0{item.style_revision}",
+            )
+            index = self.style_field.count() - 1
+        self.style_field.setCurrentIndex(index)
         self.seed_field.setText(str(item.seed))
         self.realism_field.setValue(item.realism)
         self._loading = False
@@ -313,6 +321,27 @@ class PropertiesPanel(QWidget):
         self._show_style_status(style)
         self.resource_detail.setText(style.detail)
         self.stack.setCurrentWidget(self.resource_widget)
+
+    def set_styles(self, styles: tuple[StyleSummary, ...]) -> None:
+        """Replace the verified catalog while preserving an explicit project reference."""
+        current = self.style_field.currentData()
+        self._styles = styles
+        self.style_field.blockSignals(True)
+        self.style_field.clear()
+        for style in styles:
+            if style.valid:
+                self.style_field.addItem(
+                    f"{style.display_name} · {style.revision}",
+                    f"{style.style_id}\0{style.revision}",
+                )
+        index = self.style_field.findData(current)
+        if index < 0 and isinstance(current, str) and "\0" in current:
+            style_id, revision = current.split("\0", 1)
+            self.style_field.addItem(f"Missing · {style_id}@{revision}", current)
+            index = self.style_field.count() - 1
+        if index >= 0:
+            self.style_field.setCurrentIndex(index)
+        self.style_field.blockSignals(False)
 
     def _show_style_status(self, style: StyleSummary) -> None:
         status_key = "properties.test_only" if style.test_only else "properties.production"

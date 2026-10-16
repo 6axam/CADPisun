@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 
 from handwriting_plotter.application.desktop import (
     CompositionRequest,
@@ -59,8 +60,13 @@ def generation_source_hash(snapshot: ProjectSnapshot) -> str:
 
 
 class GuiBackend:
-    def __init__(self, adapter: DesktopApplicationAdapter | None = None) -> None:
-        self.adapter = adapter or DesktopApplicationAdapter()
+    def __init__(
+        self,
+        adapter: DesktopApplicationAdapter | None = None,
+        *,
+        style_roots: tuple[Path, ...] | None = None,
+    ) -> None:
+        self.adapter = adapter or DesktopApplicationAdapter(styles=style_roots)
 
     def build(self, snapshot: ProjectSnapshot) -> GenerationResult:
         return self.adapter.build(composition_request(snapshot))

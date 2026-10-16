@@ -1,0 +1,371 @@
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import QPointF, QSettings
+
+from handwriting_plotter.gui.main_window import MainWindow
+from handwriting_plotter.gui.studio import HandwritingStudio
+from handwriting_plotter.application.resources import style_root
+
+
+def _draw_sample(studio: HandwritingStudio, offset: float = 0.0) -> None:
+    canvas = studio.capture_canvas
+    canvas.resize(640, 480)
+    assert canvas._begin_pointer("mouse", QPointF(100 + offset, 320))
+    assert canvas._move_pointer(QPointF(130 + offset, 210 - offset))
+    assert canvas._end_pointer(QPointF(170 + offset, 320))
+    assert canvas._begin_pointer("mouse", QPointF(190 + offset, 320))
+    assert canvas._end_pointer(QPointF(210 + offset, 220 + offset))
+
+
+def test_workspace_switch_preserves_document_state(qtbot, tmp_path: Path) -> None:
+    settings = QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(settings, user_data_root=tmp_path / "user-data")
+    qtbot.addWidget(window)
+    window.show()
+    object_id = window.controller.snapshot.objects[0].object_id
+    window.controller.update_text_object(object_id, text="Документ залишається")
+    snapshot = window.controller.snapshot
+
+    window.studio_workspace_action.trigger()
+
+    assert window.workspace_stack.currentWidget() is window.studio
+    assert not window.project_dock.isVisible()
+    assert not window.properties_dock.isVisible()
+    assert window.controller.snapshot == snapshot
+
+    window.document_workspace_action.trigger()
+
+    assert window.workspace_stack.currentWidget() is window.canvas
+    assert window.controller.snapshot == snapshot
+    assert window.project_dock.isVisible()
+    window.controller.reset(snapshot)
+
+
+def test_studio_saves_reopens_and_recovers_raw_sample(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1100, 700)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("ї")
+    studio.style_name.setText("Мій тестовий почерк")
+    studio.context_combo.setCurrentText("initial")
+    studio.advance_spin.setValue(840.0)
+    _draw_sample(studio)
+
+    record = studio.save_sample()
+
+    assert record is not None
+    assert record.path.is_file()
+    assert len(studio.records) == 1
+    assert record.session.samples[0].label == "ї"
+    assert len(record.session.samples[0].strokes) == 2
+    assert record.session.extensions["cadpisun.studio"]["context_tag"] == "initial"
+    assert studio.hash_value.text() == record.sha256
+    assert "saved" in studio.diagnostics.toPlainText().lower()
+
+    studio.clear_button.click()
+    assert studio.capture_canvas.strokes == ()
+    assert studio.open_latest_for_label("ї")
+    assert studio.capture_canvas.strokes == record.session.samples[0].strokes
+
+    reopened = HandwritingStudio(tmp_path)
+    qtbot.addWidget(reopened)
+    assert len(reopened.records) == 1
+    assert reopened.open_latest_for_label("ї")
+    assert reopened.style_name.text() == "Мій тестовий почерк"
+    assert reopened.context_combo.currentText() == "initial"
+    assert reopened.advance_spin.value() == 840.0
+    assert reopened.capture_canvas.strokes == record.session.samples[0].strokes
+
+
+def test_studio_actions_and_ukrainian_labels_are_functional(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1000, 650)
+    qtbot.addWidget(studio)
+    studio.show()
+    _draw_sample(studio)
+    original = studio.capture_canvas.strokes
+
+    studio.undo_button.click()
+    assert len(studio.capture_canvas.strokes) == 1
+    studio.redo_button.click()
+    assert studio.capture_canvas.strokes == original
+    studio.points_check.setChecked(True)
+    studio.directions_check.setChecked(True)
+    assert studio.capture_canvas._show_points
+    assert studio.capture_canvas._show_directions
+    studio.zoom_in_button.click()
+    assert studio.capture_canvas.zoom_factor > 1.0
+    studio.zoom_reset_button.click()
+    assert studio.capture_canvas.zoom_factor == 1.0
+
+    studio.search.setText("ґ")
+    visible = [
+        studio.glyph_list.item(index).data(256)
+        for index in range(studio.glyph_list.count())
+        if not studio.glyph_list.item(index).isHidden()
+    ]
+    assert visible == ["ґ"]
+
+    studio.queue_preset.setCurrentIndex(studio.queue_preset.findData("en"))
+    assert studio.queue_state.tokens[0] == "a"
+    assert studio.queue_state.tokens[-1] == "z"
+
+    studio.set_language("uk")
+    assert studio.save_button.text() == "Зберегти зразок"
+    assert studio.collection_title.text() == "Колекція знаків"
+    assert "Оригінальні точки" in studio.diagnostics.toPlainText()
+
+
+def test_custom_queue_captures_five_tokens_and_resumes_progress(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1100, 700)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.custom_queue.setText("а м и н о")
+    studio.apply_queue_button.click()
+    studio.required_variants.setValue(1)
+
+    for expected in ("а", "м", "и", "н", "о"):
+        assert studio.label_edit.text() == expected
+        _draw_sample(studio)
+        assert studio.save_and_next() is not None
+
+    assert [record.session.samples[0].label for record in studio.records] == ["а", "м", "и", "н", "о"]
+    assert studio.coverage_progress.value() == 5
+    assert "Missing: 0" in studio.coverage_summary.text()
+    assert studio.queue_state.current_index == 4
+
+    resumed = HandwritingStudio(tmp_path)
+    qtbot.addWidget(resumed)
+    assert resumed.queue_state.tokens == ("а", "м", "и", "н", "о")
+    assert resumed.queue_state.current_index == 4
+    assert resumed.label_edit.text() == "о"
+    assert resumed.coverage_progress.value() == 5
+
+    assert resumed.open_latest_for_label("о")
+    digest = resumed.hash_value.text()
+    assert resumed.reject_current_sample()
+    assert digest in resumed.queue_state.rejected_capture_hashes
+    assert resumed.coverage_progress.value() == 4
+
+
+def test_three_variants_can_be_browsed_preferred_reopened_and_removed(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1200, 760)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+
+    hashes = []
+    for offset in (0.0, 12.0, 24.0):
+        _draw_sample(studio, offset)
+        record = studio.save_sample()
+        assert record is not None
+        hashes.append(record.sha256)
+        studio.capture_canvas.clear()
+
+    assert studio.variant_list.count() == 3
+    studio.variant_list.setCurrentRow(1)
+    selected_id = studio.variant_list.currentItem().data(256)
+    studio.preferred_button.click()
+    preferred = next(item for item in studio.draft_catalog.variants if item.variant_id == selected_id)
+    assert preferred.preferred
+    assert sum(item.preferred for item in studio.draft_catalog.visible_variants("м")) == 1
+
+    studio.variant_list.itemDoubleClicked.emit(studio.variant_list.currentItem())
+    assert studio.hash_value.text() == preferred.capture_sha256
+    assert studio.capture_canvas.strokes
+
+    studio.variant_list.setCurrentRow(0)
+    deleted_id = studio.variant_list.currentItem().data(256)
+    studio.delete_variant_button.click()
+    assert studio.variant_list.count() == 2
+    deleted = next(item for item in studio.draft_catalog.variants if item.variant_id == deleted_id)
+    assert deleted.deleted
+    assert deleted.history[-1].action == "deleted"
+    assert all(studio.repository.path_for(digest).is_file() for digest in hashes)
+
+    reopened = HandwritingStudio(tmp_path)
+    qtbot.addWidget(reopened)
+    reopened.label_edit.setText("м")
+    assert reopened.variant_list.count() == 2
+    assert next(item for item in reopened.draft_catalog.variants if item.variant_id == selected_id).preferred
+
+
+def test_raw_and_processed_comparison_persists_two_tolerances_and_undoes_safely(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1200, 760)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    raw_record = studio.save_sample()
+    assert raw_record is not None
+    raw_strokes = studio.capture_canvas.strokes
+
+    studio.tolerance_spin.setValue(0.5)
+    fine = studio.process_current()
+    assert fine is not None
+    assert fine.processed.source_capture_sha256 == raw_record.sha256
+    assert studio.capture_canvas.processed_strokes
+    assert all(report.certified_max_deviation_px <= 0.5 for report in fine.processed.reports)
+
+    studio.tolerance_spin.setValue(2.0)
+    assert studio.capture_canvas.processed_strokes == ()
+    coarse = studio.process_current()
+    assert coarse is not None
+    assert coarse.sha256 != fine.sha256
+    assert coarse.processed.source_capture_sha256 == raw_record.sha256
+    assert len(studio.processed_repository.list_for_source(raw_record.sha256)) == 2
+
+    assert studio.undo_processing()
+    assert studio.capture_canvas.processed_strokes == ()
+    assert studio.capture_canvas.strokes == raw_strokes
+    assert studio.repository.load(raw_record.sha256) == raw_record.session
+
+    reopened = HandwritingStudio(tmp_path)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened.capture_canvas.processed_strokes
+    assert reopened.processed_hash_value.text() in {fine.sha256, coarse.sha256}
+
+
+def test_studio_normalizes_with_shared_metrics_and_reopens_physical_preview(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1300, 800)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    raw = studio.save_sample()
+    assert raw is not None
+    processed = studio.process_current()
+    assert processed is not None
+    studio.physical_size_spin.setValue(4.0)
+    studio.left_bearing_spin.setValue(60.0)
+    studio.right_bearing_spin.setValue(60.0)
+
+    profile = studio.set_style_metrics_from_current()
+    normalized = studio.normalize_current()
+
+    assert profile is not None
+    assert profile.x_height_gu == 1000.0
+    assert normalized is not None
+    assert normalized.glyph.units == "gu"
+    assert normalized.glyph.metric_profile_sha256
+    assert normalized.glyph.preview_x_height_mm == 4.0
+    assert normalized.glyph.left_bearing_gu == 60.0
+    assert studio.normalization_preview.glyph == normalized.glyph
+    assert studio.normalized_hash_value.text() == normalized.sha256
+    assert studio.repository.load(raw.sha256) == raw.session
+
+    reopened = HandwritingStudio(tmp_path)
+    reopened.resize(1300, 800)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened.normalization_preview.glyph is not None
+    assert reopened.normalized_hash_value.text() == normalized.sha256
+
+
+def test_studio_saves_manual_join_annotation_and_shows_actual_pair_diagnostic(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path)
+    studio.resize(1500, 1000)
+    qtbot.addWidget(studio)
+    studio.show()
+    studio.label_edit.setText("м")
+    _draw_sample(studio)
+    assert studio.save_sample() is not None
+    assert studio.process_current() is not None
+    assert studio.set_style_metrics_from_current() is not None
+    normalized = studio.normalize_current()
+    assert normalized is not None
+    studio.annotation_mode_combo.setCurrentText("single_body_deferred_marks")
+    studio.annotation_body_combo.setCurrentIndex(0)
+    studio.annotation_entry_check.setChecked(True)
+    studio.annotation_exit_check.setChecked(True)
+
+    annotation = studio.save_annotation()
+
+    assert annotation is not None
+    assert annotation.body_stroke_id == normalized.glyph.strokes[0].id
+    assert annotation.stroke_order == tuple(item.id for item in normalized.glyph.strokes)
+    assert annotation.entry is not None
+    assert annotation.exit is not None
+    assert studio.annotation_tangent_value.text() != "—"
+    assert studio.annotation_partner_combo.count() == 1
+
+    result = studio.preview_annotation_pair()
+    assert result is not None
+    assert result.decision in {"connected", "pen_lift", "rejected"}
+    assert result.reason in studio.diagnostics.toPlainText()
+    assert studio.join_preview._strokes
+
+    reviewed = studio.accept_current_annotation()
+    assert reviewed is not None and reviewed.review_status == "reviewed"
+    studio.publication_author.setText("local-test-user")
+    studio.publication_review_confirm.setChecked(True)
+    report = studio.validate_style_draft()
+    assert report is not None and report.passed
+    published = studio.publish_style_draft()
+    assert published is not None
+    assert published.package_path == tmp_path / "styles" / "personal" / "0.1.0"
+
+    reopened = HandwritingStudio(tmp_path)
+    reopened.resize(1500, 1000)
+    qtbot.addWidget(reopened)
+    assert reopened.open_latest_for_label("м")
+    assert reopened._annotation == reviewed
+
+
+def test_published_user_style_refreshes_normal_picker_and_backend(qtbot, tmp_path: Path) -> None:
+    user_data = tmp_path / "user-data"
+    settings = QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat)
+    window = MainWindow(settings, user_data_root=user_data)
+    qtbot.addWidget(window)
+    window.show()
+    built_in_references = {item.reference for item in window.styles if item.source == "built-in"}
+    assert built_in_references
+
+    source_manifest = next(style_root().glob("*/*/manifest.json"))
+    target = user_data / "styles" / "personal-ui-test" / "0.1.0"
+    target.parent.mkdir(parents=True)
+    shutil.copytree(source_manifest.parent, target)
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    manifest.update({
+        "style_id": "personal-ui-test",
+        "revision": "0.1.0",
+        "display_name": "Personal UI test",
+        "approved": False,
+        "production_eligible": False,
+        "test_only": True,
+    })
+    (target / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+    )
+
+    window.studio.style_published.emit("personal-ui-test", "0.1.0")
+
+    user_reference = ("personal-ui-test", "0.1.0")
+    assert user_reference in {item.reference for item in window.styles if item.valid}
+    assert built_in_references <= {item.reference for item in window.styles}
+    object_id = window.controller.snapshot.objects[0].object_id
+    window._selected_kind, window._selected_value = "text", object_id
+    window._show_selected_properties()
+    index = window.properties.style_field.findData("personal-ui-test" + "\0" + "0.1.0")
+    assert index >= 0
+    window.properties.style_field.setCurrentIndex(index)
+    qtbot.waitUntil(
+        lambda: window.controller.snapshot.objects[0].style_id == "personal-ui-test"
+    )
+    assert window.controller.snapshot.objects[0].style_revision == "0.1.0"
+    assert window.backend.build(window.controller.snapshot).test_only_style is True
+    window.controller.reset(window.controller.snapshot)

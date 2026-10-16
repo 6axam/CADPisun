@@ -34,6 +34,45 @@ def test_window_layout_and_canvas_preferences_survive_restart(qtbot, tmp_path) -
     assert second.travel_action.isChecked()
 
 
+def test_closing_studio_preserves_document_dock_visibility(qtbot, tmp_path) -> None:
+    settings = temporary_settings(tmp_path)
+    first = MainWindow(settings, user_data_root=tmp_path / "user-data")
+    qtbot.addWidget(first)
+    first.show()
+    assert first.properties_dock.isVisible()
+
+    first.set_workspace("studio")
+    assert not first.properties_dock.isVisible()
+    assert first.close()
+
+    second = MainWindow(temporary_settings(tmp_path), user_data_root=tmp_path / "user-data")
+    qtbot.addWidget(second)
+    second.show()
+    assert second.workspace_stack.currentWidget() is second.canvas
+    assert second.project_dock.isVisible()
+    assert second.properties_dock.isVisible()
+    assert second.output_dock.isVisible()
+
+
+def test_legacy_all_hidden_dock_state_is_repaired(qtbot, tmp_path) -> None:
+    settings = temporary_settings(tmp_path)
+    legacy = MainWindow(settings, user_data_root=tmp_path / "user-data")
+    qtbot.addWidget(legacy)
+    legacy.show()
+    for dock in (legacy.project_dock, legacy.properties_dock, legacy.output_dock):
+        dock.hide()
+    settings.setValue("main/state", legacy.saveState(1))
+    settings.sync()
+    legacy.hide()
+
+    repaired = MainWindow(temporary_settings(tmp_path), user_data_root=tmp_path / "user-data")
+    qtbot.addWidget(repaired)
+    repaired.show()
+    assert repaired.project_dock.isVisible()
+    assert repaired.properties_dock.isVisible()
+    assert repaired.output_dock.isVisible()
+
+
 def test_dirty_close_can_be_cancelled(qtbot, tmp_path, monkeypatch) -> None:
     window = MainWindow(temporary_settings(tmp_path))
     qtbot.addWidget(window)

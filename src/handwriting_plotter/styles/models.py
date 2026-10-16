@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Annotated, Literal, Mapping, Union
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator
+import regex
 
 from handwriting_plotter.domain.models import StrictModel
 from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic, Segment, Stroke, tangent as segment_tangent
@@ -107,6 +109,10 @@ class GlyphVariantFile(StrictModel):
     def key_is_nonspace(cls, value: str) -> str:
         if not value or any(char.isspace() for char in value):
             raise ValueError("glyph key must be non-whitespace")
+        if unicodedata.normalize("NFC", value) != value:
+            raise ValueError("glyph key must be NFC")
+        if len(regex.findall(r"\X", value)) > 8:
+            raise ValueError("glyph key must contain at most 8 graphemes")
         return value
 
 

@@ -10,6 +10,7 @@
 - DTO неизменяемы после создания; списки не передаются как разделяемое изменяемое состояние. Реализация использует strict Pydantic на публичных границах, frozen dataclasses для внутренних небольших геометрических объектов. Одни и те же инварианты проверяются при загрузке и публикации.
 - В геометрии float64. JSON сохраняет float round-trip значения, сортированные ключи и фиксированный порядок массивов. Внутренние значения не округляются до точности G-code. Для export decimal применяется явно указанный quantum, round-half-even, десятичная точка, запрет scientific notation, нормализация отрицательного нуля.
 - Воспроизводимость byte-for-byte гарантируется для одинаковых canonical inputs, engine/algorithm version, dependency lock и export settings. Между платформами/версиями — геометрический tolerance contract, не обещание равных последних битов.
+- Неупорядоченные `set`/`frozenset` поля сериализуются как лексикографически отсортированные JSON arrays. Их порядок не зависит от Python hash seed; иначе одинаковый StylePack менял бы revision hash, deterministic variant choice и последующие SVG/G-code между процессами.
 
 ## 2. Координаты и размерности
 
@@ -75,6 +76,21 @@ Polyline — представление Stroke как последователь
 
 `format=hp-style`, `schema_version=1.0`, style_id, revision (immutable), display_name, scripts, license_record, glyph_frame, metrics, coverage, glyph index, join_rules, variation_policy, file_hashes.
 
+Редактируемый `hp-style-draft/1.0` хранится отдельно от опубликованной
+ревизии. Он ссылается на immutable raw/processed/normalized SHA-256 и содержит
+selection, preferred/rejected/deleted state и review history. Публикация
+принимает только пару `VariantDraft.review_status=accepted` и
+`GlyphAnnotation.review_status=reviewed`, повторно проверяет всю цепочку
+источников и создаёт новый каталог `<style_id>/<revision>`; существующая
+ревизия никогда не перезаписывается.
+
+Локальное подтверждение автора переводит glyph-файл в техническое
+`review_status=approved`, необходимое существующему loader, но не делает весь
+почерк продуктово одобренным. Для пользовательских Level B пакетов manifest
+всегда имеет `approved=false`, `test_only=true` и
+`production_eligible=false`; provenance явно называет self-review и исходные
+normalized SHA-256.
+
 Metrics: x_height_gu=1000; ascender/descender envelope из всех variants; space_advance_gu (по умолчанию 900), line_gap recommendation, supported x_height_mm range (первоначальная цель 2.5…5.0 mm, до приёмки не подтверждённый диапазон). Все variants лежат в объявленном envelope, включая marks и возможные connectors.
 
 `coverage` — точный список NFC keys, не диапазон «Cyrillic». Минимальный набор:
@@ -89,7 +105,7 @@ Unicode union не дублирует одинаковые code points межд�
 
 `join_rules`: class pairs с allow/deny, исключения по keys/variant IDs, clearance envelope, лимиты. Deny имеет приоритет. В default `ua-school-v1`: scripts не соединяются друг с другом; цифры, апострофы и пунктуация не соединяются с буквами. Это разрывает connected run, но не обязательно lexical word.
 
-Пакет на диске: manifest.json, glyphs/<safe-id>.json, licenses/<id>.txt, review/coverage.json, review/pairs.json, provenance.json. В JSON key хранится явно; имя файла не источник Unicode semantics. В MVP импортируется каталог, не исполняемый plugin и не произвольный zip.
+Пакет на диске: manifest.json, glyphs/<safe-id>.json, licenses/<id>.txt, review/coverage.json, review/pairs.json, provenance.json. Все payload-файлы перечислены с SHA-256 в manifest. В JSON key хранится явно; имя файла не источник Unicode semantics. В MVP импортируется каталог, не исполняемый plugin и не произвольный zip.
 
 ## 4. Текст и генерация
 
@@ -227,6 +243,127 @@ test_only_style. Cache восстанавливается только при с
 Canonical hash исключает created_at и путь output. Semantic IDs детерминированы по source spans/индексам; audit event IDs могут быть случайными и не влияют на render hash.
 
 Этап II: `assets/<sha256>.<extension>` и SQLite catalog. Таблицы: assets, regions, transcriptions, reconstruction_candidates, correction_events, style_revisions, variant_refs, dataset_snapshots, model_records, jobs. FK включены, один writer, транзакция на correction/revision publish, row revision для optimistic concurrency. Миграции через user_version, до изменения backup; файлы сначала атомарно сохраняются, затем каталог ссылается на них. Непривязанные blobs удаляются только явной сборкой мусора.
+
+### 9.2 Raw online capture v1
+
+`hp-capture/1.0` — canonical UTF-8 JSON для неизменяемых записей реального
+указателя. Корень `CaptureSession` содержит session_id, UTC creation time,
+`DeviceCapabilities`, ordered samples и namespaced extensions. Каждый
+`CaptureSample` хранит NFC label, classification (`glyph|sequence`), собственный
+`CoordinateReference`, `WritingGuides`, provenance и ordered strokes.
+
+Raw frame использует logical pixels, origin=top_left, x→right, y→down; width,
+height и device_pixel_ratio записываются явно. Это не PageFrame mm и не
+GlyphFrame. `CaptureStroke` начинается `down`, заканчивается `up`, `cancel` либо
+явным interrupted move и содержит ordered unique points. Point хранит x/y,
+event, pointer type и nullable elapsed_s/pressure. `None` означает отсутствие
+измерения; нулевое давление и нулевое monotonic elapsed time остаются настоящими
+значениями. Mouse pressure не фабрикуется.
+
+Все coordinates/measurements finite, времена всего sample nondecreasing и либо
+есть у всех points, либо отсутствуют. IDs samples/strokes/points уникальны в
+session. Ограничения: 32 MiB/file, 250 000 points/stroke, 1 000 000
+points/session, 100 000 samples/session. Raw bytes сохраняются один раз по
+SHA-256 canonical representation; изменение создаёт другой hash, а processed
+derivatives позже ссылаются на исходный hash.
+
+Редактируемая очередь хранится отдельно как `hp-capture-queue/1.0`: queue_id,
+name, ordered unique Unicode tokens, current_index, required_variants,
+skipped_tokens и rejected_capture_hashes. Reject исключает hash из draft
+coverage, но не удаляет и не меняет raw capture. Queue JSON записывается
+атомарно и восстанавливается после перезапуска; coverage заново считается по
+проверенным raw records и queue metadata.
+
+Variant metadata живёт в `hp-style-draft/1.0` отдельно от raw files. Каждый
+`VariantDraft` содержит variant/sample IDs, capture SHA-256, label, ручной
+context tag, review status, preferred/deleted flags и contiguous append-only
+history. Для одного label допускается не более одного preferred variant.
+Delete создаёт tombstone и history event; исходный capture остаётся доступен по
+hash. Только последующий builder решает, какие accepted candidates публиковать.
+
+### 9.3 Processed online capture v1
+
+`hp-processed-capture/1.0` — canonical UTF-8 JSON неизменяемого производного
+артефакта. Он обязательно содержит `source_capture_sha256`, `source_sample_id`,
+исходные размеры logical-pixel frame, полный `ProcessingParameters`, ordered
+`StrokeModel` и соответствующий каждому штриху `StrokeProcessingReport`.
+Координаты остаются в raw logical pixels до явного преобразования Phase 07 и
+не выдаются за `gu` или `mm`.
+
+Pipeline фиксирован версией algorithm: consecutive duplicate filtering,
+edge-preserving resampling, optional corner-aware smoothing, Douglas–Peucker
+simplification по spans между защищёнными углами, Line/Quadratic/Cubic fitting
+и проверка directed geometry. Каждый output stroke имеет тот же ID, первый и
+последний point и captured direction, что source stroke; объединение strokes и
+reversal запрещены. Замкнутые paths сохраняют отдельный дальний anchor, а
+zero-travel pen tap представляется ограниченной out-and-back mark geometry.
+
+Report хранит raw/filtered/resampled counts, fitting kind, segment count,
+sampling resolution, measured symmetric deviation и conservative certified
+upper bound. `certified_max_deviation_px <= parameters.max_deviation_px` —
+обязательный инвариант модели. Derivative сохраняется content-addressed и
+атомарно; изменение tolerance или других параметров создаёт другой файл, не
+изменяя raw capture. GUI может убрать processed overlay, но это не удаляет raw
+или уже сохранённый derivative. Лимиты: 32 MiB/derivative и не более 2 000 000
+предварительно рассчитанных resampled points на один вызов processing.
+
+### 9.4 Shared style metrics and normalized glyph v1
+
+`hp-style-metrics/1.0` — редактируемый revisioned профиль одного draft style.
+Он хранит source logical-pixel frame, общие ascender/x-height/baseline/descender
+guides, `x_height_gu=1000`, default advance/bearings/space/line gap и диапазон
+physical x-height. Revision заменяется атомарно и может увеличиваться только на
+один. Один профиль применяется ко всем glyphs; bbox отдельной буквы никогда не
+задаёт её vertical scale.
+
+CaptureFrame → GlyphFrame: uniform `scale=1000/(baseline_px-x_height_y_px)`,
+`x_gu=x_px*scale+horizontal_translation`,
+`y_gu=(baseline_px-y_px)*scale+manual_baseline_offset_gu`. Horizontal translation
+ставит analytical ink minimum на explicit left bearing. Advance задаётся
+вручную либо common default и обязан вместить ink plus minimum right bearing.
+Ascender/descender envelope вычисляется из общих guides; выход geometry за него
+явно отвергается до ручной коррекции metrics.
+
+`hp-normalized-glyph/1.0` — immutable content-addressed derivative с raw и
+processed SHA-256, полным metric profile snapshot/hash, units=`gu`, ordered
+directed strokes, analytical bounds, advance, фактическими bearings, context и
+physical preview x-height. Bounds и bearings пересчитываются при load и должны
+совпасть с объявленными. Physical preview использует
+`x_mm=x_gu*h/1000`, `y_mm=-y_gu*h/1000`; это явная размерная модель, а не
+предположение о реальном DPI монитора.
+
+### 9.5 Manual glyph annotation v1
+
+`hp-glyph-annotation/1.0` — editable contiguous revision, связанная с exact
+normalized/processed SHA-256. `stroke_order` обязан точно совпадать с immutable
+normalized geometry; `stroke_roles` перечисляет те же IDs в том же порядке.
+Допустимые ручные роли draft: body, mark, punctuation. Geometry, direction и
+порядок pen lifts аннотация не меняет.
+
+`join_mode=none` не содержит body/deferred/anchor data и означает pen lift.
+`single_body_deferred_marks` требует ровно один body; все остальные strokes
+являются marks и перечислены в original order. Entry выбирает только начало
+body, exit — только конец. Unit tangent вычисляется из реального первого или
+последнего segment и при load должен совпасть с geometry в пределах 1°.
+Anchor metadata явно хранит compatibility classes и gap/vertical/angle limits;
+`no_join_before/after` имеет приоритет.
+
+`PairJoinPreview` имеет units=mm и возвращает `connected` с настоящим connector,
+`pen_lift` для явного запрета/отсутствующей join semantics либо `rejected` с
+причиной существующего geometry-aware join engine. Preview не публикует и не
+сохраняет выдуманный connector в glyph geometry.
+
+Для label из 2…8 graphemes аннотация может иметь
+`boundary_status=manual` и ровно N−1 strictly increasing
+`character_boundaries_gu` внутри glyph advance. `unannotated` обязан хранить
+пустой список и не утверждает успешную segmentation. Boundaries являются review
+metadata; recorded strokes остаются единым ordered movement sequence.
+
+Recorded ligature публикуется как обычный `GlyphVariant.key` с несколькими NFC
+graphemes и участвует в существующем longest-match resolver. До создания
+кандидата каждый отдельный grapheme key обязан присутствовать как fallback;
+отсутствие sequence key автоматически оставляет individual glyphs и обычную
+join logic. Отдельного string replacement слоя нет.
 
 Job journal I-H хранит planned_op, last_sent_line, last_accepted_line, last_confirmed_checkpoint, profile/registration/session hashes. Не хранить last_accepted как executed. После reconnect статус требует сверки; предыдущая registration автоматически недействительна, если потеряна позиция или сдвинут лист.
 

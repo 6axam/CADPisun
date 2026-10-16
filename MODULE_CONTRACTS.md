@@ -57,6 +57,20 @@ v1.0. Здесь указаны декларативные сигнатуры, �
 | import_capture (II-A) | raw bytes, format_id, Calibration → Outcome<OnlineCapture> |
 | publish_style | approved StyleDraft, expected_parent_revision → Outcome<StyleRevision> |
 
+`PersonalStylePackBuilder.validate` принимает только явно accepted variants с
+reviewed annotation, сверяет raw → processed → normalized hashes, единый metric
+profile, isolated context и individual fallback для multi-grapheme keys.
+`publish` создаёт canonical glyph/review/provenance/license files, вычисляет их
+SHA-256 и делегирует единственную mutation в `FileStyleRepository.publish`.
+Писать разрешено только в platform user-data `styles/`; пакетные assets
+остаются read-only.
+
+`CompositeStyleRepository` принимает отдельные built-in и user roots. Каждая
+явная `(style_id, revision)` ссылка должна существовать ровно в одном root;
+отсутствие возвращает `STYLE_NOT_FOUND`, совпадение в двух roots —
+`AMBIGUOUS_STYLE_REFERENCE`. Фактическая загрузка каждого кандидата остаётся за
+`FileStyleRepository`, поэтому составной каталог не обходит hash validation.
+
 SVG import v1: только `svg/g/path` с numeric width/viewBox и path commands M/L/H/V/Q/T/C/S/Z; supported transforms translate/scale/rotate/matrix через нормализацию, shear только явная matrix. CSS, use/symbol, text, images, masks, clipPath, filters, external refs отвергаются. Каждый M начинает stroke; subpath order сохраняется. A не принимается до отдельного адаптера. Запрещены DTD/entity expansion; authoring exports с DOCTYPE предварительно нормализуются контролируемым редактором, не исполняющим внешние ресурсы. `fill=none` обязателен, но недостаточен для centerline eligibility — требуется author review.
 
 SVG font importer читает glyph key/advance и вручную заданные baseline/x-height; поддержка multi-character key не означает automatic ligature correctness. Отсутствующие anchors → join none. Самостоятельно не изобретать entry/exit по bbox. Максимум SVG input 20 MiB, XML depth 64, 100 000 paths, 2 000 000 path coordinates; стиль целиком ≤100 MiB и ≤100 000 variants. превышение → RESOURCE_LIMIT.
@@ -217,6 +231,89 @@ CLI возвращает exit 0 success, 2 invalid input/config/coverage, 3 geom
 
 Storage stores immutable inputs/revisions, atomic manifest, каталог II. FileStore не импортирует geometry/recognizer; принимает bytes/DTO serializer. Limits, disk-full, permissions, hash mismatch возвращаются явно. При ошибке temp files могут остаться для диагностики, но отсутствует completed manifest; следующий run не принимает их за готовое задание.
 
+### 12.1 Raw capture boundary
+
+Files `capture/{models,repository}.py` не импортируют Qt. `serialize_capture`
+принимает validated `CaptureSession` и выдаёт canonical bytes.
+`load_capture_bytes` применяет byte budget, strict JSON без BOM/duplicate keys и
+принимает только `hp-capture/1.0`. `CaptureRepository.store` публикует raw bytes
+атомарно по content SHA-256 без overwrite; повторная запись тех же bytes
+идемпотентна, несовпадение existing bytes даёт `CAPTURE_HASH_MISMATCH`.
+`load(hash)` повторно проверяет имя/hash до parsing. Ошибки unknown format/schema,
+resource limits, event/time/ID order, coordinate frame и capability mismatch не
+исправляются молча.
+
+`CaptureQueueStore` читает/атомарно заменяет только editable
+`hp-capture-queue/1.0` metadata. Queue navigation не переписывает raw captures;
+skip и rejected hashes являются явными review decisions. Coverage dashboard
+считает variants из `CaptureRepository` за вычетом rejected hashes и применяет
+настраиваемый required_variants без продуктового auto-approval.
+
+`DraftStore` атомарно хранит `hp-style-draft/1.0`; операции preferred,
+accepted/rejected и delete создают следующую запись history, не меняя
+`CaptureRepository`. GUI показывает только non-deleted variants, но audit и
+восстановление сохраняют tombstones. Reopen всегда повторно загружает raw bytes
+по capture_sha256.
+
+### 12.2 Capture processing boundary
+
+`capture/processing.py` не импортирует Qt. `process_sample(sample,
+source_capture_sha256, parameters)` детерминированно возвращает
+`ProcessedCapture` в том же logical-pixel frame. Он сохраняет one-to-one
+порядок/IDs/boundaries strokes, captured direction и endpoints, не объединяет
+и не разворачивает paths. Характерные corners и loop anchor защищаются от
+smoothing/simplification. Point mark остаётся отдельным directed mark.
+
+Перед возвратом pipeline измеряет symmetric source/result deviation с
+ограниченным шагом и добавляет conservative sampling/curve-flattening margin.
+Результат с upper bound выше declared tolerance отвергается; fallback может
+уменьшить simplification вплоть до исходной polyline, но не ослабляет tolerance.
+До выделения resampled arrays проверяется общий point budget.
+`ProcessedRepository` canonical-сериализует `hp-processed-capture/1.0`,
+публикует его atomic content-addressed write под source hash, а при load снова
+проверяет derivative hash, существование/hash raw capture и source sample link.
+UI отвечает только за выбор параметров
+и Raw/Processed overlay; отмена overlay не вызывает удаление raw bytes.
+
+### 12.3 Glyph metric normalization boundary
+
+`capture/metrics.py` не импортирует Qt. `normalize_processed_glyph(processed,
+processed_sha256, raw_sample, shared_profile, variant metadata/override)`
+проверяет sample/frame identity и применяет один affine scale из shared
+baseline/x-height guides ко всем control/end points. Он может менять только
+horizontal origin/bearings, declared advance и явный baseline offset; per-glyph
+vertical bbox scaling запрещён.
+
+`MetricProfileStore` атомарно хранит contiguous editable profile revisions.
+`NormalizedRepository` до store/load повторно проверяет raw SHA/sample,
+processed SHA/source link, profile hash, analytical bounds, envelope и
+bearings. `NormalizedGlyph.physical_preview_strokes()` выполняет явное gu→mm
+преобразование с инверсией Y. GUI показывает отдельный GlyphFrame preview,
+физические размеры и ручные controls; изменение параметров инвалидирует только
+preview/normalized derivative, не raw или processed sources.
+
+### 12.4 Manual annotation and pair preview boundary
+
+`capture/annotation.py` не импортирует Qt. `validate_annotation(annotation,
+normalized_glyph)` проверяет exact source/order/roles, one-body rule, original
+deferred-mark order, critical refs и endpoint/tangent agreement. AnnotationStore
+записывает только следующую contiguous revision после повторной проверки всей
+raw→processed→normalized source chain.
+
+`annotation_to_glyph_variant` создаёт draft existing `GlyphVariantFile`, не
+меняя geometry и не повышая review status. `preview_join(left,right)` размещает
+эти variants через существующий `place_glyph` и вызывает production join
+decision `shaping.joins.connect`; UI показывает connector или точную reject/lift
+reason. Ни preview, ни editor не исправляют несовместимый anchor автоматическим
+reversal, reordering или новым connector metadata.
+
+`validate_ligature_fallback` принимает только explicit multi-grapheme annotation
+и требует individual key для каждого grapheme. Manual character boundaries
+имеют ровно N−1 positions; unannotated boundaries не фабрикуются.
+`build_recorded_ligature` возвращает тот же draft `GlyphVariantFile`, после чего
+обычные resolve/shape/layout/PenPlan stages выбирают longest eligible key или
+детерминированно используют individual fallback.
+
 Готовность: end-to-end T-A01…T-A04; import core без optional deps, работа offline, отмена, atomic failure и JSON diagnostics. Будущий UI получает source spans и IDs для выбора букв, но никогда не исполняет неизвестные command fragments или SQL.
 
 ## 13. Desktop GUI
@@ -229,6 +326,7 @@ Storage stores immutable inputs/revisions, atomic manifest, каталог II. F
 | DesktopApplicationAdapter | Immutable project snapshot → shared GenerationResult; использует application/layout/stroke/motion adapters |
 | GenerationWorker | Snapshot revision + adapter → success/error signal; widgets не меняются из worker thread |
 | PageCanvas | Backend SVG/PenPlan bytes + non-production object/grid overlays → scene in PageFrame mm; CAD selection, move, independent-axis grid snap, zoom/pan/fit |
+| HandwritingCaptureWidget | Mouse/tablet/touch events → ordered `CaptureStroke`; fixed logical-pixel frame, monotonic elapsed time, nullable real pressure, synthesized-mouse suppression; no geometric processing |
 | StatusTelemetry | PageCanvas paint events/cursor → measured FPS и PageFrame mm coordinates; application version → постоянная подпись; generation lifecycle → indeterminate/success/error progress |
 | ProjectStore | `hp-desktop-project/1.0…1.3` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
 
