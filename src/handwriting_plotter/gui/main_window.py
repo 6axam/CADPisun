@@ -464,6 +464,7 @@ class MainWindow(QMainWindow):
         self.project_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self.canvas.selection_changed.connect(self._on_canvas_selection_changed)
         self.canvas.objects_moved.connect(self._on_canvas_objects_moved)
+        self.canvas.object_resized.connect(self._on_canvas_object_resized)
         self.canvas.fps_changed.connect(self._on_canvas_fps_changed)
         self.canvas.cursor_position_changed.connect(self._on_cursor_position_changed)
         self.project_tree.itemChanged.connect(self._on_tree_item_changed)
@@ -548,6 +549,8 @@ class MainWindow(QMainWindow):
                     item.frame_y_mm,
                     item.frame_width_mm,
                     item.frame_height_mm,
+                    item.display_diameter_mm,
+                    item.color_group,
                 ))
             else:
                 signatures.append((
@@ -789,6 +792,41 @@ class MainWindow(QMainWindow):
         elif had_current_generation or self._regeneration_pending:
             self._schedule_regeneration("Object moved · updating page…")
 
+    def _on_canvas_object_resized(
+        self,
+        object_id: str,
+        x_mm: float,
+        y_mm: float,
+        width_mm: float,
+        height_mm: float,
+    ) -> None:
+        item = next(item for item in self.controller.snapshot.objects if item.object_id == object_id)
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        try:
+            if isinstance(item, TextObject):
+                self.controller.update_text_object(
+                    object_id,
+                    frame_x_mm=x_mm,
+                    frame_y_mm=y_mm,
+                    frame_width_mm=width_mm,
+                    frame_height_mm=height_mm,
+                    x_mm=max(x_mm, min(item.x_mm, x_mm + width_mm - 0.01)),
+                    y_mm=max(y_mm, min(item.y_mm, y_mm + height_mm - 0.01)),
+                )
+                if had_current_generation or self._regeneration_pending:
+                    self._schedule_regeneration("Object resized · updating page…")
+            else:
+                self.controller.update_grid_object(
+                    object_id, x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm
+                )
+                self._preserve_generation_revision(had_current_generation)
+        except ValueError as exc:
+            self.canvas.set_object_frames(self.controller.snapshot.objects, self._selected_object_ids_copy())
+            self._show_status(str(exc), "error", 5000)
+
     def _update_text_object(self, object_id: str, changes: dict) -> None:
         try:
             self.controller.update_text_object(object_id, **changes)
@@ -977,6 +1015,7 @@ class MainWindow(QMainWindow):
         files = result.files
         self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
                                   files["page-0001.plan.json"])
+        self.canvas.set_object_overflows(result.report.get("overflow_object_ids", ()))
         self.canvas.set_preview_stale(False, self._t("canvas.preview_stale"))
         diagnostics = result.report.get("diagnostics", [])
         styles = result.report.get("styles", [])

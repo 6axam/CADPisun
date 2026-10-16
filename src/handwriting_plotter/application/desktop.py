@@ -42,19 +42,19 @@ class CompositionTextBlock:
     text: str
     x_mm: float
     y_mm: float
-    frame_x_mm: float
-    frame_y_mm: float
-    frame_width_mm: float
-    frame_height_mm: float
     x_height_mm: float
     line_pitch_mm: float
-    character_spacing_mm: float
-    rotation_deg: float
-    stroke_color: str
     style_id: str
     style_revision: str
     seed: int
     realism: float
+    frame_x_mm: float | None = None
+    frame_y_mm: float | None = None
+    frame_width_mm: float = 60.0
+    frame_height_mm: float = 30.0
+    character_spacing_mm: float = 0.0
+    rotation_deg: float = 0.0
+    stroke_color: str = "black"
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,11 +218,13 @@ class DesktopApplicationAdapter:
             }
             manifest_name = f"styles/{block.style_id}@{block.style_revision}.manifest.json"
             files[manifest_name] = canonical_json_bytes(style.manifest.model_dump(mode="json"))
+            frame_x = block.x_mm if block.frame_x_mm is None else block.frame_x_mm
+            frame_y = block.y_mm if block.frame_y_mm is None else block.frame_y_mm
             frame = Bounds(
-                block.frame_x_mm,
-                block.frame_y_mm,
-                block.frame_x_mm + block.frame_width_mm,
-                block.frame_y_mm + block.frame_height_mm,
+                frame_x,
+                frame_y,
+                frame_x + block.frame_width_mm,
+                frame_y + block.frame_height_mm,
             )
             if not (
                 frame.min_x <= block.x_mm < frame.max_x

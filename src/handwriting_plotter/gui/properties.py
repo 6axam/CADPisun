@@ -182,7 +182,7 @@ class PropertiesPanel(QWidget):
         self.content_layout.addWidget(self.display_diameter_field, 3, 0)
         self._labels["properties.display_diameter"] = diameter_label
         color_label = QLabel()
-        self.content_layout.addWidget(color_label, 2, 1)
+        self.content_layout.addWidget(color_label, 4, 0, 1, 2)
         self._labels["properties.color_group"] = color_label
         palette = QWidget()
         palette_layout = QGridLayout(palette)
@@ -203,10 +203,10 @@ class PropertiesPanel(QWidget):
             self.color_group_button_group.addButton(button, index)
             palette_layout.addWidget(button, index // 8, index % 8)
             self.color_group_buttons.append(button)
-        self.content_layout.addWidget(palette, 3, 1)
+        self.content_layout.addWidget(palette, 5, 0, 1, 2)
         self.color_group_settings_button = QToolButton()
         self.color_group_settings_button.setEnabled(False)
-        self.content_layout.addWidget(self.color_group_settings_button, 4, 0, 1, 2)
+        self.content_layout.addWidget(self.color_group_settings_button, 6, 0, 1, 2)
         layout.addWidget(content_group)
         self._groups["properties.group.content"] = content_group
         self._add_group(layout, "properties.group.position", [

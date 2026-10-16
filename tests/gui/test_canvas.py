@@ -14,7 +14,7 @@ from handwriting_plotter.application.service import (
     HandwritingPlotterService,
 )
 from handwriting_plotter.gui.canvas import PageCanvas
-from handwriting_plotter.gui.document import GridObject, TextObject
+from handwriting_plotter.gui.document import GridObject, TEXT_COLOR_GROUPS, TextObject
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +82,105 @@ def test_text_object_frame_is_drawn_and_highlighted_on_selection(qtbot) -> None:
     assert frame.pen().style() == Qt.PenStyle.SolidLine
     canvas.set_selected_objects(set())
     assert frame.pen().style() == Qt.PenStyle.DashLine
+
+
+def test_selected_text_frame_uses_color_group_and_has_eight_resize_handles(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    item = TextObject(
+        object_id="colored-frame", name="Colored", color_group=6,
+        frame_x_mm=20, frame_y_mm=30, frame_width_mm=80, frame_height_mm=40,
+    )
+
+    canvas.set_object_frames((item,), {item.object_id})
+
+    assert canvas._object_frames[item.object_id].pen().color().name().upper() == TEXT_COLOR_GROUPS[6]
+    assert set(canvas._resize_handles) == {"nw", "n", "ne", "e", "se", "s", "sw", "w"}
+    assert canvas._resize_handles["se"].rect().center() == QPointF(100, 70)
+
+
+def test_side_resize_changes_one_axis_and_corner_resize_preserves_ratio(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    item = TextObject(
+        object_id="resize", name="Resize",
+        frame_x_mm=20, frame_y_mm=30, frame_width_mm=80, frame_height_mm=40,
+    )
+    canvas.set_object_frames((item,), {item.object_id})
+    canvas._resize_object_id = item.object_id
+    canvas._resize_initial_rect = QRectF(20, 30, 80, 40)
+    canvas._active_resize_handle = "e"
+
+    canvas._preview_resize(QPointF(120, 42))
+    side = canvas._object_frames[item.object_id].rect()
+    assert side.getRect() == (20.0, 30.0, 100.0, 40.0)
+
+    canvas._resize_initial_rect = QRectF(20, 30, 80, 40)
+    canvas._active_resize_handle = "se"
+    canvas._preview_resize(QPointF(140, 80))
+    corner = canvas._object_frames[item.object_id].rect()
+    assert corner.width() / corner.height() == pytest.approx(2.0)
+    assert corner.topLeft() == QPointF(20, 30)
+
+
+def test_dragging_side_handle_emits_resized_physical_rectangle(qtbot) -> None:
+    canvas = PageCanvas()
+    canvas.resize(700, 700)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.zoom_to_fit()
+    item = TextObject(
+        object_id="resize-event", name="Resize event",
+        frame_x_mm=20, frame_y_mm=30, frame_width_mm=80, frame_height_mm=40,
+    )
+    canvas.set_object_frames((item,), {item.object_id})
+    emitted: list[tuple[str, float, float, float, float]] = []
+    canvas.object_resized.connect(lambda *values: emitted.append(values))
+    start = canvas.mapFromScene(QPointF(100, 50))
+    end = canvas.mapFromScene(QPointF(120, 50))
+
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=end)
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    assert emitted
+    object_id, x, y, width, height = emitted[-1]
+    assert object_id == item.object_id
+    assert (x, y, height) == pytest.approx((20, 30, 40), abs=0.5)
+    assert width == pytest.approx(100, abs=0.5)
+
+
+def test_hovered_frame_is_wider_and_dashed(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    item = TextObject(object_id="hover", name="Hover", frame_x_mm=20, frame_y_mm=30)
+    canvas.set_object_frames((item,), {item.object_id})
+
+    canvas._hovered_object_id = item.object_id
+    canvas._sync_object_frame_styles()
+
+    pen = canvas._object_frames[item.object_id].pen()
+    assert pen.style() == Qt.PenStyle.DashLine
+    assert pen.widthF() == pytest.approx(1.0)
+
+
+def test_overflow_marker_is_centered_red_circle_with_white_cross(qtbot) -> None:
+    canvas = PageCanvas()
+    qtbot.addWidget(canvas)
+    item = TextObject(
+        object_id="overflow", name="Overflow", display_diameter_mm=6,
+        frame_x_mm=20, frame_y_mm=30, frame_width_mm=80, frame_height_mm=40,
+    )
+    canvas.set_object_frames((item,), {item.object_id})
+
+    canvas.set_object_overflows((item.object_id,))
+
+    assert len(canvas._overflow_items) == 3
+    circle = canvas._overflow_items[0]
+    assert circle.rect().center() == QPointF(60, 50)
+    assert circle.rect().width() == 6
+    assert circle.brush().color().name().upper() == "#DC2626"
+    assert all(line.pen().color().name().upper() == "#FFFFFF" for line in canvas._overflow_items[1:])
 
 
 def test_selection_direction_controls_crossing_semantics(qtbot) -> None:
