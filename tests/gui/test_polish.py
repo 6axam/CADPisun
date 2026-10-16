@@ -21,6 +21,7 @@ def test_window_layout_and_canvas_preferences_survive_restart(qtbot, tmp_path) -
     qtbot.addWidget(first)
     first.show()
     first.project_dock.hide()
+    first.tools_dock.hide()
     first.travel_action.setChecked(True)
     first.resize(1111, 777)
     first.close()
@@ -31,6 +32,7 @@ def test_window_layout_and_canvas_preferences_survive_restart(qtbot, tmp_path) -
     qtbot.addWidget(second)
     second.show()
     assert not second.project_dock.isVisible()
+    assert not second.tools_dock.isVisible()
     assert second.travel_action.isChecked()
 
 

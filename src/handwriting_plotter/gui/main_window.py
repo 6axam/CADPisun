@@ -11,17 +11,17 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
-    QHBoxLayout,
+    QGridLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QPushButton,
     QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -88,8 +88,8 @@ class MainWindow(QMainWindow):
         self._build_canvas()
         self._build_docks()
         self._build_actions()
+        self._build_tool_docks()
         self._build_menus()
-        self._build_toolbar()
         self._build_status_bar()
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
@@ -124,14 +124,6 @@ class MainWindow(QMainWindow):
         project_panel = QWidget()
         project_layout = QVBoxLayout(project_panel)
         project_layout.setContentsMargins(0, 0, 0, 0)
-        controls = QHBoxLayout()
-        self.add_text_button = QPushButton(self._t("button.add_text"))
-        self.add_grid_button = QPushButton(self._t("button.add_grid"))
-        self.remove_text_button = QPushButton(self._t("button.remove"))
-        controls.addWidget(self.add_text_button)
-        controls.addWidget(self.add_grid_button)
-        controls.addWidget(self.remove_text_button)
-        project_layout.addLayout(controls)
         self.project_tree = QTreeWidget()
         self.project_tree.setObjectName("project-explorer")
         self.project_tree.setHeaderHidden(True)
@@ -171,6 +163,24 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             self.workspace_group.addAction(action)
         self.document_workspace_action.setChecked(True)
+        self.object_mode_action = self.document_workspace_action
+        self.preview_mode_action = self._action(
+            self._t("action.mode.preview"), lambda: None
+        )
+        self.execution_mode_action = self._action(
+            self._t("action.mode.execution"), lambda: None
+        )
+        for action, tooltip_key in (
+            (self.preview_mode_action, "action.mode.preview_planned"),
+            (self.execution_mode_action, "action.mode.execution_planned"),
+        ):
+            action.setCheckable(True)
+            action.setEnabled(False)
+            action.setProperty("implementationStatus", "planned")
+            action.setToolTip(self._t(tooltip_key))
+            self.workspace_group.addAction(action)
+        self.preview_mode_action.setData("preview")
+        self.execution_mode_action.setData("execution")
         self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
         self.open_action = self._action(self._t("action.open"), self.open_project, QKeySequence.StandardKey.Open)
         self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
@@ -184,6 +194,11 @@ class MainWindow(QMainWindow):
         self.add_grid_action = self._action(self._t("action.add_grid"), self.add_grid_object)
         self.delete_action = self._action(self._t("action.delete"), self.remove_selected_object, QKeySequence.StandardKey.Delete)
         self.generate_action = self._action(self._t("action.generate"), self.generate_page, QKeySequence("Ctrl+Return"))
+        self.fit_page_action = self._action(self._t("action.fit_page"), self.canvas.zoom_to_fit, "F")
+        self.travel_action = self._action(self._t("action.travel"), self.canvas.set_show_travel)
+        self.travel_action.setCheckable(True)
+        self.markers_action = self._action(self._t("action.markers"), self.canvas.set_show_markers)
+        self.markers_action.setCheckable(True)
         self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
         self.export_preview_action = self._action(self._t("action.export_preview"), lambda: self._export("page-0001.preview.svg"))
         self.export_gcode_action = self._action(self._t("action.export_gcode"), lambda: self._export("page-0001.gcode"))
@@ -192,6 +207,81 @@ class MainWindow(QMainWindow):
             self.export_svg_action, self.export_preview_action, self.export_gcode_action, self.export_report_action,
         )
         self._update_export_actions()
+
+    def _symbol_button(self, symbol: str, action: QAction, object_name: str) -> QToolButton:
+        button = QToolButton()
+        button.setObjectName(object_name)
+        button.setText(symbol)
+        button.setFixedSize(38, 38)
+        button.setCheckable(action.isCheckable())
+        button.setStyleSheet(
+            "QToolButton { border: 1px solid #343943; border-radius: 6px; "
+            "background: #262A31; font-size: 16px; font-weight: 600; padding: 0; }"
+            "QToolButton:hover { border-color: #64A0FF; background: #303640; }"
+            "QToolButton:checked { border-color: #4B8DF8; background: #294F86; }"
+            "QToolButton:disabled { color: #676E79; background: #202329; }"
+        )
+
+        def sync_action() -> None:
+            label = action.text().replace("&", "")
+            button.setAccessibleName(label)
+            button.setToolTip(action.toolTip() or label)
+            button.setEnabled(action.isEnabled())
+            button.setChecked(action.isChecked())
+
+        button.clicked.connect(lambda _checked=False: action.trigger())
+        action.changed.connect(sync_action)
+        sync_action()
+        return button
+
+    def _build_tool_docks(self) -> None:
+        tools_panel = QWidget()
+        tools_layout = QGridLayout(tools_panel)
+        tools_layout.setContentsMargins(6, 6, 6, 6)
+        tools_layout.setSpacing(5)
+        specifications = (
+            ("◇", self.new_action, "tool-new"),
+            ("↥", self.open_action, "tool-open"),
+            ("▣", self.save_action, "tool-save"),
+            ("T+", self.add_text_action, "tool-add-text"),
+            ("▦", self.add_grid_action, "tool-add-grid"),
+            ("⌫", self.delete_action, "tool-delete"),
+            ("▶", self.generate_action, "tool-generate"),
+            ("⛶", self.fit_page_action, "tool-fit-page"),
+            ("↝", self.travel_action, "tool-travel"),
+            ("●", self.markers_action, "tool-markers"),
+        )
+        self.tool_buttons = []
+        for index, (symbol, action, name) in enumerate(specifications):
+            button = self._symbol_button(symbol, action, name)
+            tools_layout.addWidget(button, index // 5, index % 5)
+            self.tool_buttons.append(button)
+        self.add_text_button = self.tool_buttons[3]
+        self.add_grid_button = self.tool_buttons[4]
+        self.remove_text_button = self.tool_buttons[5]
+        tools_layout.setRowStretch(2, 1)
+        self.tools_dock = self._dock(self._t("dock.tools"), "tools-dock", tools_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.tools_dock)
+        self.splitDockWidget(self.project_dock, self.tools_dock, Qt.Orientation.Vertical)
+        self.resizeDocks([self.project_dock, self.tools_dock], [620, 150], Qt.Orientation.Vertical)
+
+        modes_panel = QWidget()
+        modes_layout = QGridLayout(modes_panel)
+        modes_layout.setContentsMargins(6, 6, 6, 6)
+        modes_layout.setSpacing(5)
+        mode_specs = (
+            ("□", self.object_mode_action, "mode-object"),
+            ("▶", self.preview_mode_action, "mode-preview"),
+            ("⚙", self.execution_mode_action, "mode-execution"),
+        )
+        self.mode_buttons = []
+        for column, (symbol, action, name) in enumerate(mode_specs):
+            button = self._symbol_button(symbol, action, name)
+            modes_layout.addWidget(button, 0, column)
+            self.mode_buttons.append(button)
+        modes_layout.setColumnStretch(len(mode_specs), 1)
+        self.modes_dock = self._dock(self._t("dock.modes"), "modes-dock", modes_panel)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.modes_dock)
 
     def _build_menus(self) -> None:
         self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
@@ -205,7 +295,10 @@ class MainWindow(QMainWindow):
         self.edit_menu.addSeparator()
         self.edit_menu.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
         self.view_menu = self.menuBar().addMenu(self._t("menu.view"))
-        for dock in (self.project_dock, self.properties_dock, self.output_dock):
+        for dock in (
+            self.project_dock, self.tools_dock, self.modes_dock,
+            self.properties_dock, self.output_dock,
+        ):
             self.view_menu.addAction(dock.toggleViewAction())
         self.language_menu = self.menuBar().addMenu(self._t("menu.language"))
         self.language_group = QActionGroup(self)
@@ -215,32 +308,14 @@ class MainWindow(QMainWindow):
         self.language_menu.addActions(self.language_group.actions())
         self.tools_menu = self.menuBar().addMenu(self._t("menu.tools"))
         self.tools_menu.addAction(self.generate_action)
+        self.tools_menu.addSeparator()
+        self.tools_menu.addAction(self.studio_workspace_action)
         self.machine_menu = self.menuBar().addMenu(self._t("menu.machine"))
         self.virtual_profile_action = self._action(self._t("action.virtual_profile"), self._virtual_profile_info)
         self.machine_menu.addAction(self.virtual_profile_action)
         self.help_menu = self.menuBar().addMenu(self._t("menu.help"))
         self.about_action = self._action(self._t("action.about"), self._about)
         self.help_menu.addAction(self.about_action)
-
-    def _build_toolbar(self) -> None:
-        self.workspace_toolbar = self.addToolBar(self._t("toolbar.workspace"))
-        self.workspace_toolbar.setObjectName("workspace-toolbar")
-        self.workspace_toolbar.addActions((self.document_workspace_action, self.studio_workspace_action))
-        self.workspace_toolbar.addSeparator()
-        self.workspace_toolbar.addActions([self.new_action, self.open_action, self.save_action])
-        self.workspace_toolbar.addSeparator()
-        self.workspace_toolbar.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
-        self.workspace_toolbar.addSeparator()
-        self.workspace_toolbar.addAction(self.generate_action)
-        self.workspace_toolbar.addSeparator()
-        self.fit_page_action = self._action(self._t("action.fit_page"), self.canvas.zoom_to_fit, "F")
-        self.workspace_toolbar.addAction(self.fit_page_action)
-        self.travel_action = self._action(self._t("action.travel"), self.canvas.set_show_travel)
-        self.travel_action.setCheckable(True)
-        self.workspace_toolbar.addAction(self.travel_action)
-        self.markers_action = self._action(self._t("action.markers"), self.canvas.set_show_markers)
-        self.markers_action.setCheckable(True)
-        self.workspace_toolbar.addAction(self.markers_action)
 
     def _build_status_bar(self) -> None:
         self._canvas_fps = 0.0
@@ -377,6 +452,8 @@ class MainWindow(QMainWindow):
         action_keys = {
             self.document_workspace_action: "action.workspace.document",
             self.studio_workspace_action: "action.workspace.studio",
+            self.preview_mode_action: "action.mode.preview",
+            self.execution_mode_action: "action.mode.execution",
             self.new_action: "action.new",
             self.open_action: "action.open",
             self.save_action: "action.save",
@@ -405,15 +482,15 @@ class MainWindow(QMainWindow):
         self.english_language_action.setChecked(self.language == "en")
         self.ukrainian_language_action.setChecked(self.language == "uk")
         self.project_dock.setWindowTitle(self._t("dock.project"))
+        self.tools_dock.setWindowTitle(self._t("dock.tools"))
+        self.modes_dock.setWindowTitle(self._t("dock.modes"))
         self.properties_dock.setWindowTitle(self._t("dock.properties"))
         self.output_dock.setWindowTitle(self._t("dock.output"))
-        self.add_text_button.setText(self._t("button.add_text"))
-        self.add_grid_button.setText(self._t("button.add_grid"))
-        self.remove_text_button.setText(self._t("button.remove"))
         self.output_tabs.setTabText(0, self._t("tab.console"))
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
-        self.workspace_toolbar.setWindowTitle(self._t("toolbar.workspace"))
+        self.preview_mode_action.setToolTip(self._t("action.mode.preview_planned"))
+        self.execution_mode_action.setToolTip(self._t("action.mode.execution_planned"))
         progress_state = self.generation_progress.property("state")
         if progress_state == "running":
             self.generation_progress.setFormat(self._t("status.progress.generating"))
@@ -472,9 +549,6 @@ class MainWindow(QMainWindow):
         self.properties.text_content_changed.connect(self._update_text_content)
         self.properties.grid_object_changed.connect(self._update_grid_object)
         self.properties.page_changed.connect(self._update_page)
-        self.add_text_button.clicked.connect(self.add_text_object)
-        self.add_grid_button.clicked.connect(self.add_grid_object)
-        self.remove_text_button.clicked.connect(self.remove_selected_object)
 
     def _dock(self, title: str, name: str, widget: QWidget) -> QDockWidget:
         dock = QDockWidget(title, self)
