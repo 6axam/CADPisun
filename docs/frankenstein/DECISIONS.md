@@ -105,3 +105,14 @@ for this technical revision. The StyleManifest stays `approved=false`,
 self-review rather than claiming an independent reviewer. The builder never
 promotes draft or synthetic data automatically.
 
+## F-ADR-013: Canonicalize unordered model collections before JSON hashing
+
+Status: accepted, 2026-10-16.
+
+Every `set` or `frozenset` field on a persisted `StrictModel` serializes as a
+sorted JSON array. Key sorting alone cannot stabilize array order. Without this
+rule, Python hash randomization changed annotation bytes, StylePack revision
+hashes, deterministic variant selection, SVG and G-code across otherwise
+identical processes. The regression runs two interpreters with different
+`PYTHONHASHSEED` values.
+

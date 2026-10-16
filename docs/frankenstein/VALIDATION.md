@@ -169,6 +169,34 @@ user revision for a text object, and generates through the composite backend.
 The published manifest stays non-production and test-only. These tests ran on
 Linux with Qt offscreen; no local Windows execution is claimed.
 
+### Phase 11 complete synthetic Level B workflow
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/test_canonical_models.py tests/e2e/test_frankenstein_level_b.py
+QT_QPA_PLATFORM=offscreen PYTHONHASHSEED=1 uv run python \
+  tools/generate_frankenstein_level_b.py examples/frankenstein-level-b/review-bundle --overwrite
+QT_QPA_PLATFORM=offscreen PYTHONHASHSEED=2 uv run python \
+  tools/generate_frankenstein_level_b.py /tmp/cadpisun-frankenstein-reopen --overwrite
+diff -qr examples/frankenstein-level-b/review-bundle \
+  /tmp/cadpisun-frankenstein-reopen
+```
+
+Result: `2 passed in 2.39s`; full regression `200 passed in 16.63s`;
+cross-process directory diff produced no output.
+The generated bundle contains 49 files and 388 KiB. Style revision hash is
+`1aada21a94f0c51632c17d03d2cd40f985a0950ddb0415c56e2bcf7fcda81301`;
+desktop document ID is `desktop-d8702b16489f62c2c92f`.
+
+Evidence covers six synthetic raw pointer captures, processed and normalized
+derivatives, reviewed annotations, two `м` variants, an immutable five-key
+StylePack, all four required words, 16 PenPlan draws, parsed production and
+diagnostic SVG, MotionPlan, virtual G-code round trip, atomic review-bundle
+hashes, project cache reopen, a fresh rebuild, and byte identity under distinct
+Python hash seeds. The SVGs were also rendered locally with librsvg for visual
+inspection. This is integration evidence only: no physical human input,
+tablet, Windows host or plotter was used, and handwriting quality remains open.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

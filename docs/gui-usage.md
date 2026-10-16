@@ -191,6 +191,13 @@ provenance и license records, вычисляет их SHA-256 и публику
 со встроенными стилями; проект хранит явные `style_id` и `style_revision`.
 Отсутствующая ревизия показывается как Missing и не подменяется другой.
 
+Полный synthetic-only Level B audit находится в
+[`examples/frankenstein-level-b/`](../examples/frankenstein-level-b/README.md).
+Он содержит raw/processed/normalized/annotation цепочки, опубликованный
+StylePack, четыре обязательных слова, оба SVG, PenPlan, MotionPlan, виртуальный
+G-code, reopenable project и SHA-256 manifest. Этот bundle проверяет интеграцию,
+но не качество человеческого почерка, планшет или физическое оборудование.
+
 ## Строка состояния и диагностика
 
 Внизу слева показываются фактически измеряемая частота перерисовки холста и

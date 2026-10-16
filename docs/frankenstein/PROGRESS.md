@@ -1,13 +1,13 @@
 # Project Frankenstein — progress
 
-Last updated: 2026-10-15.
+Last updated: 2026-10-16.
 
 ## Current checkpoint
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: 11 — first complete end-to-end workflow
-- Last completed phase: 10 — personal StylePack builder
+- Phase: Level B release verification and CI
+- Last completed phase: 11 — first complete end-to-end workflow
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
 - Phase 02 commit: `417f362`
@@ -18,8 +18,9 @@ Last updated: 2026-10-15.
 - Phase 07 commit: `f08da52`
 - Phase 08 commit: `65ecc97`
 - Phase 09 commit: `59e05ad`
-- Phase 10 commit: see the commit named `feat: publish captured handwriting as versioned StylePacks` (recorded at the next checkpoint).
-- Next concrete action: record/assemble the five-glyph corpus, generate the four required words through the published user StylePack, and verify SVG/G-code round trips and determinism.
+- Phase 10 commit: `918543d`
+- Phase 11 commit: see the commit named `feat: complete personal handwriting end-to-end workflow` (recorded at the next checkpoint).
+- Next concrete action: run the complete Linux suite, push Phase 11, obtain green Linux/Windows GitHub Actions evidence, and finish the Level B acceptance report.
 
 ## Validation ledger
 
@@ -47,6 +48,8 @@ Last updated: 2026-10-15.
 | 2026-10-15 | Phase 09 full Linux headless regression | 195 passed in 16.86 s |
 | 2026-10-15 | Phase 10 builder/styles/Studio focused suites | 19 passed in 3.38 s |
 | 2026-10-15 | Phase 10 full Linux headless regression | 198 passed in 17.02 s |
+| 2026-10-16 | Phase 11 deterministic five-glyph workflow | 2 passed in 2.39 s |
+| 2026-10-16 | Phase 11 full Linux headless regression | 200 passed in 16.63 s |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
@@ -217,9 +220,28 @@ publishes one real Qt-captured test sample. The resulting `personal@0.1.0`
 reloads through the regular repository, remains `approved=false`,
 `test_only=true`, and `production_eligible=false`, and cannot be overwritten.
 
-### Phase 11 — IN_PROGRESS
+### Phase 11 — DONE
 
 - Exercise one published five-glyph personal revision through normal document generation.
 - Verify all four required Ukrainian words in SVG and virtual G-code.
 - Record deterministic artifact hashes and restart/reopen evidence.
+
+The tracked synthetic-only review bundle records six pointer fixtures for five
+Ukrainian keys, including two accepted `м` variants. It processes, normalizes,
+annotates, self-reviews and publishes those sources through the same immutable
+repositories as Studio. A normal desktop project then lays out `мама`, `мимо`,
+`мана`, and `мина` using the explicit user revision.
+
+The gate parses production and diagnostic SVG, verifies 16 glyph draws and 19
+source graphemes, validates MotionPlan and virtual G-code round trip, saves the
+project with its generation cache, reopens it, and rebuilds identical output
+through fresh repositories. Its review manifest hashes every raw, derivative,
+StylePack and generated payload. The fixture remains clearly synthetic,
+simulation-only and non-production; it does not clear `BLK-STYLE-001`.
+
+Cross-process regeneration initially exposed unordered `frozenset` JSON output.
+`StrictModel` now serializes unordered collections as sorted arrays. Runs under
+two different `PYTHONHASHSEED` values produce byte-identical 49-file bundles and
+the same StylePack revision hash
+`1aada21a94f0c51632c17d03d2cd40f985a0950ddb0415c56e2bcf7fcda81301`.
 

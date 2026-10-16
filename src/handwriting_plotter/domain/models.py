@@ -7,11 +7,17 @@ import math
 from hashlib import sha256
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+
+    @field_serializer("*", mode="wrap", check_fields=False)
+    def stable_json_collections(self, value: Any, handler, info):  # noqa: ANN001, ANN201
+        if info.mode == "json" and isinstance(value, (frozenset, set)):
+            return sorted(value)
+        return handler(value)
 
 
 class Envelope(StrictModel):
