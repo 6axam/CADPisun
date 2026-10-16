@@ -12,8 +12,13 @@ from handwriting_plotter.gui.theme import COLORS
 from handwriting_plotter.version import __version__
 
 
-def test_main_window_has_engineering_workspace(qtbot) -> None:
-    window = MainWindow()
+def isolated_window(tmp_path, name: str) -> MainWindow:
+    settings = QSettings(str(tmp_path / f"{name}.ini"), QSettings.Format.IniFormat)
+    return MainWindow(settings, user_data_root=tmp_path / f"{name}-data")
+
+
+def test_main_window_has_engineering_workspace(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "workspace")
     qtbot.addWidget(window)
     window.show()
     assert window.windowTitle().endswith("— Handwriting Plotter")
@@ -30,8 +35,8 @@ def test_main_window_has_engineering_workspace(qtbot) -> None:
     assert window.statusBar().childrenRect().contains(window.version_label.geometry())
 
 
-def test_docks_are_actually_toggleable(qtbot) -> None:
-    window = MainWindow()
+def test_docks_are_actually_toggleable(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "toggle-docks")
     qtbot.addWidget(window)
     window.show()
     action = window.project_dock.toggleViewAction()
@@ -41,8 +46,8 @@ def test_docks_are_actually_toggleable(qtbot) -> None:
     assert window.project_dock.isVisible()
 
 
-def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot) -> None:
-    window = MainWindow()
+def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "status-telemetry")
     qtbot.addWidget(window)
 
     window.canvas.fps_changed.emit(59.94)
@@ -55,8 +60,8 @@ def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot) -> None:
     assert "Y: 148.50 mm" in window.telemetry_label.text()
 
 
-def test_status_messages_use_distinct_operation_colors(qtbot) -> None:
-    window = MainWindow()
+def test_status_messages_use_distinct_operation_colors(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "status-colors")
     qtbot.addWidget(window)
 
     for severity, color in (
@@ -94,8 +99,8 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
     assert reopened.ukrainian_language_action.isChecked()
 
 
-def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot) -> None:
-    window = MainWindow()
+def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "selection")
     qtbot.addWidget(window)
     snapshot = ProjectSnapshot(
         project_id="selection-project",
@@ -121,8 +126,8 @@ def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot
     assert {item.object_id for item in window.controller.snapshot.objects} == {"first", "second"}
 
 
-def test_canvas_move_signal_updates_text_and_frame_coordinates(qtbot) -> None:
-    window = MainWindow()
+def test_canvas_move_signal_updates_text_and_frame_coordinates(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "move")
     qtbot.addWidget(window)
     item = window.controller.snapshot.objects[0]
 
@@ -134,8 +139,8 @@ def test_canvas_move_signal_updates_text_and_frame_coordinates(qtbot) -> None:
     window.controller.reset(window.controller.snapshot)
 
 
-def test_grid_object_can_be_created_selected_and_edited(qtbot) -> None:
-    window = MainWindow()
+def test_grid_object_can_be_created_selected_and_edited(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "grid")
     qtbot.addWidget(window)
 
     window.add_grid_object()

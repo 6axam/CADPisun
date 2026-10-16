@@ -1068,6 +1068,30 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state, 1)
+        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        visibility_keys = {
+            dock.objectName(): f"main/document_docks/{dock.objectName()}/visible"
+            for dock in docks
+        }
+        has_explicit_visibility = any(self.settings.contains(key) for key in visibility_keys.values())
+        if has_explicit_visibility:
+            for dock in docks:
+                key = visibility_keys[dock.objectName()]
+                visible = self.settings.value(
+                    key,
+                    dock.toggleViewAction().isChecked(),
+                    type=bool,
+                )
+                dock.setVisible(visible)
+        elif state is not None and not any(dock.toggleViewAction().isChecked() for dock in docks):
+            # Older builds saved Studio's temporary all-hidden state as the
+            # Document layout. Recover that state once without overriding a
+            # user's explicitly persisted per-dock choices in newer builds.
+            for dock in docks:
+                dock.show()
+        self._document_dock_visibility = {
+            dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+        }
         show_travel = self.settings.value("canvas/show_travel", False, type=bool)
         show_markers = self.settings.value("canvas/show_markers", False, type=bool)
         self.travel_action.setChecked(show_travel)
@@ -1076,6 +1100,18 @@ class MainWindow(QMainWindow):
         self.canvas.set_show_markers(show_markers)
 
     def _save_window_state(self) -> None:
+        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        if self.workspace_stack.currentWidget() is self.studio:
+            visibility = self._document_dock_visibility
+        else:
+            visibility = {
+                dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+            }
+        for dock in docks:
+            self.settings.setValue(
+                f"main/document_docks/{dock.objectName()}/visible",
+                visibility.get(dock.objectName(), True),
+            )
         self.settings.setValue("main/geometry", self.saveGeometry())
         self.settings.setValue("main/state", self.saveState(1))
         self.settings.setValue("canvas/show_travel", self.travel_action.isChecked())
