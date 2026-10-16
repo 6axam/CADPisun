@@ -34,4 +34,3 @@ States: `TODO`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 - Published user revisions use the existing StylePack schema and `FileStyleRepository` integrity verification.
 - Synthetic data is always marked as such. It can prove the pipeline but cannot establish handwriting quality or independent review.
 - Hardware transport, OCR, and mandatory neural dependencies remain outside this execution plan.
-

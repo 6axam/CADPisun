@@ -115,4 +115,3 @@ rule, Python hash randomization changed annotation bytes, StylePack revision
 hashes, deterministic variant selection, SVG and G-code across otherwise
 identical processes. The regression runs two interpreters with different
 `PYTHONHASHSEED` values.
-

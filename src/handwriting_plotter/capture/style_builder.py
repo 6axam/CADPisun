@@ -311,4 +311,3 @@ class PersonalStylePackBuilder:
             )
         finally:
             shutil.rmtree(staging, ignore_errors=True)
-

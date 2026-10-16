@@ -580,4 +580,3 @@ class HandwritingCaptureWidget(QWidget):
         elif point is not None and event.type() == QEvent.Type.TouchUpdate:
             pressure = float(point.pressure()) if pressure_supported else None
             self._move_pointer(point.position(), pressure=pressure)
-

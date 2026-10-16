@@ -270,4 +270,3 @@ class CaptureSession(StrictModel):
         if has_pressure and not self.device.pressure:
             raise ValueError("captured pressure is absent from device capabilities")
         return self
-

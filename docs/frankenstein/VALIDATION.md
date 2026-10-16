@@ -223,4 +223,3 @@ Every completed phase appends:
 - relevant performance measurement rather than an estimate;
 - generated artifact hashes for end-to-end milestones;
 - CI run URL and per-platform status after push.
-

@@ -1615,4 +1615,3 @@ class HandwritingStudio(QWidget):
         code = "-".join(f"u-{ord(char):04x}" for char in label)
         count = sum(record.session.samples[0].label == label for record in self._records) + 1
         return f"{code}-v{count}"
-

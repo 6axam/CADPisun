@@ -157,4 +157,3 @@ class DraftStore:
         finally:
             staging.unlink(missing_ok=True)
         return path
-

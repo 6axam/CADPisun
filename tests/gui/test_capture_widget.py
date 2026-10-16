@@ -154,4 +154,3 @@ def test_undo_redo_and_interruption_preserve_whole_strokes(qtbot) -> None:
     assert widget.strokes[-1].points[-1].pressure == 0.5
     assert "pen" in widget.device_capabilities.pointer_types
     assert widget.device_capabilities.pressure
-

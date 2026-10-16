@@ -66,4 +66,3 @@ existing shaping → layout → PenPlan → SVG/G-code
 ```
 
 The first implementation step is the Qt-free capture boundary. UI work starts only after its round-trip and rejection behavior are proven.
-

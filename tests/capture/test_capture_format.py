@@ -208,4 +208,3 @@ def test_capture_rejects_invalid_guides_and_excessive_point_count(monkeypatch) -
     monkeypatch.setattr(capture_models, "MAX_POINTS_PER_STROKE", 2)
     with pytest.raises(ValidationError, match="too many points"):
         replace(sample_session().samples[0].strokes[0], stroke_id="too-many")
-

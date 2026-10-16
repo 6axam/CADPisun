@@ -369,4 +369,3 @@ def test_published_user_style_refreshes_normal_picker_and_backend(qtbot, tmp_pat
     assert window.controller.snapshot.objects[0].style_revision == "0.1.0"
     assert window.backend.build(window.controller.snapshot).test_only_style is True
     window.controller.reset(window.controller.snapshot)
-

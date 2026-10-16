@@ -39,4 +39,3 @@ def test_only_one_preferred_variant_per_label() -> None:
     catalog = DraftCatalog(style_id="personal", display_name="Personal", variants=(_variant(1, preferred=True), _variant(2)))
     updated = catalog.set_preferred("u-043c-v2", "2026-10-14T10:01:00Z")
     assert [item.variant_id for item in updated.variants if item.preferred] == ["u-043c-v2"]
-

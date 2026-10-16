@@ -18,4 +18,3 @@ Audit date: 2026-10-14. Repositories were shallow-cloned outside the CADPisun ch
 ## Attribution policy
 
 This audit supplies the requested acknowledgment for studied implementations. If later work copies or adapts actual source from a permissive donor, that phase must add the required copyright/license text and identify exact copied files in this document before the code is committed.
-

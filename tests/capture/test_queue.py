@@ -44,4 +44,3 @@ def test_queue_store_rejects_unsafe_id(tmp_path) -> None:
     store = CaptureQueueStore(tmp_path)
     with pytest.raises(ValueError, match="INVALID_QUEUE_ID"):
         store.path_for("../escape")
-

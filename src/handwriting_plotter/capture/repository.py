@@ -120,4 +120,3 @@ class CaptureRepository:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-
