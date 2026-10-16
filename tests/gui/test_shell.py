@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
@@ -44,6 +44,45 @@ def test_docks_are_actually_toggleable(qtbot, tmp_path) -> None:
     assert not window.project_dock.isVisible()
     action.trigger()
     assert window.project_dock.isVisible()
+
+
+def test_issue_seven_exposes_dockable_symbol_tools_in_view_menu(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-seven-tools")
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.tools_dock.isVisible()
+    assert window.dockWidgetArea(window.tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.tools_dock.allowedAreas() & Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.tools_dock.toggleViewAction() in window.view_menu.actions()
+    assert window.tools_dock.windowTitle() == "Tools"
+    assert len(window.tool_buttons) == 10
+    assert all(button.width() == button.height() for button in window.tool_buttons)
+    assert all(button.text() and button.text() != button.accessibleName() for button in window.tool_buttons)
+    assert all("border-radius" in button.styleSheet() for button in window.tool_buttons)
+
+    window.tools_dock.toggleViewAction().trigger()
+    assert not window.tools_dock.isVisible()
+
+
+def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-seven-modes")
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.modes_dock.isVisible()
+    assert window.dockWidgetArea(window.modes_dock) == Qt.DockWidgetArea.TopDockWidgetArea
+    assert window.modes_dock.toggleViewAction() in window.view_menu.actions()
+    assert window.object_mode_action.isChecked()
+    assert window.object_mode_action.isEnabled()
+    assert not window.preview_mode_action.isEnabled()
+    assert not window.execution_mode_action.isEnabled()
+    assert window.preview_mode_action.property("implementationStatus") == "planned"
+    assert window.execution_mode_action.property("implementationStatus") == "planned"
+    assert window.preview_mode_action.toolTip() == "Preview mode · planned"
+    assert window.execution_mode_action.toolTip() == "Execution mode · planned"
+    assert window.preview_mode_action.data() == "preview"
+    assert window.execution_mode_action.data() == "execution"
 
 
 def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot, tmp_path) -> None:
@@ -90,6 +129,9 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
         "Файл", "Редагування", "Вигляд", "Мова", "Інструменти", "Верстат", "Довідка",
     ]
     assert window.project_dock.windowTitle() == "Об’єкти проєкту"
+    assert window.tools_dock.windowTitle() == "Інструменти"
+    assert window.modes_dock.windowTitle() == "Режими"
+    assert window.object_mode_action.text() == "Об’єкт"
     assert window.properties._labels["properties.name"].text() == "Назва"
     assert window.version_label.text() == f"Версія {__version__}"
 
