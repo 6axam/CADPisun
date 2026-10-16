@@ -4,6 +4,8 @@
 
 > **Project Frankenstein:** [план и текущий прогресс персонального рукописного workflow](docs/frankenstein/MASTER_PLAN.md).
 
+> **Level B:** [итоговый отчёт, проверяемый review bundle и результаты Linux/Windows CI](docs/frankenstein/LEVEL_B_REPORT.md).
+
 **Текущая сборка: `0.2.0+20261014.2`.** Номер отображается в нижней строке GUI
 и командой `uv run hplot version`, поэтому его можно сверить после загрузки ZIP.
 

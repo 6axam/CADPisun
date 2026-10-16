@@ -5,6 +5,12 @@ personal-style gate for CADPisun. It contains six immutable pointer captures for
 five Ukrainian letters (`а, м, и, н, о`), including two `м` variants, plus every
 derived and generated artifact required to audit the pipeline.
 
+![Synthetic Handwriting Studio capture](handwriting-studio-synthetic.png)
+
+The screenshot is rendered from the current Qt widget with a synthetic pointer
+trace. It demonstrates the capture queue, guides, points and stroke direction;
+it is not a human-handwriting sample.
+
 The pointer traces are deterministic **synthetic integration fixtures**. They
 exercise the same repositories, validators, StylePack publisher, Document
 Workspace backend, SVG writer, MotionPlan and virtual G-code round trip as user

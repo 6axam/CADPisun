@@ -197,6 +197,19 @@ Python hash seeds. The SVGs were also rendered locally with librsvg for visual
 inspection. This is integration evidence only: no physical human input,
 tablet, Windows host or plotter was used, and handwriting quality remains open.
 
+### Phase 11 CI
+
+[GitHub Actions run 38866286365](https://github.com/6axam/CADPisun/actions/runs/38866286365)
+tested commit `c097de9c0aa2a2e8861bdcc43bc0d73ca6203edf` with Python 3.12:
+
+- `ubuntu-latest · Python 3.12`: success; 48 seconds total job time;
+- `windows-latest · Python 3.12`: success; 1 minute 11 seconds total job time.
+
+Both jobs ran the focused Canvas, document editing, export, generation, desktop
+polish, selective refresh and shell checks followed by the complete core and
+integration suite. The Windows result is headless GitHub-hosted CI evidence;
+it is not a claim of a manual Windows GUI or physical-input test.
+
 ### Documentation checks
 
 `git diff --check` passed. All local Markdown links in `docs/frankenstein/` resolve. The staged-file review confirms that Phase 00 changes only documentation outside the read-only `sources/` mirror.

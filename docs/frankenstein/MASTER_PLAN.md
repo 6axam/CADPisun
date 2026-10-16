@@ -12,12 +12,12 @@ States: `TODO`, `IN_PROGRESS`, `DONE`, `BLOCKED`.
 | 03 | Integrated Handwriting Studio | 02 | save, leave, return, reopen sample | DONE |
 | 04 | Capture queues and coverage | 03 | five-token capture without manual filenames | DONE |
 | 05 | Variant management | 04 | three `м` variants browsable and selectable | DONE |
-| 06 | Directed-stroke processing | 01, 05 | two tolerances, bounded deviation, shared raw source | IN_PROGRESS |
-| 07 | Common glyph metrics | 06 | coherent `а м н о и` baseline/x-height | TODO |
-| 08 | Join annotation | 07 | pair preview reports join/lift/rejection | TODO |
-| 09 | Recorded ligatures | 08 | captured `ма` selected through PenPlan | TODO |
-| 10 | Personal StylePack publication | 05–09 | immutable test-only revision appears in normal picker | TODO |
-| 11 | Complete Level B workflow | 10 | `мама мимо мана мина` → SVG and virtual G-code | TODO |
+| 06 | Directed-stroke processing | 01, 05 | two tolerances, bounded deviation, shared raw source | DONE |
+| 07 | Common glyph metrics | 06 | coherent `а м н о и` baseline/x-height | DONE |
+| 08 | Join annotation | 07 | pair preview reports join/lift/rejection | DONE |
+| 09 | Recorded ligatures | 08 | captured `ма` selected through PenPlan | DONE |
+| 10 | Personal StylePack publication | 05–09 | immutable test-only revision appears in normal picker | DONE |
+| 11 | Complete Level B workflow | 10 | `мама мимо мана мина` → SVG and virtual G-code | DONE |
 | 12 | Natural variation v2 | 11 | deterministic bounded variation and anti-repeat tests | TODO |
 | 13 | GUI realism controls | 12 | controls persist and regenerate deterministic output | TODO |
 | 14 | Multi-page composition | 13 | page navigation and complete artifact export | TODO |

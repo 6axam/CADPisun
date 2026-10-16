@@ -6,7 +6,7 @@ Last updated: 2026-10-16.
 
 - Branch: `codex/frankenstein-handwriting-studio`
 - Base commit: `011ec7a3764fd637765aeb38dd815ec5f1b047bd`
-- Phase: Level B release verification and CI
+- Phase: Level B complete; phases 12–17 remain planned follow-up work
 - Last completed phase: 11 — first complete end-to-end workflow
 - Phase 00 commit: `7d0f875`
 - Phase 01 commit: `67fa1cf`
@@ -19,8 +19,11 @@ Last updated: 2026-10-16.
 - Phase 08 commit: `65ecc97`
 - Phase 09 commit: `59e05ad`
 - Phase 10 commit: `918543d`
-- Phase 11 commit: see the commit named `feat: complete personal handwriting end-to-end workflow` (recorded at the next checkpoint).
-- Next concrete action: run the complete Linux suite, push Phase 11, obtain green Linux/Windows GitHub Actions evidence, and finish the Level B acceptance report.
+- Phase 11 commit: `c097de9`
+- Level B acceptance report: [`LEVEL_B_REPORT.md`](LEVEL_B_REPORT.md)
+- Published review: [pull request #4](https://github.com/6axam/CADPisun/pull/4)
+- Verified CI: [GitHub Actions run 38866286365](https://github.com/6axam/CADPisun/actions/runs/38866286365), Linux and Windows jobs successful at Phase 11 commit `c097de9`.
+- Next planned phase: 12 — deterministic natural variation v2. It is outside the completed Level B milestone and must begin with its own acceptance tests.
 
 ## Validation ledger
 
@@ -50,6 +53,8 @@ Last updated: 2026-10-16.
 | 2026-10-15 | Phase 10 full Linux headless regression | 198 passed in 17.02 s |
 | 2026-10-16 | Phase 11 deterministic five-glyph workflow | 2 passed in 2.39 s |
 | 2026-10-16 | Phase 11 full Linux headless regression | 200 passed in 16.63 s |
+| 2026-10-16 | Phase 11 GitHub Actions, `ubuntu-latest`, Python 3.12 | success in 48 s job elapsed time |
+| 2026-10-16 | Phase 11 GitHub Actions, `windows-latest`, Python 3.12 | success in 1 min 11 s job elapsed time |
 
 The first test attempt could not start because the existing local environment did not contain the dev extra (`pytest` executable absent). `uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev` restored the locked environment; this was an environment prerequisite, not a failing project test.
 
