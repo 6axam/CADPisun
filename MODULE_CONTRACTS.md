@@ -328,7 +328,7 @@ reversal, reordering или новым connector metadata.
 | PageCanvas | Backend SVG/PenPlan bytes + non-production object/grid overlays → scene in PageFrame mm; CAD selection, move, independent-axis grid snap, zoom/pan/fit |
 | HandwritingCaptureWidget | Mouse/tablet/touch events → ordered `CaptureStroke`; fixed logical-pixel frame, monotonic elapsed time, nullable real pressure, synthesized-mouse suppression; no geometric processing |
 | StatusTelemetry | PageCanvas paint events/cursor → measured FPS и PageFrame mm coordinates; application version → постоянная подпись; generation lifecycle → indeterminate/success/error progress |
-| ProjectStore | `hp-desktop-project/1.0…1.3` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
+| ProjectStore | `hp-desktop-project/1.0…1.4` ↔ canonical JSON; verified optional GenerationResult cache, atomic replace, unknown version error |
 
 Старый worker result не применяется к новой revision. Одновременно выполняется
 не больше одной generation job документа. Export копирует проверенные bytes из
@@ -342,3 +342,8 @@ project JSON.
 геометрии, клетки, линии, цвета или видимости не делает уже рассчитанные
 машинные артефакты семантически устаревшими. Привязка действует независимо по
 X и Y в пределах 1.5 mm и никогда не изменяет координаты без движения объекта.
+
+Для каждого TextObject adapter ограничивает layout его рабочим полем, применяет
+межсимвольный интервал и поворот вокруг центра поля, затем повторно проверяет
+аналитические ink bounds. Переполненный объект не обрезается частично: его ID
+попадает в report `overflow_object_ids`, а его strokes не пересекают PenPlan.

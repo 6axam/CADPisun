@@ -74,13 +74,31 @@ def test_legacy_project_is_loaded_with_text_frames(tmp_path, schema_version) -> 
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.3"
+    assert loaded.schema_version == "1.4"
     assert loaded.project_id == sample_project().project_id
     assert loaded.objects[0].frame_x_mm == 42.0
     assert loaded.objects[0].frame_y_mm == 53.0
     assert loaded.objects[0].frame_width_mm == 60.0
     assert loaded.objects[0].frame_height_mm == 30.0
     assert loaded.objects[0].kind == "text"
+
+
+def test_schema_13_project_gets_new_text_layout_defaults(tmp_path) -> None:
+    data = sample_project().model_dump(mode="json")
+    data["schema_version"] = "1.3"
+    for key in ("character_spacing_mm", "rotation_deg", "display_diameter_mm", "color_group"):
+        data["objects"][0].pop(key, None)
+    path = tmp_path / "schema-13.hplot.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_project(path)
+
+    assert loaded.schema_version == "1.4"
+    item = loaded.objects[0]
+    assert item.character_spacing_mm == 0
+    assert item.rotation_deg == 0
+    assert item.display_diameter_mm == 3
+    assert item.color_group == 0
 
 
 def test_grid_object_round_trips_with_validated_geometry(tmp_path) -> None:
@@ -321,8 +339,8 @@ def test_text_properties_group_pairs_and_edit_independent_frame(qtbot) -> None:
     item = TextObject(
         object_id="frame-properties",
         name="Frame",
-        x_mm=12,
-        y_mm=18,
+        x_mm=25,
+        y_mm=36,
         frame_x_mm=20,
         frame_y_mm=30,
         frame_width_mm=70,
@@ -335,12 +353,61 @@ def test_text_properties_group_pairs_and_edit_independent_frame(qtbot) -> None:
     frame_layout = panel._groups["properties.group.frame"].layout()
     x_position = frame_layout.getItemPosition(frame_layout.indexOf(panel.frame_x_field))
     y_position = frame_layout.getItemPosition(frame_layout.indexOf(panel.frame_y_field))
+    assert panel.x_field.value() == 5
+    assert panel.y_field.value() == 6
+    panel.x_field.setValue(7)
+    panel.y_field.setValue(8)
     panel.frame_width_field.setValue(65)
 
     assert x_position[0] == y_position[0]
     assert x_position[1] != y_position[1]
     assert emitted[-1]["frame_width_mm"] == 65
-    assert emitted[-1]["x_mm"] == 12
+    assert emitted[-1]["x_mm"] == 27
+    assert emitted[-1]["y_mm"] == 38
+
+
+def test_text_properties_expose_issue_five_controls_and_ukrainian_labels(qtbot) -> None:
+    from handwriting_plotter.gui.properties import PropertiesPanel
+    from handwriting_plotter.gui.styles import discover_styles
+
+    panel = PropertiesPanel(discover_styles(), language="uk")
+    qtbot.addWidget(panel)
+    item = TextObject(
+        object_id="issue-five",
+        name="Issue five",
+        x_mm=25,
+        y_mm=35,
+        frame_x_mm=20,
+        frame_y_mm=30,
+        character_spacing_mm=1.25,
+        rotation_deg=15,
+        display_diameter_mm=4,
+        color_group=3,
+    )
+    emitted: list[dict] = []
+    panel.text_object_changed.connect(lambda _object_id, changes: emitted.append(changes))
+
+    panel.show_text_object(item)
+
+    assert panel._groups["properties.group.position"].title() == "Початок тексту відносно його зони"
+    assert panel._groups["properties.group.frame"].title() == "Робоче поле об’єкта"
+    assert panel._labels["properties.text_start_x"].text() == "Початок X"
+    assert panel._labels["properties.text_start_y"].text() == "Початок Y"
+    assert panel._labels["properties.x_height"].text() == "Висота символів"
+    assert len(panel.color_group_buttons) == 16
+    assert panel.color_group_buttons[3].isChecked()
+    assert panel.content_layout.getItemPosition(panel.content_layout.indexOf(panel.name_field))[0] == 1
+    assert panel.content_layout.getItemPosition(panel.content_layout.indexOf(panel.text_field))[0] == 1
+
+    panel.character_spacing_field.setValue(2.0)
+    panel.rotation_field.setValue(-25)
+    panel.display_diameter_field.setValue(5)
+    panel.color_group_buttons[9].click()
+
+    assert emitted[-1]["character_spacing_mm"] == 2.0
+    assert emitted[-1]["rotation_deg"] == -25
+    assert emitted[-1]["display_diameter_mm"] == 5
+    assert emitted[-1]["color_group"] == 9
 
 
 def test_grid_properties_edit_cells_line_style_color_and_snap(qtbot) -> None:

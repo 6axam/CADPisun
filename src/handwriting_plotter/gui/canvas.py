@@ -15,13 +15,14 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QGraphicsEllipseItem,
     QGraphicsItem,
+    QGraphicsLineItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
 )
 
-from .document import GridObject, TextObject
+from .document import GridObject, TEXT_COLOR_GROUPS, TextObject
 from .theme import COLORS
 
 OBJECT_ID_ROLE = 0
@@ -85,6 +86,7 @@ class PageCanvas(QGraphicsView):
 
     selection_changed = Signal(object)
     objects_moved = Signal(object, float, float)
+    object_resized = Signal(str, float, float, float, float)
     cursor_position_changed = Signal(object)
     fps_changed = Signal(float)
 
@@ -121,6 +123,13 @@ class PageCanvas(QGraphicsView):
         self._object_models: dict[str, object] = {}
         self._grid_items: dict[str, GridPageItem] = {}
         self._selected_object_ids: set[str] = set()
+        self._hovered_object_id: str | None = None
+        self._resize_handles: dict[str, QGraphicsRectItem] = {}
+        self._active_resize_handle: str | None = None
+        self._resize_object_id: str | None = None
+        self._resize_initial_rect: QRectF | None = None
+        self._overflow_items: list[QGraphicsItem] = []
+        self._overflow_object_ids: set[str] = set()
         self._selection_origin: QPointF | None = None
         self._selection_current: QPointF | None = None
         self._selection_additive = False
@@ -219,6 +228,7 @@ class PageCanvas(QGraphicsView):
         self._production_item = None
         self._preview_item = None
         self._marker_items.clear()
+        self.set_object_overflows(())
         self.set_preview_stale(False)
 
     def set_preview_stale(self, stale: bool, label: str | None = None) -> None:
@@ -233,6 +243,7 @@ class PageCanvas(QGraphicsView):
         self._stale_banner_text.setVisible(self._preview_is_stale)
 
     def set_object_frames(self, objects, selected_ids=()) -> None:  # noqa: ANN001
+        self._clear_resize_handles()
         for item in self._object_frames.values():
             if item.scene() is self.scene():
                 self.scene().removeItem(item)
@@ -261,6 +272,8 @@ class PageCanvas(QGraphicsView):
             self._object_frames[obj.object_id] = frame
             self._object_models[obj.object_id] = obj
         self._sync_object_frame_styles()
+        self._sync_resize_handles()
+        self.set_object_overflows(self._overflow_object_ids)
 
     @staticmethod
     def _object_rect(obj: object) -> QRectF:
@@ -273,20 +286,96 @@ class PageCanvas(QGraphicsView):
     def set_selected_objects(self, object_ids) -> None:  # noqa: ANN001
         self._selected_object_ids = set(object_ids)
         self._sync_object_frame_styles()
+        self._sync_resize_handles()
 
     def _sync_object_frame_styles(self) -> None:
         for object_id, frame in self._object_frames.items():
             selected = object_id in self._selected_object_ids
-            is_grid = isinstance(self._object_models[object_id], GridObject)
-            color = QColor(COLORS["accent"] if selected else COLORS["muted"])
+            model = self._object_models[object_id]
+            is_grid = isinstance(model, GridObject)
+            base_color = model.color if is_grid else TEXT_COLOR_GROUPS[model.color_group]
+            color = QColor(base_color)
             color.setAlpha(255 if selected else (0 if is_grid else 105))
+            hovered = object_id == self._hovered_object_id
             pen = QPen(
                 color,
-                0.45 if selected else 0.25,
-                Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine,
+                1.0 if hovered else (0.45 if selected else 0.25),
+                Qt.PenStyle.DashLine if hovered or not selected else Qt.PenStyle.SolidLine,
             )
             pen.setCosmetic(True)
             frame.setPen(pen)
+
+    def _clear_resize_handles(self) -> None:
+        for item in self._resize_handles.values():
+            if item.scene() is self.scene():
+                self.scene().removeItem(item)
+        self._resize_handles.clear()
+
+    @staticmethod
+    def _handle_centers(rect: QRectF) -> dict[str, QPointF]:
+        return {
+            "nw": rect.topLeft(), "n": QPointF(rect.center().x(), rect.top()),
+            "ne": rect.topRight(), "e": QPointF(rect.right(), rect.center().y()),
+            "se": rect.bottomRight(), "s": QPointF(rect.center().x(), rect.bottom()),
+            "sw": rect.bottomLeft(), "w": QPointF(rect.left(), rect.center().y()),
+        }
+
+    def _sync_resize_handles(self) -> None:
+        self._clear_resize_handles()
+        if len(self._selected_object_ids) != 1:
+            return
+        object_id = next(iter(self._selected_object_ids))
+        frame = self._object_frames.get(object_id)
+        if frame is None:
+            return
+        model = self._object_models[object_id]
+        diameter = model.display_diameter_mm if isinstance(model, TextObject) else 3.0
+        diameter = max(1.5, min(4.0, diameter))
+        for name, center in self._handle_centers(frame.rect()).items():
+            handle = QGraphicsRectItem(
+                center.x() - diameter / 2, center.y() - diameter / 2, diameter, diameter
+            )
+            handle.setBrush(QColor(TEXT_COLOR_GROUPS[model.color_group]) if isinstance(model, TextObject) else QColor(model.color))
+            handle.setPen(QPen(QColor("#FFFFFF"), 0.3))
+            handle.setZValue(12)
+            self.scene().addItem(handle)
+            self._resize_handles[name] = handle
+
+    def _handle_at(self, point: QPointF) -> str | None:
+        for name, handle in self._resize_handles.items():
+            if handle.rect().contains(point):
+                return name
+        return None
+
+    def set_object_overflows(self, object_ids) -> None:  # noqa: ANN001
+        for item in self._overflow_items:
+            if item.scene() is self.scene():
+                self.scene().removeItem(item)
+        self._overflow_items.clear()
+        self._overflow_object_ids = set(object_ids)
+        for object_id in sorted(self._overflow_object_ids):
+            frame = self._object_frames.get(object_id)
+            if frame is None:
+                continue
+            model = self._object_models[object_id]
+            diameter = model.display_diameter_mm if isinstance(model, TextObject) else 5.0
+            center = frame.rect().center()
+            radius = diameter / 2
+            circle = QGraphicsEllipseItem(center.x() - radius, center.y() - radius, diameter, diameter)
+            circle.setBrush(QColor("#DC2626"))
+            circle.setPen(QPen(QColor("#991B1B"), 0.35))
+            circle.setZValue(15)
+            self.scene().addItem(circle)
+            self._overflow_items.append(circle)
+            arm = diameter * 0.23
+            for x1, y1, x2, y2 in ((-arm, -arm, arm, arm), (-arm, arm, arm, -arm)):
+                line = QGraphicsLineItem(center.x() + x1, center.y() + y1, center.x() + x2, center.y() + y2)
+                pen = QPen(QColor("#FFFFFF"), max(0.45, diameter * 0.12))
+                pen.setCosmetic(True)
+                line.setPen(pen)
+                line.setZValue(16)
+                self.scene().addItem(line)
+                self._overflow_items.append(line)
 
     def _object_at(self, point: QPointF) -> str | None:
         for object_id, frame in reversed(tuple(self._object_frames.items())):
@@ -359,6 +448,43 @@ class PageCanvas(QGraphicsView):
         )
         for object_id, initial in self._move_initial_rects.items():
             self._object_frames[object_id].setRect(initial.translated(self._move_delta))
+        self._sync_resize_handles()
+
+    def _preview_resize(self, point: QPointF) -> None:
+        if self._resize_initial_rect is None or self._active_resize_handle is None or self._resize_object_id is None:
+            return
+        initial = self._resize_initial_rect
+        handle = self._active_resize_handle
+        left, top, right, bottom = initial.left(), initial.top(), initial.right(), initial.bottom()
+        if len(handle) == 1:
+            if handle == "w": left = max(0.0, min(point.x(), right - 5.0))
+            elif handle == "e": right = min(self.PAGE_WIDTH_MM, max(point.x(), left + 5.0))
+            elif handle == "n": top = max(0.0, min(point.y(), bottom - 5.0))
+            elif handle == "s": bottom = min(self.PAGE_HEIGHT_MM, max(point.y(), top + 5.0))
+        else:
+            anchor_x = right if "w" in handle else left
+            anchor_y = bottom if "n" in handle else top
+            raw_width = abs(point.x() - anchor_x)
+            raw_height = abs(point.y() - anchor_y)
+            scale = max(raw_width / initial.width(), raw_height / initial.height())
+            scale = max(scale, 5.0 / initial.width(), 5.0 / initial.height())
+            max_width = anchor_x if "w" in handle else self.PAGE_WIDTH_MM - anchor_x
+            max_height = anchor_y if "n" in handle else self.PAGE_HEIGHT_MM - anchor_y
+            scale = min(scale, max_width / initial.width(), max_height / initial.height())
+            width, height = initial.width() * scale, initial.height() * scale
+            left, right = (anchor_x - width, anchor_x) if "w" in handle else (anchor_x, anchor_x + width)
+            top, bottom = (anchor_y - height, anchor_y) if "n" in handle else (anchor_y, anchor_y + height)
+        self._object_frames[self._resize_object_id].setRect(QRectF(QPointF(left, top), QPointF(right, bottom)))
+        self._sync_resize_handles()
+
+    def _border_object_at(self, point: QPointF, tolerance: float = 1.5) -> str | None:
+        for object_id, frame in reversed(tuple(self._object_frames.items())):
+            rect = frame.rect()
+            if rect.adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point) and not rect.adjusted(
+                tolerance, tolerance, -tolerance, -tolerance
+            ).contains(point):
+                return object_id
+        return None
 
     def _reset_pointer_operation(self) -> None:
         self._selection_item.hide()
@@ -368,6 +494,9 @@ class PageCanvas(QGraphicsView):
         self._pressed_object_id = None
         self._move_initial_rects.clear()
         self._move_delta = QPointF()
+        self._active_resize_handle = None
+        self._resize_object_id = None
+        self._resize_initial_rect = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.NoDrag:
@@ -376,6 +505,13 @@ class PageCanvas(QGraphicsView):
             self._selection_current = point
             self._selection_additive = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             self._selection_initial_ids = set(self._selected_object_ids)
+            handle = self._handle_at(point)
+            if handle is not None and len(self._selected_object_ids) == 1:
+                self._active_resize_handle = handle
+                self._resize_object_id = next(iter(self._selected_object_ids))
+                self._resize_initial_rect = QRectF(self._object_frames[self._resize_object_id].rect())
+                event.accept()
+                return
             self._pressed_object_id = self._object_at(point)
             if self._pressed_object_id is not None:
                 selected = set(self._selected_object_ids)
@@ -400,6 +536,10 @@ class PageCanvas(QGraphicsView):
         )
         if self._selection_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
             self._selection_current = scene_point
+            if self._active_resize_handle is not None:
+                self._preview_resize(scene_point)
+                event.accept()
+                return
             rect = QRectF(self._selection_origin, self._selection_current).normalized()
             if rect.width() >= 0.5 or rect.height() >= 0.5:
                 if self._move_initial_rects:
@@ -416,15 +556,34 @@ class PageCanvas(QGraphicsView):
                 self._selection_item.show()
             event.accept()
             return
+        hovered = self._border_object_at(scene_point)
+        if hovered != self._hovered_object_id:
+            self._hovered_object_id = hovered
+            self._sync_object_frame_styles()
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: ANN001, N802
         self.cursor_position_changed.emit(None)
+        self._hovered_object_id = None
+        self._sync_object_frame_styles()
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self._selection_origin is not None:
             end = self.mapToScene(event.position().toPoint())
+            if self._active_resize_handle is not None and self._resize_object_id is not None:
+                self._preview_resize(end)
+                object_id = self._resize_object_id
+                resized = QRectF(self._object_frames[object_id].rect())
+                changed = self._resize_initial_rect is not None and resized != self._resize_initial_rect
+                self._reset_pointer_operation()
+                self._sync_resize_handles()
+                if changed:
+                    self.object_resized.emit(
+                        object_id, resized.x(), resized.y(), resized.width(), resized.height()
+                    )
+                event.accept()
+                return
             rect = QRectF(self._selection_origin, end).normalized()
             dragged = rect.width() >= 0.5 or rect.height() >= 0.5
             if dragged and self._move_initial_rects:

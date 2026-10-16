@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRegularExpression, Signal
+from PySide6.QtCore import QSize, QRegularExpression, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QCheckBox,
+    QButtonGroup,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -15,11 +16,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .document import GridObject, PageSettings, TextObject
+from .document import GridObject, PageSettings, TEXT_COLOR_GROUPS, TextObject
 from .i18n import Language, normalize_language, tr
 from .styles import StyleSummary
 
@@ -53,6 +55,7 @@ class PropertiesPanel(QWidget):
         self._object_id: str | None = None
         self._shown_style: StyleSummary | None = None
         self._loading = False
+        self._color_group = 0
         self._labels: dict[str, QLabel] = {}
         self._groups: dict[str, QGroupBox] = {}
         self.stack = QStackedWidget()
@@ -74,15 +77,22 @@ class PropertiesPanel(QWidget):
         form.addRow(label, field)
         self._labels[key] = label
 
-    def _add_group(self, layout: QVBoxLayout, key: str, fields: list[tuple[str, QWidget]]) -> QGroupBox:
+    def _add_group(
+        self,
+        layout: QVBoxLayout,
+        key: str,
+        fields: list[tuple[str, QWidget]],
+        *,
+        columns: int = 2,
+    ) -> QGroupBox:
         group = QGroupBox()
         grid = QGridLayout(group)
         grid.setContentsMargins(8, 10, 8, 8)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(4)
         for index, (label_key, field) in enumerate(fields):
-            row = (index // 2) * 2
-            column = index % 2
+            row = (index // columns) * 2
+            column = index % columns
             label = QLabel()
             label.setBuddy(field)
             grid.addWidget(label, row, column)
@@ -136,6 +146,12 @@ class PropertiesPanel(QWidget):
         self.frame_height_field = _millimetre_spin(0.01, 297)
         self.x_height_field = _millimetre_spin(0.5, 30)
         self.line_pitch_field = _millimetre_spin(0.5, 100)
+        self.character_spacing_field = _millimetre_spin(0, 30)
+        self.rotation_field = QDoubleSpinBox()
+        self.rotation_field.setRange(-180, 180)
+        self.rotation_field.setDecimals(1)
+        self.rotation_field.setSuffix("°")
+        self.display_diameter_field = _millimetre_spin(1, 20)
         self.style_field = QComboBox()
         for style in self._styles:
             if not style.valid:
@@ -148,24 +164,67 @@ class PropertiesPanel(QWidget):
         self.realism_field.setRange(0, 1)
         self.realism_field.setSingleStep(0.05)
         self.realism_field.setDecimals(2)
-        self._add_group(layout, "properties.group.content", [
+        content_group = QGroupBox()
+        self.content_layout = QGridLayout(content_group)
+        self.content_layout.setContentsMargins(8, 10, 8, 8)
+        for column, (key, field) in enumerate((
             ("properties.name", self.name_field),
             ("properties.text", self.text_field),
-        ])
+        )):
+            label = QLabel()
+            label.setBuddy(field)
+            self.content_layout.addWidget(label, 0, column)
+            self.content_layout.addWidget(field, 1, column)
+            self._labels[key] = label
+        diameter_label = QLabel()
+        diameter_label.setBuddy(self.display_diameter_field)
+        self.content_layout.addWidget(diameter_label, 2, 0)
+        self.content_layout.addWidget(self.display_diameter_field, 3, 0)
+        self._labels["properties.display_diameter"] = diameter_label
+        color_label = QLabel()
+        self.content_layout.addWidget(color_label, 4, 0, 1, 2)
+        self._labels["properties.color_group"] = color_label
+        palette = QWidget()
+        palette_layout = QGridLayout(palette)
+        palette_layout.setContentsMargins(0, 0, 0, 0)
+        palette_layout.setSpacing(3)
+        self.color_group_buttons: list[QToolButton] = []
+        self.color_group_button_group = QButtonGroup(self)
+        self.color_group_button_group.setExclusive(True)
+        for index, color in enumerate(TEXT_COLOR_GROUPS):
+            button = QToolButton()
+            button.setCheckable(True)
+            button.setFixedSize(QSize(22, 22))
+            button.setStyleSheet(
+                f"QToolButton {{ background: {color}; border: 1px solid #64748B; }} "
+                "QToolButton:checked { border: 3px solid #F8FAFC; }"
+            )
+            button.setToolTip(f"{index + 1}: {color}")
+            self.color_group_button_group.addButton(button, index)
+            palette_layout.addWidget(button, index // 8, index % 8)
+            self.color_group_buttons.append(button)
+        self.content_layout.addWidget(palette, 5, 0, 1, 2)
+        self.color_group_settings_button = QToolButton()
+        self.color_group_settings_button.setEnabled(False)
+        self.content_layout.addWidget(self.color_group_settings_button, 6, 0, 1, 2)
+        layout.addWidget(content_group)
+        self._groups["properties.group.content"] = content_group
         self._add_group(layout, "properties.group.position", [
-            ("properties.text_origin", self.x_field),
-            ("properties.y", self.y_field),
+            ("properties.text_start_x", self.x_field),
+            ("properties.text_start_y", self.y_field),
         ])
         self._add_group(layout, "properties.group.frame", [
-            ("properties.frame_x", self.frame_x_field),
-            ("properties.frame_y", self.frame_y_field),
-            ("properties.frame_width", self.frame_width_field),
-            ("properties.frame_height", self.frame_height_field),
+            ("properties.text_frame_x", self.frame_x_field),
+            ("properties.text_frame_y", self.frame_y_field),
+            ("properties.text_frame_width", self.frame_width_field),
+            ("properties.text_frame_height", self.frame_height_field),
         ])
         self._add_group(layout, "properties.group.typography", [
             ("properties.x_height", self.x_height_field),
             ("properties.line_pitch", self.line_pitch_field),
-        ])
+            ("properties.character_spacing", self.character_spacing_field),
+            ("properties.rotation", self.rotation_field),
+        ], columns=4)
         self._add_group(layout, "properties.group.style", [
             ("properties.style", self.style_field),
             ("properties.realism", self.realism_field),
@@ -177,12 +236,18 @@ class PropertiesPanel(QWidget):
         for field in (
             self.x_field, self.y_field, self.frame_x_field, self.frame_y_field,
             self.frame_width_field, self.frame_height_field, self.x_height_field,
-            self.line_pitch_field, self.realism_field,
+            self.line_pitch_field, self.character_spacing_field, self.rotation_field,
+            self.display_diameter_field, self.realism_field,
         ):
             field.valueChanged.connect(self._emit_text)
         self.seed_field.editingFinished.connect(self._emit_text)
         self.style_field.currentIndexChanged.connect(self._emit_text)
+        self.color_group_button_group.idClicked.connect(self._set_color_group)
         return widget
+
+    def _set_color_group(self, index: int) -> None:
+        self._color_group = index
+        self._emit_text()
 
     def _build_resource_widget(self) -> QWidget:
         widget = QWidget()
@@ -257,6 +322,7 @@ class PropertiesPanel(QWidget):
             group.setTitle(tr(self.language, key))
         for index, value in enumerate(("solid", "dashed", "dash_dot")):
             self.grid_line_style_field.setItemText(index, tr(self.language, f"properties.line_style.{value}"))
+        self.color_group_settings_button.setText(tr(self.language, "properties.color_group_settings"))
         if self._shown_style is not None:
             self._show_style_status(self._shown_style)
 
@@ -275,14 +341,19 @@ class PropertiesPanel(QWidget):
         self._shown_style = None
         self.name_field.setText(item.name)
         self.text_field.setPlainText(item.text)
-        self.x_field.setValue(item.x_mm)
-        self.y_field.setValue(item.y_mm)
+        self.x_field.setValue(item.x_mm - item.frame_x_mm)
+        self.y_field.setValue(item.y_mm - item.frame_y_mm)
         self.frame_x_field.setValue(item.frame_x_mm)
         self.frame_y_field.setValue(item.frame_y_mm)
         self.frame_width_field.setValue(item.frame_width_mm)
         self.frame_height_field.setValue(item.frame_height_mm)
         self.x_height_field.setValue(item.x_height_mm)
         self.line_pitch_field.setValue(item.line_pitch_mm)
+        self.character_spacing_field.setValue(item.character_spacing_mm)
+        self.rotation_field.setValue(item.rotation_deg)
+        self.display_diameter_field.setValue(item.display_diameter_mm)
+        self._color_group = item.color_group
+        self.color_group_buttons[item.color_group].setChecked(True)
         index = self.style_field.findData(f"{item.style_id}\0{item.style_revision}")
         if index < 0:
             self.style_field.addItem(
@@ -373,14 +444,18 @@ class PropertiesPanel(QWidget):
         return {
             "name": self.name_field.text().strip() or "Text",
             "text": self.text_field.toPlainText(),
-            "x_mm": self.x_field.value(),
-            "y_mm": self.y_field.value(),
+            "x_mm": self.frame_x_field.value() + self.x_field.value(),
+            "y_mm": self.frame_y_field.value() + self.y_field.value(),
             "frame_x_mm": self.frame_x_field.value(),
             "frame_y_mm": self.frame_y_field.value(),
             "frame_width_mm": self.frame_width_field.value(),
             "frame_height_mm": self.frame_height_field.value(),
             "x_height_mm": self.x_height_field.value(),
             "line_pitch_mm": self.line_pitch_field.value(),
+            "character_spacing_mm": self.character_spacing_field.value(),
+            "rotation_deg": self.rotation_field.value(),
+            "display_diameter_mm": self.display_diameter_field.value(),
+            "color_group": self._color_group,
             "style_id": style_id,
             "style_revision": revision,
             "seed": int(seed_text),

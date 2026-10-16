@@ -14,7 +14,7 @@ from handwriting_plotter.application.service import GenerationResult
 from handwriting_plotter.domain.models import canonical_hash
 from handwriting_plotter.layout.pages import PageSpec
 
-from .document import ProjectSnapshot, TextObject
+from .document import ProjectSnapshot, TEXT_COLOR_GROUPS, TextObject
 
 
 def composition_request(snapshot: ProjectSnapshot) -> CompositionRequest:
@@ -36,8 +36,15 @@ def composition_request(snapshot: ProjectSnapshot) -> CompositionRequest:
             text=item.text,
             x_mm=item.x_mm,
             y_mm=item.y_mm,
+            frame_x_mm=item.frame_x_mm,
+            frame_y_mm=item.frame_y_mm,
+            frame_width_mm=item.frame_width_mm,
+            frame_height_mm=item.frame_height_mm,
             x_height_mm=item.x_height_mm,
             line_pitch_mm=item.line_pitch_mm,
+            character_spacing_mm=item.character_spacing_mm,
+            rotation_deg=item.rotation_deg,
+            stroke_color=TEXT_COLOR_GROUPS[item.color_group],
             style_id=item.style_id,
             style_revision=item.style_revision,
             seed=item.seed,

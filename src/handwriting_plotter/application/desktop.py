@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any
@@ -11,8 +12,9 @@ from handwriting_plotter.adapters.gcode.virtual_xyz import emit_virtual_gcode
 from handwriting_plotter.adapters.svg.preview import write_preview_svg
 from handwriting_plotter.adapters.svg.writer import write_production_svg
 from handwriting_plotter.domain.models import canonical_hash, canonical_json_bytes
-from handwriting_plotter.geometry.bounds import Bounds
-from handwriting_plotter.geometry.curves import Stroke
+from handwriting_plotter.geometry.bounds import Bounds, curve_bounds
+from handwriting_plotter.geometry.curves import Point2, Stroke
+from handwriting_plotter.geometry.transforms import Affine2, transform_segment
 from handwriting_plotter.layout.lines import PageLine, PlacedExecutionGroup, PlacedWord
 from handwriting_plotter.layout.pages import Page, PageDocument, PageSpec, layout_document
 from handwriting_plotter.motion.limits import validate_motion_limits
@@ -46,6 +48,13 @@ class CompositionTextBlock:
     style_revision: str
     seed: int
     realism: float
+    frame_x_mm: float | None = None
+    frame_y_mm: float | None = None
+    frame_width_mm: float = 60.0
+    frame_height_mm: float = 30.0
+    character_spacing_mm: float = 0.0
+    rotation_deg: float = 0.0
+    stroke_color: str = "black"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +83,67 @@ def _namespace_line(line: PageLine, object_id: str) -> PageLine:
             groups.append(PlacedExecutionGroup(f"{object_id}/{group.group_id}", strokes, refs))
         words.append(PlacedWord(word.shape, word.origin_x_mm, tuple(groups)))
     return PageLine(f"{object_id}/{line.line_id}", line.baseline_y_mm, tuple(words), line.ink_bounds)
+
+
+def _rotation(angle_deg: float, center_x: float, center_y: float) -> Affine2:
+    angle = math.radians(angle_deg)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    return Affine2(
+        cosine,
+        sine,
+        -sine,
+        cosine,
+        center_x - cosine * center_x + sine * center_y,
+        center_y - sine * center_x - cosine * center_y,
+        "PageFrame",
+        "PageFrame",
+    )
+
+
+def _rotate_line(
+    line: PageLine,
+    angle_deg: float,
+    center_x: float,
+    center_y: float,
+    pen_width_mm: float,
+) -> PageLine:
+    if abs(angle_deg) <= 1e-12:
+        return line
+    transform = _rotation(angle_deg, center_x, center_y)
+    words: list[PlacedWord] = []
+    segment_bounds: list[Bounds] = []
+    for word in line.words:
+        groups: list[PlacedExecutionGroup] = []
+        for group in word.groups:
+            strokes: list[Stroke] = []
+            for stroke in group.strokes:
+                segments = tuple(transform_segment(segment, transform) for segment in stroke.segments)
+                segment_bounds.extend(curve_bounds(segment) for segment in segments)
+                strokes.append(Stroke(
+                    stroke.id,
+                    segments,
+                    stroke.source_refs,
+                    stroke.role,
+                    stroke.direction_provenance,
+                ))
+            groups.append(PlacedExecutionGroup(group.group_id, tuple(strokes), group.source_refs))
+        origin = transform.apply(Point2(word.origin_x_mm, line.baseline_y_mm))
+        words.append(PlacedWord(word.shape, origin.x, tuple(groups)))
+    bounds = segment_bounds[0]
+    for part in segment_bounds[1:]:
+        bounds = bounds.union(part)
+    bounds = bounds.expanded(pen_width_mm / 2)
+    baseline = transform.apply(Point2(center_x, line.baseline_y_mm)).y
+    return PageLine(line.line_id, baseline, tuple(words), bounds)
+
+
+def _inside(inner: Bounds, outer: Bounds, tolerance: float = 1e-9) -> bool:
+    return (
+        inner.min_x >= outer.min_x - tolerance
+        and inner.min_y >= outer.min_y - tolerance
+        and inner.max_x <= outer.max_x + tolerance
+        and inner.max_y <= outer.max_y + tolerance
+    )
 
 
 def _overlap(first: Bounds, second: Bounds) -> bool:
@@ -114,7 +184,9 @@ class DesktopApplicationAdapter:
         style_records: dict[tuple[str, str], dict[str, Any]] = {}
         loaded_styles: dict[tuple[str, str], Any] = {}
         object_bounds: list[tuple[str, Bounds]] = []
+        overflow_object_ids: list[str] = []
         diagnostics: list[str] = []
+        stroke_colors = {block.object_id: block.stroke_color for block in request.blocks}
         files: dict[str, bytes] = {
             "input.txt": "\n\n".join(block.text for block in request.blocks).encode("utf-8"),
             "request.json": canonical_json_bytes(request_payload),
@@ -135,30 +207,6 @@ class DesktopApplicationAdapter:
             if not coverage.passed:
                 missing = ",".join(f"{item.key}@{item.original_spans}" for item in coverage.missing)
                 raise ValueError(f"MISSING_GLYPH:{block.name}:{missing}")
-            block_spec = PageSpec(
-                width_mm=page_spec.width_mm,
-                height_mm=page_spec.height_mm,
-                margin_left_mm=block.x_mm,
-                margin_right_mm=page_spec.margin_right_mm,
-                margin_top_mm=block.y_mm,
-                margin_bottom_mm=page_spec.margin_bottom_mm,
-                x_height_mm=block.x_height_mm,
-                line_pitch_mm=block.line_pitch_mm,
-                paragraph_gap_mm=page_spec.paragraph_gap_mm,
-                pen_width_mm=page_spec.pen_width_mm,
-            )
-            laid_out = layout_document(document, style, seed=block.seed, page_spec=block_spec,
-                                       variation=VariationSpec(block.realism))
-            if len(laid_out.pages) != 1:
-                raise ValueError(f"OBJECT_REQUIRES_ONE_PAGE:{block.name}:{len(laid_out.pages)}")
-            page = laid_out.pages[0]
-            lines.extend(_namespace_line(line, block.object_id) for line in page.lines)
-            coverage_count += len(laid_out.source_coverage)
-            if page.ink_bounds is not None:
-                for other_name, other in object_bounds:
-                    if _overlap(page.ink_bounds, other):
-                        diagnostics.append(f"OBJECT_BOUNDS_OVERLAP:{other_name}:{block.name}")
-                object_bounds.append((block.name, page.ink_bounds))
             key = (block.style_id, block.style_revision)
             style_records[key] = {
                 "style_id": block.style_id,
@@ -170,13 +218,90 @@ class DesktopApplicationAdapter:
             }
             manifest_name = f"styles/{block.style_id}@{block.style_revision}.manifest.json"
             files[manifest_name] = canonical_json_bytes(style.manifest.model_dump(mode="json"))
-        if not lines:
+            frame_x = block.x_mm if block.frame_x_mm is None else block.frame_x_mm
+            frame_y = block.y_mm if block.frame_y_mm is None else block.frame_y_mm
+            frame = Bounds(
+                frame_x,
+                frame_y,
+                frame_x + block.frame_width_mm,
+                frame_y + block.frame_height_mm,
+            )
+            if not (
+                frame.min_x <= block.x_mm < frame.max_x
+                and frame.min_y <= block.y_mm < frame.max_y
+            ):
+                diagnostics.append(f"OBJECT_FRAME_OVERFLOW:{block.object_id}")
+                overflow_object_ids.append(block.object_id)
+                continue
+            block_spec = PageSpec(
+                width_mm=page_spec.width_mm,
+                height_mm=page_spec.height_mm,
+                margin_left_mm=block.x_mm,
+                margin_right_mm=page_spec.width_mm - frame.max_x,
+                margin_top_mm=block.y_mm,
+                margin_bottom_mm=page_spec.height_mm - frame.max_y,
+                x_height_mm=block.x_height_mm,
+                line_pitch_mm=block.line_pitch_mm,
+                character_spacing_mm=block.character_spacing_mm,
+                paragraph_gap_mm=page_spec.paragraph_gap_mm,
+                pen_width_mm=page_spec.pen_width_mm,
+            )
+            try:
+                laid_out = layout_document(
+                    document,
+                    style,
+                    seed=block.seed,
+                    page_spec=block_spec,
+                    variation=VariationSpec(block.realism),
+                )
+            except ValueError as exc:
+                if str(exc) not in {
+                    "GLYPH_TOO_WIDE",
+                    "LINE_TOO_TALL",
+                    "LAYOUT_OUT_OF_BOUNDS",
+                    "NONBREAKABLE_OVERFLOW",
+                }:
+                    raise
+                diagnostics.append(f"OBJECT_FRAME_OVERFLOW:{block.object_id}")
+                overflow_object_ids.append(block.object_id)
+                continue
+            if len(laid_out.pages) != 1:
+                diagnostics.append(f"OBJECT_FRAME_OVERFLOW:{block.object_id}")
+                overflow_object_ids.append(block.object_id)
+                continue
+            block_page = laid_out.pages[0]
+            prepared = tuple(
+                _rotate_line(
+                    _namespace_line(line, block.object_id),
+                    block.rotation_deg,
+                    frame.min_x + block.frame_width_mm / 2,
+                    frame.min_y + block.frame_height_mm / 2,
+                    page_spec.pen_width_mm,
+                )
+                for line in block_page.lines
+            )
+            block_bounds: Bounds | None = None
+            for line in prepared:
+                block_bounds = line.ink_bounds if block_bounds is None else block_bounds.union(line.ink_bounds)
+            if block_bounds is not None and not _inside(block_bounds, frame):
+                diagnostics.append(f"OBJECT_FRAME_OVERFLOW:{block.object_id}")
+                overflow_object_ids.append(block.object_id)
+                continue
+            lines.extend(prepared)
+            coverage_count += len(laid_out.source_coverage)
+            if block_bounds is not None:
+                for other_name, other in object_bounds:
+                    if _overlap(block_bounds, other):
+                        diagnostics.append(f"OBJECT_BOUNDS_OVERLAP:{other_name}:{block.name}")
+                object_bounds.append((block.name, block_bounds))
+        if not lines and not overflow_object_ids:
             raise ValueError("NO_RENDERABLE_TEXT")
         total_bounds: Bounds | None = None
         for line in lines:
             total_bounds = line.ink_bounds if total_bounds is None else total_bounds.union(line.ink_bounds)
         page = Page(0, "page-0000", page_spec, tuple(lines), total_bounds)
-        page_document = PageDocument(document_id, (page,), tuple(), True, tuple(diagnostics))
+        complete = not overflow_object_ids
+        page_document = PageDocument(document_id, (page,), tuple(), complete, tuple(diagnostics))
         pen_plan = compile_page(page, document_id)
         logical = simulate_pen_plan(pen_plan)
         registration = virtual_registration(page.page_id, profile)
@@ -191,13 +316,13 @@ class DesktopApplicationAdapter:
             raise ValueError("GCODE_ROUNDTRIP_FAILED:" + ",".join(comparison))
         files["page-0001.plan.json"] = canonical_json_bytes(primitive(pen_plan))
         files["page-0001.motion.json"] = canonical_json_bytes(primitive(motion))
-        files["page-0001.svg"] = write_production_svg(page, pen_plan)
-        files["page-0001.preview.svg"] = write_preview_svg(page, pen_plan)
+        files["page-0001.svg"] = write_production_svg(page, pen_plan, stroke_colors)
+        files["page-0001.preview.svg"] = write_preview_svg(page, pen_plan, stroke_colors)
         files["page-0001.gcode"] = command.content
         styles = [style_records[key] for key in sorted(style_records)]
         report = {
             "document_id": page_document.document_id,
-            "complete": True,
+            "complete": complete,
             "page_count": 1,
             "source_coverage_count": coverage_count,
             "styles": styles,
@@ -209,7 +334,7 @@ class DesktopApplicationAdapter:
             },
             "pages": [{
                 "page_id": page.page_id,
-                "empty": False,
+                "empty": not lines,
                 "logical": primitive(logical),
                 "motion": {
                     "segment_count": motion.approximation_report.segment_count,
@@ -221,6 +346,7 @@ class DesktopApplicationAdapter:
                 "gcode_roundtrip_passed": True,
             }],
             "diagnostics": diagnostics,
+            "overflow_object_ids": overflow_object_ids,
             "blockers": ["BLK-STYLE-001"] if any(item["test_only"] for item in styles) else [],
         }
         files["report.json"] = canonical_json_bytes(report)
@@ -230,7 +356,7 @@ class DesktopApplicationAdapter:
         ]
         files["job-manifest.json"] = canonical_json_bytes({
             "format": "hp-job-bundle", "schema_version": "1.0", "document_id": document_id,
-            "complete": True, "engine_version": ENGINE_VERSION, "style_revision_hashes":
+            "complete": complete, "engine_version": ENGINE_VERSION, "style_revision_hashes":
             [item["revision_hash"] for item in styles], "simulation_only": True,
             "hardware_verified": False, "artifacts": artifacts,
         })
