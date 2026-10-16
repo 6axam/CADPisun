@@ -24,6 +24,14 @@ from handwriting_plotter.domain.models import (
 )
 
 
+TEXT_COLOR_GROUPS: tuple[str, ...] = (
+    "#1F2937", "#DC2626", "#EA580C", "#CA8A04",
+    "#16A34A", "#0D9488", "#0891B2", "#2563EB",
+    "#4F46E5", "#7C3AED", "#C026D3", "#DB2777",
+    "#6B7280", "#92400E", "#65A30D", "#0F766E",
+)
+
+
 class PageSettings(StrictModel):
     width_mm: float = Field(default=210.0, gt=0)
     height_mm: float = Field(default=297.0, gt=0)

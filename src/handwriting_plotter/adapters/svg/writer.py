@@ -42,7 +42,18 @@ def draw_path(operation: Draw) -> str:
     return " ".join(parts)
 
 
-def write_production_svg(page: Page, plan: PenPlan) -> bytes:
+def operation_color(operation: Draw, stroke_colors: dict[str, str] | None) -> str:
+    if not stroke_colors or not operation.stroke_ids:
+        return "black"
+    object_id = operation.stroke_ids[0].split("/", 1)[0]
+    return stroke_colors.get(object_id, "black")
+
+
+def write_production_svg(
+    page: Page,
+    plan: PenPlan,
+    stroke_colors: dict[str, str] | None = None,
+) -> bytes:
     validation = validate_pen_plan(plan)
     if not validation.passed or plan.page_id != page.page_id:
         raise ValueError("INVALID_PEN_PLAN")
@@ -64,7 +75,7 @@ def write_production_svg(page: Page, plan: PenPlan) -> bytes:
                 {
                     "d": draw_path(operation),
                     "fill": "none",
-                    "stroke": "black",
+                    "stroke": operation_color(operation, stroke_colors),
                     "stroke-width": decimal(page.spec.pen_width_mm),
                     "stroke-linecap": "round",
                     "stroke-linejoin": "round",

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
 from handwriting_plotter.gui.document import GridObject, ProjectSnapshot, TextObject
+from handwriting_plotter.gui.document import TEXT_COLOR_GROUPS
 from handwriting_plotter.geometry.bounds import curve_bounds
 from handwriting_plotter.geometry.curves import Cubic, Line, Point2, Quadratic
 from handwriting_plotter.gui.theme import COLORS
@@ -159,6 +160,19 @@ def test_character_spacing_and_rotation_change_geometry_deterministically() -> N
     assert rotated.files == GuiBackend().build(
         ProjectSnapshot(project_id="transform-project", objects=(rotated_item,))
     ).files
+
+
+def test_color_group_colors_production_and_diagnostic_svg() -> None:
+    item = TextObject(
+        object_id="colored", name="Colored", text="Alpha",
+        frame_x_mm=15, frame_y_mm=15, frame_width_mm=80, frame_height_mm=40,
+        color_group=6,
+    )
+    result = GuiBackend().build(ProjectSnapshot(project_id="colored-project", objects=(item,)))
+    expected = TEXT_COLOR_GROUPS[6].encode("ascii")
+
+    assert expected in result.files["page-0001.svg"]
+    assert expected in result.files["page-0001.preview.svg"]
 
 
 def test_layout_grid_is_strictly_excluded_from_all_generated_artifacts() -> None:

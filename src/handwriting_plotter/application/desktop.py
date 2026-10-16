@@ -50,7 +50,7 @@ class CompositionTextBlock:
     line_pitch_mm: float
     character_spacing_mm: float
     rotation_deg: float
-    color_group: int
+    stroke_color: str
     style_id: str
     style_revision: str
     seed: int
@@ -186,6 +186,7 @@ class DesktopApplicationAdapter:
         object_bounds: list[tuple[str, Bounds]] = []
         overflow_object_ids: list[str] = []
         diagnostics: list[str] = []
+        stroke_colors = {block.object_id: block.stroke_color for block in request.blocks}
         files: dict[str, bytes] = {
             "input.txt": "\n\n".join(block.text for block in request.blocks).encode("utf-8"),
             "request.json": canonical_json_bytes(request_payload),
@@ -313,8 +314,8 @@ class DesktopApplicationAdapter:
             raise ValueError("GCODE_ROUNDTRIP_FAILED:" + ",".join(comparison))
         files["page-0001.plan.json"] = canonical_json_bytes(primitive(pen_plan))
         files["page-0001.motion.json"] = canonical_json_bytes(primitive(motion))
-        files["page-0001.svg"] = write_production_svg(page, pen_plan)
-        files["page-0001.preview.svg"] = write_preview_svg(page, pen_plan)
+        files["page-0001.svg"] = write_production_svg(page, pen_plan, stroke_colors)
+        files["page-0001.preview.svg"] = write_preview_svg(page, pen_plan, stroke_colors)
         files["page-0001.gcode"] = command.content
         styles = [style_records[key] for key in sorted(style_records)]
         report = {

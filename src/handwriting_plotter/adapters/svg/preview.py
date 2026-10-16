@@ -7,10 +7,14 @@ from xml.etree import ElementTree as ET
 from handwriting_plotter.layout.pages import Page
 from handwriting_plotter.strokes.compile import Draw, PenPlan, TravelTo
 
-from .writer import SVG_NS, decimal, draw_path
+from .writer import SVG_NS, decimal, draw_path, operation_color
 
 
-def write_preview_svg(page: Page, plan: PenPlan) -> bytes:
+def write_preview_svg(
+    page: Page,
+    plan: PenPlan,
+    stroke_colors: dict[str, str] | None = None,
+) -> bytes:
     root = ET.Element(
         f"{{{SVG_NS}}}svg",
         {
@@ -34,7 +38,8 @@ def write_preview_svg(page: Page, plan: PenPlan) -> bytes:
         elif isinstance(operation, Draw):
             draw_number += 1
             ET.SubElement(root, f"{{{SVG_NS}}}path", {
-                "d": draw_path(operation), "fill": "none", "stroke": "black",
+                "d": draw_path(operation), "fill": "none",
+                "stroke": operation_color(operation, stroke_colors),
                 "stroke-width": decimal(page.spec.pen_width_mm), "stroke-linecap": "round", "stroke-linejoin": "round",
                 "data-role": "draw",
             })
