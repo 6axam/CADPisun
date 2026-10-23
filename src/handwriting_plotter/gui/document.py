@@ -118,7 +118,43 @@ class GridObject(StrictModel):
         return self
 
 
-ProjectObject = Annotated[TextObject | GridObject, Field(discriminator="kind")]
+class ArtworkObject(StrictModel):
+    """Portable visual reference; never converted to plotter strokes implicitly."""
+
+    kind: Literal["artwork"] = "artwork"
+    object_id: str = Field(min_length=1)
+    name: str = Field(default="Artwork", min_length=1, max_length=120)
+    visible: bool = True
+    media_type: Literal[
+        "image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/bmp", "image/gif"
+    ]
+    data_base64: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    x_mm: float = Field(default=15.0, ge=0, lt=210)
+    y_mm: float = Field(default=15.0, ge=0, lt=297)
+    width_mm: float = Field(default=80.0, gt=0, le=210)
+    height_mm: float = Field(default=80.0, gt=0, le=297)
+    opacity: float = Field(default=0.7, ge=0.05, le=1.0)
+
+    @model_validator(mode="after")
+    def artwork_is_valid(self) -> "ArtworkObject":
+        try:
+            raw = base64.b64decode(self.data_base64, validate=True)
+        except ValueError as exc:
+            raise ValueError("invalid artwork base64") from exc
+        if sha256(raw).hexdigest() != self.sha256:
+            raise ValueError("artwork SHA-256 mismatch")
+        if self.x_mm + self.width_mm > 210:
+            raise ValueError("artwork exceeds page width")
+        if self.y_mm + self.height_mm > 297:
+            raise ValueError("artwork exceeds page height")
+        return self
+
+    def content(self) -> bytes:
+        return base64.b64decode(self.data_base64, validate=True)
+
+
+ProjectObject = Annotated[TextObject | GridObject | ArtworkObject, Field(discriminator="kind")]
 
 
 class DisplaySettings(StrictModel):
@@ -128,7 +164,7 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.4"] = "1.4"
+    schema_version: Literal["1.5"] = "1.5"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
@@ -247,10 +283,10 @@ def load_project_file(path: Path) -> LoadedProject:
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
     version = data.get("schema_version")
-    if version not in {"1.0", "1.1", "1.2", "1.3", "1.4"}:
+    if version not in {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
     cache_data = data.pop("generation_cache", None)
-    if version in {"1.0", "1.1", "1.2", "1.3"}:
+    if version in {"1.0", "1.1", "1.2", "1.3", "1.4"}:
         migrated_objects = []
         for item in data.get("objects", []):
             migrated = dict(item)
@@ -267,7 +303,7 @@ def load_project_file(path: Path) -> LoadedProject:
                 migrated.setdefault("color_group", 0)
             migrated_objects.append(migrated)
         data["objects"] = migrated_objects
-        data["schema_version"] = "1.4"
+        data["schema_version"] = "1.5"
     snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
     if cache_data is None:
         return LoadedProject(snapshot)
@@ -419,6 +455,15 @@ class DocumentController(QObject):
         self.apply(self.snapshot.model_copy(update={"objects": self.snapshot.objects + (item,)}), "Add grid object")
         return item
 
+    def add_artwork_object(self, item: ArtworkObject) -> ArtworkObject:
+        if any(existing.object_id == item.object_id for existing in self.snapshot.objects):
+            raise ValueError("duplicate artwork object id")
+        self.apply(
+            self.snapshot.model_copy(update={"objects": self.snapshot.objects + (item,)}),
+            "Import artwork",
+        )
+        return item
+
     def remove_text_object(self, object_id: str) -> None:
         self.remove_objects({object_id})
 
@@ -447,6 +492,11 @@ class DocumentController(QObject):
         if not any(isinstance(item, GridObject) and item.object_id == object_id for item in self.snapshot.objects):
             raise KeyError(object_id)
         self._update_object(object_id, changes, "Edit grid object")
+
+    def update_artwork_object(self, object_id: str, **changes) -> None:  # noqa: ANN003
+        if not any(isinstance(item, ArtworkObject) and item.object_id == object_id for item in self.snapshot.objects):
+            raise KeyError(object_id)
+        self._update_object(object_id, changes, "Edit artwork")
 
     def _update_object(
         self,

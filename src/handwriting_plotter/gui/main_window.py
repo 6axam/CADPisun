@@ -11,17 +11,16 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
-    QGridLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QScrollArea,
     QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,8 +29,10 @@ from handwriting_plotter.version import __version__
 from handwriting_plotter.application.resources import style_root
 
 from .backend import GuiBackend, generation_source_hash
+from .artwork import import_artwork
 from .canvas import PageCanvas
 from .document import (
+    ArtworkObject,
     DocumentController,
     GridObject,
     ProjectSnapshot,
@@ -40,12 +41,15 @@ from .document import (
     load_project_file,
     save_project,
 )
-from .exporting import export_artifact
+from .dialogs import ControlsDialog, ProgramSettingsDialog, ShortcutBinding
+from .exporting import export_artifact, export_page_png
 from .i18n import Language, normalize_language, tr
+from .mode_workspaces import ArtifactModeWorkspace
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .studio import HandwritingStudio, handwriting_data_root
 from .theme import COLORS
+from .tool_panels import ResponsiveActionPanel
 from .workers import GenerationWorker
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
@@ -85,6 +89,7 @@ class MainWindow(QMainWindow):
         self._canvas_objects_signature: tuple | None = None
         self._margin_signature: tuple[float, float, float, float] | None = None
         self._document_dock_visibility: dict[str, bool] = {}
+        self._workspace = "document"
         self._build_canvas()
         self._build_docks()
         self._build_actions()
@@ -105,10 +110,14 @@ class MainWindow(QMainWindow):
 
     def _build_canvas(self) -> None:
         self.canvas = PageCanvas(self)
+        self.preview_workspace = ArtifactModeWorkspace("preview", self)
+        self.execution_workspace = ArtifactModeWorkspace("execution", self)
         self.studio = HandwritingStudio(self.user_data_root, language=self.language, parent=self)
         self.workspace_stack = QStackedWidget(self)
         self.workspace_stack.setObjectName("workspace-stack")
         self.workspace_stack.addWidget(self.canvas)
+        self.workspace_stack.addWidget(self.preview_workspace)
+        self.workspace_stack.addWidget(self.execution_workspace)
         self.workspace_stack.addWidget(self.studio)
         self.studio.style_published.connect(self._style_published)
         self.setCentralWidget(self.workspace_stack)
@@ -131,10 +140,20 @@ class MainWindow(QMainWindow):
         self.project_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         project_layout.addWidget(self.project_tree)
         self.project_dock = self._dock(self._t("dock.project"), "project-dock", project_panel)
+        self.project_dock.setMinimumWidth(200)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
 
         self.properties = PropertiesPanel(self.styles, language=self.language)
-        self.properties_dock = self._dock(self._t("dock.properties"), "properties-dock", self.properties)
+        self.properties_scroll = QScrollArea()
+        self.properties_scroll.setObjectName("properties-scroll")
+        self.properties_scroll.setWidgetResizable(True)
+        self.properties_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.properties_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.properties_scroll.setWidget(self.properties)
+        self.properties_dock = self._dock(
+            self._t("dock.properties"), "properties-dock", self.properties_scroll
+        )
+        self.properties_dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.properties_dock)
 
         self.console = self._read_only_log("Application events will appear here.")
@@ -147,6 +166,8 @@ class MainWindow(QMainWindow):
         self.output_tabs.addTab(self.toolpath, self._t("tab.toolpath"))
         self.output_dock = self._dock(self._t("dock.output"), "output-dock", self.output_tabs)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
         self.resizeDocks([self.project_dock, self.properties_dock], [275, 340], Qt.Orientation.Horizontal)
         self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
 
@@ -165,24 +186,24 @@ class MainWindow(QMainWindow):
         self.document_workspace_action.setChecked(True)
         self.object_mode_action = self.document_workspace_action
         self.preview_mode_action = self._action(
-            self._t("action.mode.preview"), lambda: None
+            self._t("action.mode.preview"), lambda: self.set_workspace("preview")
         )
         self.execution_mode_action = self._action(
-            self._t("action.mode.execution"), lambda: None
+            self._t("action.mode.execution"), lambda: self.set_workspace("execution")
         )
-        for action, tooltip_key in (
-            (self.preview_mode_action, "action.mode.preview_planned"),
-            (self.execution_mode_action, "action.mode.execution_planned"),
-        ):
+        for action in (self.preview_mode_action, self.execution_mode_action):
             action.setCheckable(True)
-            action.setEnabled(False)
-            action.setProperty("implementationStatus", "planned")
-            action.setToolTip(self._t(tooltip_key))
+            action.setProperty("implementationStatus", "implemented")
             self.workspace_group.addAction(action)
+        self.preview_mode_action.setToolTip(self._t("action.mode.preview_tip"))
+        self.execution_mode_action.setToolTip(self._t("action.mode.execution_tip"))
         self.preview_mode_action.setData("preview")
         self.execution_mode_action.setData("execution")
         self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
         self.open_action = self._action(self._t("action.open"), self.open_project, QKeySequence.StandardKey.Open)
+        self.import_artwork_action = self._action(
+            self._t("action.import_artwork"), self.import_artwork_file, QKeySequence("Ctrl+Shift+I")
+        )
         self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
         self.save_as_action = self._action(self._t("action.save_as"), self.save_project_as, QKeySequence.StandardKey.SaveAs)
         self.exit_action = self._action(self._t("action.exit"), self.close, QKeySequence.StandardKey.Quit)
@@ -201,91 +222,84 @@ class MainWindow(QMainWindow):
         self.markers_action.setCheckable(True)
         self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
         self.export_preview_action = self._action(self._t("action.export_preview"), lambda: self._export("page-0001.preview.svg"))
+        self.export_png_action = self._action(self._t("action.export_png"), lambda: self._export("page-0001.png"))
         self.export_gcode_action = self._action(self._t("action.export_gcode"), lambda: self._export("page-0001.gcode"))
         self.export_report_action = self._action(self._t("action.export_report"), lambda: self._export("report.json"))
         self.export_actions = (
-            self.export_svg_action, self.export_preview_action, self.export_gcode_action, self.export_report_action,
+            self.export_svg_action, self.export_preview_action, self.export_png_action,
+            self.export_gcode_action, self.export_report_action,
         )
+        self._configure_shortcuts()
         self._update_export_actions()
 
-    def _symbol_button(self, symbol: str, action: QAction, object_name: str) -> QToolButton:
-        button = QToolButton()
-        button.setObjectName(object_name)
-        button.setText(symbol)
-        button.setFixedSize(38, 38)
-        button.setCheckable(action.isCheckable())
-        button.setStyleSheet(
-            "QToolButton { border: 1px solid #343943; border-radius: 6px; "
-            "background: #262A31; font-size: 16px; font-weight: 600; padding: 0; }"
-            "QToolButton:hover { border-color: #64A0FF; background: #303640; }"
-            "QToolButton:checked { border-color: #4B8DF8; background: #294F86; }"
-            "QToolButton:disabled { color: #676E79; background: #202329; }"
-        )
-
-        def sync_action() -> None:
-            label = action.text().replace("&", "")
-            button.setAccessibleName(label)
-            button.setToolTip(action.toolTip() or label)
-            button.setEnabled(action.isEnabled())
-            button.setChecked(action.isChecked())
-
-        button.clicked.connect(lambda _checked=False: action.trigger())
-        action.changed.connect(sync_action)
-        sync_action()
-        return button
-
     def _build_tool_docks(self) -> None:
-        tools_panel = QWidget()
-        tools_layout = QGridLayout(tools_panel)
-        tools_layout.setContentsMargins(6, 6, 6, 6)
-        tools_layout.setSpacing(5)
-        specifications = (
+        project_specifications = (
             ("◇", self.new_action, "tool-new"),
             ("↥", self.open_action, "tool-open"),
+            ("▧", self.import_artwork_action, "tool-import-artwork"),
             ("▣", self.save_action, "tool-save"),
+            ("▶", self.generate_action, "tool-generate"),
+        )
+        editing_specifications = (
+            ("↶", self.undo_action, "tool-undo"),
+            ("↷", self.redo_action, "tool-redo"),
             ("T+", self.add_text_action, "tool-add-text"),
             ("▦", self.add_grid_action, "tool-add-grid"),
             ("⌫", self.delete_action, "tool-delete"),
-            ("▶", self.generate_action, "tool-generate"),
+        )
+        view_specifications = (
             ("⛶", self.fit_page_action, "tool-fit-page"),
             ("↝", self.travel_action, "tool-travel"),
             ("●", self.markers_action, "tool-markers"),
         )
-        self.tool_buttons = []
-        for index, (symbol, action, name) in enumerate(specifications):
-            button = self._symbol_button(symbol, action, name)
-            tools_layout.addWidget(button, index // 5, index % 5)
-            self.tool_buttons.append(button)
-        self.add_text_button = self.tool_buttons[3]
-        self.add_grid_button = self.tool_buttons[4]
-        self.remove_text_button = self.tool_buttons[5]
-        tools_layout.setRowStretch(2, 1)
-        self.tools_dock = self._dock(self._t("dock.tools"), "tools-dock", tools_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.tools_dock)
-        self.splitDockWidget(self.project_dock, self.tools_dock, Qt.Orientation.Vertical)
-        self.resizeDocks([self.project_dock, self.tools_dock], [620, 150], Qt.Orientation.Vertical)
+        self.project_tools_panel = ResponsiveActionPanel(project_specifications)
+        self.editing_tools_panel = ResponsiveActionPanel(editing_specifications)
+        self.view_tools_panel = ResponsiveActionPanel(view_specifications)
+        self.project_tools_dock = self._dock(
+            self._t("dock.project_tools"), "project-tools-dock", self.project_tools_panel
+        )
+        self.editing_tools_dock = self._dock(
+            self._t("dock.editing"), "editing-tools-dock", self.editing_tools_panel
+        )
+        self.view_tools_dock = self._dock(
+            self._t("dock.view_tools"), "view-tools-dock", self.view_tools_panel
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tools_dock)
+        self.splitDockWidget(self.project_dock, self.project_tools_dock, Qt.Orientation.Vertical)
+        self.splitDockWidget(self.project_tools_dock, self.editing_tools_dock, Qt.Orientation.Vertical)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.editing_tools_dock)
+        self.resizeDocks(
+            [self.project_dock, self.project_tools_dock, self.editing_tools_dock],
+            [560, 105, 105],
+            Qt.Orientation.Vertical,
+        )
+        self.tool_buttons = list(
+            self.project_tools_panel.buttons
+            + self.editing_tools_panel.buttons
+            + self.view_tools_panel.buttons
+        )
+        self.add_text_button = self.editing_tools_panel.buttons[2]
+        self.add_grid_button = self.editing_tools_panel.buttons[3]
+        self.remove_text_button = self.editing_tools_panel.buttons[4]
 
-        modes_panel = QWidget()
-        modes_layout = QGridLayout(modes_panel)
-        modes_layout.setContentsMargins(6, 6, 6, 6)
-        modes_layout.setSpacing(5)
         mode_specs = (
             ("□", self.object_mode_action, "mode-object"),
             ("▶", self.preview_mode_action, "mode-preview"),
             ("⚙", self.execution_mode_action, "mode-execution"),
         )
-        self.mode_buttons = []
-        for column, (symbol, action, name) in enumerate(mode_specs):
-            button = self._symbol_button(symbol, action, name)
-            modes_layout.addWidget(button, 0, column)
-            self.mode_buttons.append(button)
-        modes_layout.setColumnStretch(len(mode_specs), 1)
-        self.modes_dock = self._dock(self._t("dock.modes"), "modes-dock", modes_panel)
+        self.modes_panel = ResponsiveActionPanel(mode_specs)
+        self.mode_buttons = list(self.modes_panel.buttons)
+        self.modes_dock = self._dock(self._t("dock.modes"), "modes-dock", self.modes_panel)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.modes_dock)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.view_tools_dock)
+        self.splitDockWidget(self.modes_dock, self.view_tools_dock, Qt.Orientation.Horizontal)
 
     def _build_menus(self) -> None:
         self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
-        self.file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        self.file_menu.addActions([
+            self.new_action, self.open_action, self.import_artwork_action,
+            self.save_action, self.save_as_action,
+        ])
         self.export_menu = self.file_menu.addMenu(self._t("menu.export"))
         self.export_menu.addActions(self.export_actions)
         self.file_menu.addSeparator()
@@ -296,7 +310,8 @@ class MainWindow(QMainWindow):
         self.edit_menu.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
         self.view_menu = self.menuBar().addMenu(self._t("menu.view"))
         for dock in (
-            self.project_dock, self.tools_dock, self.modes_dock,
+            self.project_dock, self.project_tools_dock, self.editing_tools_dock,
+            self.modes_dock, self.view_tools_dock,
             self.properties_dock, self.output_dock,
         ):
             self.view_menu.addAction(dock.toggleViewAction())
@@ -310,12 +325,18 @@ class MainWindow(QMainWindow):
         self.tools_menu.addAction(self.generate_action)
         self.tools_menu.addSeparator()
         self.tools_menu.addAction(self.studio_workspace_action)
+        self.tools_menu.addSeparator()
+        self.program_settings_action = self._action(
+            self._t("action.program_settings"), self._show_program_settings
+        )
+        self.tools_menu.addAction(self.program_settings_action)
         self.machine_menu = self.menuBar().addMenu(self._t("menu.machine"))
         self.virtual_profile_action = self._action(self._t("action.virtual_profile"), self._virtual_profile_info)
         self.machine_menu.addAction(self.virtual_profile_action)
         self.help_menu = self.menuBar().addMenu(self._t("menu.help"))
+        self.controls_action = self._action(self._t("action.controls"), self._show_controls, "F1")
         self.about_action = self._action(self._t("action.about"), self._about)
-        self.help_menu.addAction(self.about_action)
+        self.help_menu.addActions([self.controls_action, self.about_action])
 
     def _build_status_bar(self) -> None:
         self._canvas_fps = 0.0
@@ -456,6 +477,7 @@ class MainWindow(QMainWindow):
             self.execution_mode_action: "action.mode.execution",
             self.new_action: "action.new",
             self.open_action: "action.open",
+            self.import_artwork_action: "action.import_artwork",
             self.save_action: "action.save",
             self.save_as_action: "action.save_as",
             self.exit_action: "action.exit",
@@ -467,9 +489,12 @@ class MainWindow(QMainWindow):
             self.generate_action: "action.generate",
             self.export_svg_action: "action.export_svg",
             self.export_preview_action: "action.export_preview",
+            self.export_png_action: "action.export_png",
             self.export_gcode_action: "action.export_gcode",
             self.export_report_action: "action.export_report",
             self.virtual_profile_action: "action.virtual_profile",
+            self.program_settings_action: "action.program_settings",
+            self.controls_action: "action.controls",
             self.about_action: "action.about",
             self.fit_page_action: "action.fit_page",
             self.travel_action: "action.travel",
@@ -482,15 +507,17 @@ class MainWindow(QMainWindow):
         self.english_language_action.setChecked(self.language == "en")
         self.ukrainian_language_action.setChecked(self.language == "uk")
         self.project_dock.setWindowTitle(self._t("dock.project"))
-        self.tools_dock.setWindowTitle(self._t("dock.tools"))
+        self.project_tools_dock.setWindowTitle(self._t("dock.project_tools"))
+        self.editing_tools_dock.setWindowTitle(self._t("dock.editing"))
+        self.view_tools_dock.setWindowTitle(self._t("dock.view_tools"))
         self.modes_dock.setWindowTitle(self._t("dock.modes"))
         self.properties_dock.setWindowTitle(self._t("dock.properties"))
         self.output_dock.setWindowTitle(self._t("dock.output"))
         self.output_tabs.setTabText(0, self._t("tab.console"))
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
-        self.preview_mode_action.setToolTip(self._t("action.mode.preview_planned"))
-        self.execution_mode_action.setToolTip(self._t("action.mode.execution_planned"))
+        self.preview_mode_action.setToolTip(self._t("action.mode.preview_tip"))
+        self.execution_mode_action.setToolTip(self._t("action.mode.execution_tip"))
         progress_state = self.generation_progress.property("state")
         if progress_state == "running":
             self.generation_progress.setFormat(self._t("status.progress.generating"))
@@ -508,16 +535,18 @@ class MainWindow(QMainWindow):
             self._t("canvas.preview_stale"),
         )
         self.properties.set_language(self.language)
+        self.preview_workspace.set_language(self.language)
+        self.execution_workspace.set_language(self.language)
         self.studio.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
         self._show_status(self._t("status.ready"), timeout=2500)
 
     def set_workspace(self, workspace: str) -> None:
-        if workspace not in {"document", "studio"}:
+        if workspace not in {"document", "preview", "execution", "studio"}:
             raise ValueError("UNKNOWN_WORKSPACE")
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        docks = self._document_docks()
         if workspace == "studio":
-            if self.workspace_stack.currentWidget() is self.canvas:
+            if self._workspace == "document":
                 self._document_dock_visibility = {
                     dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
                 }
@@ -526,12 +555,41 @@ class MainWindow(QMainWindow):
                 dock.hide()
             self.studio_workspace_action.setChecked(True)
             self.telemetry_label.hide()
-        else:
+        elif workspace == "document":
             self.workspace_stack.setCurrentWidget(self.canvas)
             for dock in docks:
                 dock.setVisible(self._document_dock_visibility.get(dock.objectName(), True))
             self.document_workspace_action.setChecked(True)
             self.telemetry_label.show()
+        else:
+            if self._workspace == "document":
+                self._document_dock_visibility = {
+                    dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+                }
+            target = self.preview_workspace if workspace == "preview" else self.execution_workspace
+            self.workspace_stack.setCurrentWidget(target)
+            for dock in docks:
+                dock.setVisible(dock in {self.modes_dock, self.view_tools_dock, self.output_dock})
+            (self.preview_mode_action if workspace == "preview" else self.execution_mode_action).setChecked(True)
+            self.telemetry_label.hide()
+            current = (
+                self.generated_result is not None
+                and self.generated_source_hash == generation_source_hash(self.controller.snapshot)
+            )
+            target.set_stale(not current)
+            if self.generated_result is None and self._generation_worker is None:
+                self.generate_page()
+        self._workspace = workspace
+
+    def _document_docks(self) -> tuple[QDockWidget, ...]:
+        return (
+            self.project_dock,
+            self.project_tools_dock,
+            self.editing_tools_dock,
+            self.view_tools_dock,
+            self.properties_dock,
+            self.output_dock,
+        )
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -548,6 +606,7 @@ class MainWindow(QMainWindow):
         self.properties.text_object_changed.connect(self._update_text_object)
         self.properties.text_content_changed.connect(self._update_text_content)
         self.properties.grid_object_changed.connect(self._update_grid_object)
+        self.properties.artwork_object_changed.connect(self._update_artwork_object)
         self.properties.page_changed.connect(self._update_page)
 
     def _dock(self, title: str, name: str, widget: QWidget) -> QDockWidget:
@@ -626,7 +685,7 @@ class MainWindow(QMainWindow):
                     item.display_diameter_mm,
                     item.color_group,
                 ))
-            else:
+            elif isinstance(item, GridObject):
                 signatures.append((
                     item.kind,
                     item.object_id,
@@ -640,6 +699,18 @@ class MainWindow(QMainWindow):
                     item.line_style,
                     item.color,
                     item.snap_enabled,
+                ))
+            else:
+                signatures.append((
+                    item.kind,
+                    item.object_id,
+                    item.visible,
+                    item.x_mm,
+                    item.y_mm,
+                    item.width_mm,
+                    item.height_mm,
+                    item.opacity,
+                    item.sha256,
                 ))
         return tuple(signatures)
 
@@ -673,7 +744,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _find_object_tree_item(self, object_id: str) -> QTreeWidgetItem | None:
-        for kind in ("text", "grid"):
+        for kind in ("text", "grid", "artwork"):
             item = self._find_tree_item(kind, object_id)
             if item is not None:
                 return item
@@ -703,6 +774,8 @@ class MainWindow(QMainWindow):
                 not current,
                 self._t("canvas.preview_stale"),
             )
+            self.preview_workspace.set_stale(not current)
+            self.execution_workspace.set_stale(not current)
             if current:
                 self.generated_revision = revision
                 self._update_export_actions()
@@ -730,10 +803,11 @@ class MainWindow(QMainWindow):
         selected_ids = {
             item.data(0, ROLE_VALUE)
             for item in self.project_tree.selectedItems()
-            if item.data(0, ROLE_KIND) in {"text", "grid"} and isinstance(item.data(0, ROLE_VALUE), str)
+            if item.data(0, ROLE_KIND) in {"text", "grid", "artwork"}
+            and isinstance(item.data(0, ROLE_VALUE), str)
         }
         current = self.project_tree.currentItem()
-        if current is not None and current.data(0, ROLE_KIND) in {"text", "grid"}:
+        if current is not None and current.data(0, ROLE_KIND) in {"text", "grid", "artwork"}:
             self._selected_kind = current.data(0, ROLE_KIND)
             self._selected_value = current.data(0, ROLE_VALUE)
             selected_ids.add(self._selected_value)
@@ -793,16 +867,22 @@ class MainWindow(QMainWindow):
             item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
             if isinstance(item, GridObject):
                 self.properties.show_grid_object(item)
+        elif self._selected_kind == "artwork":
+            item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
+            if isinstance(item, ArtworkObject):
+                self.properties.show_artwork_object(item)
         elif self._selected_kind == "style":
             style = next((obj for obj in self.styles if obj.reference == self._selected_value), None)
             if style:
                 self.properties.show_style(style)
 
     def _on_tree_item_changed(self, node: QTreeWidgetItem, column: int) -> None:
-        if self._refreshing_tree or node.data(0, ROLE_KIND) not in {"text", "grid"}:
+        if self._refreshing_tree or node.data(0, ROLE_KIND) not in {"text", "grid", "artwork"}:
             return
         object_id = node.data(0, ROLE_VALUE)
-        fallback_name = "Grid" if node.data(0, ROLE_KIND) == "grid" else "Text"
+        fallback_name = {"grid": "Grid", "artwork": "Artwork", "text": "Text"}[
+            node.data(0, ROLE_KIND)
+        ]
         name = node.text(0).strip() or fallback_name
         visible = node.checkState(0) == Qt.CheckState.Checked
         QTimer.singleShot(0, lambda: self._apply_tree_item_change(object_id, name, visible))
@@ -818,8 +898,11 @@ class MainWindow(QMainWindow):
         visibility_changed = item.visible != visible
         if isinstance(item, TextObject):
             self.controller.update_text_object(object_id, name=name, visible=visible)
-        else:
+        elif isinstance(item, GridObject):
             self.controller.update_grid_object(object_id, name=name, visible=visible)
+            self._preserve_generation_revision(had_current_generation)
+        else:
+            self.controller.update_artwork_object(object_id, name=name, visible=visible)
             self._preserve_generation_revision(had_current_generation)
         if isinstance(item, TextObject) and visibility_changed and (had_current_generation or self._regeneration_pending):
             self._schedule_regeneration("Visibility changed · updating page…")
@@ -828,6 +911,8 @@ class MainWindow(QMainWindow):
         self._regeneration_pending = True
         self._regeneration_timer.start()
         self.canvas.clear_artifacts()
+        self.preview_workspace.clear()
+        self.execution_workspace.clear()
         self.generated_result = None
         self.generated_revision = None
         self.generated_source_hash = None
@@ -892,8 +977,13 @@ class MainWindow(QMainWindow):
                 )
                 if had_current_generation or self._regeneration_pending:
                     self._schedule_regeneration("Object resized · updating page…")
-            else:
+            elif isinstance(item, GridObject):
                 self.controller.update_grid_object(
+                    object_id, x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm
+                )
+                self._preserve_generation_revision(had_current_generation)
+            else:
+                self.controller.update_artwork_object(
                     object_id, x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm
                 )
                 self._preserve_generation_revision(had_current_generation)
@@ -928,6 +1018,46 @@ class MainWindow(QMainWindow):
             self._show_status(str(exc), "error", 5000)
             return
         self._preserve_generation_revision(had_current_generation)
+
+    def _update_artwork_object(self, object_id: str, changes: dict) -> None:
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        try:
+            self.controller.update_artwork_object(object_id, **changes)
+        except ValueError as exc:
+            self._show_status(str(exc), "error", 5000)
+            return
+        self._preserve_generation_revision(had_current_generation)
+
+    def import_artwork_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            self._t("dialog.import_artwork"),
+            "",
+            "Artwork (*.svg *.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+        )
+        if not filename:
+            return
+        try:
+            item = import_artwork(Path(filename))
+            had_current_generation = (
+                self.generated_result is not None
+                and self.generated_revision == self.controller.revision
+            )
+            self.controller.add_artwork_object(item)
+            self._preserve_generation_revision(had_current_generation)
+            self._selected_kind, self._selected_value = "artwork", item.object_id
+            self._selected_object_ids = {item.object_id}
+            self._refresh_tree(self.controller.snapshot)
+            self._sync_tree_selection()
+            self._show_status(
+                self._t("status.artwork_imported").format(name=item.name), "success", 5000
+            )
+        except Exception as exc:
+            self._show_status(str(exc), "error", 7000)
+            QMessageBox.critical(self, self._t("dialog.import_failed"), str(exc))
 
     def _preserve_generation_revision(self, had_current_generation: bool) -> None:
         if had_current_generation and self.generated_result is not None:
@@ -969,7 +1099,7 @@ class MainWindow(QMainWindow):
             and self.generated_revision == self.controller.revision
         )
         self.controller.remove_objects(selected)
-        if selected_models and all(isinstance(item, GridObject) for item in selected_models):
+        if selected_models and all(not isinstance(item, TextObject) for item in selected_models):
             self._preserve_generation_revision(had_current_generation)
         self._selected_object_ids.clear()
         self._selected_kind, self._selected_value = "page", None
@@ -984,6 +1114,8 @@ class MainWindow(QMainWindow):
         self._selected_kind, self._selected_value = "page", None
         self.controller.reset(default_project())
         self.canvas.clear_artifacts()
+        self.preview_workspace.clear()
+        self.execution_workspace.clear()
         self.generated_result = None
         self.generated_revision = None
         self.generated_source_hash = None
@@ -1004,6 +1136,8 @@ class MainWindow(QMainWindow):
             self._selected_kind, self._selected_value = "page", None
             self.controller.reset(loaded.snapshot, Path(filename))
             self.canvas.clear_artifacts()
+            self.preview_workspace.clear()
+            self.execution_workspace.clear()
             self.generated_result = None
             self.generated_revision = None
             self.generated_source_hash = None
@@ -1089,6 +1223,13 @@ class MainWindow(QMainWindow):
         files = result.files
         self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
                                   files["page-0001.plan.json"])
+        for workspace in (self.preview_workspace, self.execution_workspace):
+            workspace.set_artifacts(
+                files["page-0001.svg"],
+                files["page-0001.preview.svg"],
+                files["page-0001.plan.json"],
+                files["page-0001.gcode"],
+            )
         self.canvas.set_object_overflows(result.report.get("overflow_object_ids", ()))
         self.canvas.set_preview_stale(False, self._t("canvas.preview_stale"))
         diagnostics = result.report.get("diagnostics", [])
@@ -1151,6 +1292,7 @@ class MainWindow(QMainWindow):
         specifications = {
             "page-0001.svg": ("Export Production SVG", "page.svg", "SVG (*.svg)"),
             "page-0001.preview.svg": ("Export Diagnostic SVG", "page.preview.svg", "SVG (*.svg)"),
+            "page-0001.png": ("Export Page Image", "page.png", "PNG image (*.png)"),
             "page-0001.gcode": ("Export Virtual G-code — Simulation Only", "page.virtual.gcode", "G-code (*.gcode *.nc)"),
             "report.json": ("Export Validation Report", "validation-report.json", "JSON (*.json)"),
         }
@@ -1159,7 +1301,10 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            export_artifact(self.generated_result, artifact, Path(filename))
+            if artifact == "page-0001.png":
+                export_page_png(self.generated_result, Path(filename))
+            else:
+                export_artifact(self.generated_result, artifact, Path(filename))
             self._show_status(f"Exported {filename}", "success", 5000)
             self.console.appendPlainText(f"Exported {artifact} to {filename}")
         except Exception as exc:
@@ -1181,7 +1326,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state, 1)
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        docks = self._document_docks()
         visibility_keys = {
             dock.objectName(): f"main/document_docks/{dock.objectName()}/visible"
             for dock in docks
@@ -1196,7 +1341,10 @@ class MainWindow(QMainWindow):
                     type=bool,
                 )
                 dock.setVisible(visible)
-        elif state is not None and not any(dock.toggleViewAction().isChecked() for dock in docks):
+        elif state is not None and not any(
+            dock.toggleViewAction().isChecked()
+            for dock in (self.project_dock, self.properties_dock, self.output_dock)
+        ):
             # Older builds saved Studio's temporary all-hidden state as the
             # Document layout. Recover that state once without overriding a
             # user's explicitly persisted per-dock choices in newer builds.
@@ -1213,8 +1361,8 @@ class MainWindow(QMainWindow):
         self.canvas.set_show_markers(show_markers)
 
     def _save_window_state(self) -> None:
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
-        if self.workspace_stack.currentWidget() is self.studio:
+        docks = self._document_docks()
+        if self._workspace != "document":
             visibility = self._document_dock_visibility
         else:
             visibility = {
@@ -1266,7 +1414,83 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         return action
 
+    def _configure_shortcuts(self) -> None:
+        specifications = (
+            ("new", self.new_action, "Ctrl+N"),
+            ("open", self.open_action, "Ctrl+O"),
+            ("import_artwork", self.import_artwork_action, "Ctrl+Shift+I"),
+            ("save", self.save_action, "Ctrl+S"),
+            ("save_as", self.save_as_action, "Ctrl+Shift+S"),
+            ("undo", self.undo_action, "Ctrl+Z"),
+            ("redo", self.redo_action, "Ctrl+Shift+Z"),
+            ("add_text", self.add_text_action, "Insert"),
+            ("delete", self.delete_action, "Delete"),
+            ("generate", self.generate_action, "Ctrl+Return"),
+            ("fit_page", self.fit_page_action, "F"),
+        )
+        self._shortcut_specs = specifications
+        for identifier, action, default in specifications:
+            stored = self.settings.value(f"shortcuts/{identifier}", None)
+            action.setShortcut(QKeySequence(str(stored) if stored is not None else default))
+
+    def _shortcut_bindings(self) -> tuple[ShortcutBinding, ...]:
+        return tuple(
+            ShortcutBinding(identifier, action.text(), action, default)
+            for identifier, action, default in self._shortcut_specs
+        )
+
+    def _show_controls(self) -> None:
+        dialog = ControlsDialog(self._shortcut_bindings(), language=self.language, parent=self)
+        dialog.exec()
+
+    def _show_program_settings(self) -> None:
+        dialog = ProgramSettingsDialog(
+            self._shortcut_bindings(), language=self.language, parent=self
+        )
+        if dialog.exec() != ProgramSettingsDialog.DialogCode.Accepted:
+            return
+        for identifier, sequence in dialog.shortcut_values().items():
+            action = next(action for key, action, _default in self._shortcut_specs if key == identifier)
+            action.setShortcut(sequence)
+            self.settings.setValue(
+                f"shortcuts/{identifier}",
+                sequence.toString(QKeySequence.SequenceFormat.PortableText),
+            )
+        if dialog.reset_layout_requested:
+            self._reset_dock_layout()
+        self.settings.sync()
+        self.set_language(dialog.selected_language)
+
+    def _reset_dock_layout(self) -> None:
+        self.set_workspace("document")
+        for dock in self._document_docks():
+            dock.setFloating(False)
+            dock.show()
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tools_dock)
+        self.splitDockWidget(self.project_dock, self.project_tools_dock, Qt.Orientation.Vertical)
+        self.splitDockWidget(self.project_tools_dock, self.editing_tools_dock, Qt.Orientation.Vertical)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.properties_dock)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.modes_dock)
+        self.splitDockWidget(self.modes_dock, self.view_tools_dock, Qt.Orientation.Horizontal)
+        self.resizeDocks(
+            [self.project_dock, self.properties_dock], [275, 340], Qt.Orientation.Horizontal
+        )
+        self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
+        self._document_dock_visibility = {
+            dock.objectName(): True for dock in self._document_docks()
+        }
+        self.settings.remove("main/state")
+        self.settings.remove("main/geometry")
+        self.settings.remove("main/document_docks")
+
     def _about(self) -> None:
-        QMessageBox.about(self, "About Handwriting Plotter",
-                          f"Handwriting Plotter {__version__}\n\n"
-                          "Deterministic single-line handwriting and virtual plotter planning.")
+        QMessageBox.about(
+            self,
+            self._t("about.title"),
+            self._t("about.body").format(
+                version=__version__,
+                styles=len(tuple(style for style in self.styles if style.valid)),
+            ),
+        )

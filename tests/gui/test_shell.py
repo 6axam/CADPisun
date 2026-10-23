@@ -5,6 +5,8 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
@@ -46,26 +48,31 @@ def test_docks_are_actually_toggleable(qtbot, tmp_path) -> None:
     assert window.project_dock.isVisible()
 
 
-def test_issue_seven_exposes_dockable_symbol_tools_in_view_menu(qtbot, tmp_path) -> None:
-    window = isolated_window(tmp_path, "issue-seven-tools")
+def test_issue_nine_splits_responsive_tool_docks_and_exposes_them_in_view(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-nine-tools")
     qtbot.addWidget(window)
     window.show()
 
-    assert window.tools_dock.isVisible()
-    assert window.dockWidgetArea(window.tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
-    assert window.tools_dock.allowedAreas() & Qt.DockWidgetArea.LeftDockWidgetArea
-    assert window.tools_dock.toggleViewAction() in window.view_menu.actions()
-    assert window.tools_dock.windowTitle() == "Tools"
-    assert len(window.tool_buttons) == 10
+    docks = (window.project_tools_dock, window.editing_tools_dock, window.view_tools_dock)
+    assert all(dock.isVisible() for dock in docks)
+    assert window.dockWidgetArea(window.project_tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.dockWidgetArea(window.editing_tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.dockWidgetArea(window.view_tools_dock) == Qt.DockWidgetArea.TopDockWidgetArea
+    assert all(dock.toggleViewAction() in window.view_menu.actions() for dock in docks)
+    assert [dock.windowTitle() for dock in docks] == ["Project", "Editing", "View"]
     assert all(button.width() == button.height() for button in window.tool_buttons)
     assert all(button.text() and button.text() != button.accessibleName() for button in window.tool_buttons)
-    assert all("border-radius" in button.styleSheet() for button in window.tool_buttons)
 
-    window.tools_dock.toggleViewAction().trigger()
-    assert not window.tools_dock.isVisible()
+    window.editing_tools_dock.setFloating(True)
+    window.editing_tools_dock.resize(70, 320)
+    qtbot.wait(1)
+    assert window.editing_tools_panel.column_count == 1
+    window.editing_tools_dock.resize(260, 100)
+    qtbot.wait(1)
+    assert window.editing_tools_panel.column_count > 1
 
 
-def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds(qtbot, tmp_path) -> None:
+def test_issue_nine_modes_switch_to_real_preview_and_execution_workspaces(qtbot, tmp_path) -> None:
     window = isolated_window(tmp_path, "issue-seven-modes")
     qtbot.addWidget(window)
     window.show()
@@ -75,14 +82,51 @@ def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds
     assert window.modes_dock.toggleViewAction() in window.view_menu.actions()
     assert window.object_mode_action.isChecked()
     assert window.object_mode_action.isEnabled()
-    assert not window.preview_mode_action.isEnabled()
-    assert not window.execution_mode_action.isEnabled()
-    assert window.preview_mode_action.property("implementationStatus") == "planned"
-    assert window.execution_mode_action.property("implementationStatus") == "planned"
-    assert window.preview_mode_action.toolTip() == "Preview mode · planned"
-    assert window.execution_mode_action.toolTip() == "Execution mode · planned"
+    assert window.preview_mode_action.isEnabled()
+    assert window.execution_mode_action.isEnabled()
+    assert window.preview_mode_action.property("implementationStatus") == "implemented"
+    assert window.execution_mode_action.property("implementationStatus") == "implemented"
     assert window.preview_mode_action.data() == "preview"
     assert window.execution_mode_action.data() == "execution"
+
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    window.preview_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.preview_workspace
+    assert window.preview_workspace.has_artifact
+    assert "G21" in window.preview_workspace.gcode.toPlainText()
+    assert window.preview_workspace.timeline.maximum() > 0
+
+    window.execution_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.execution_workspace
+    assert "SIMULATION ONLY" in window.execution_workspace.state_label.text()
+    before = window.execution_workspace.timeline.value()
+    window.execution_workspace.play_button.click()
+    qtbot.waitUntil(lambda: window.execution_workspace.timeline.value() > before, timeout=2_000)
+    window.execution_workspace.play_button.click()
+
+    window.object_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.canvas
+
+
+def test_properties_scroll_and_output_dock_use_non_overlapping_corner(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-nine-docking")
+    qtbot.addWidget(window)
+    window.resize(900, 620)
+    window.show()
+    item = window.controller.snapshot.objects[0]
+    window._on_canvas_selection_changed((item.object_id,))
+    qtbot.wait(1)
+
+    assert window.properties_scroll.widget() is window.properties
+    assert window.properties_scroll.widgetResizable()
+    assert window.properties_scroll.verticalScrollBar().maximum() > 0
+    assert window.corner(Qt.Corner.BottomRightCorner) == Qt.DockWidgetArea.RightDockWidgetArea
+
+    window.output_dock.setFloating(True)
+    window.output_dock.setFloating(False)
+    assert not window.output_dock.isFloating()
+    assert window.dockWidgetArea(window.output_dock) == Qt.DockWidgetArea.BottomDockWidgetArea
 
 
 def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot, tmp_path) -> None:
@@ -129,7 +173,9 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
         "Файл", "Редагування", "Вигляд", "Мова", "Інструменти", "Верстат", "Довідка",
     ]
     assert window.project_dock.windowTitle() == "Об’єкти проєкту"
-    assert window.tools_dock.windowTitle() == "Інструменти"
+    assert window.project_tools_dock.windowTitle() == "Проєкт"
+    assert window.editing_tools_dock.windowTitle() == "Редагування"
+    assert window.view_tools_dock.windowTitle() == "Вигляд"
     assert window.modes_dock.windowTitle() == "Режими"
     assert window.object_mode_action.text() == "Об’єкт"
     assert window.properties._labels["properties.name"].text() == "Назва"
@@ -139,6 +185,67 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
     qtbot.addWidget(reopened)
     assert reopened.language == "uk"
     assert reopened.ukrainian_language_action.isChecked()
+
+
+def test_controls_dialog_lists_current_shortcuts_and_canvas_gestures(qtbot, tmp_path) -> None:
+    from handwriting_plotter.gui.dialogs import ControlsDialog
+
+    window = isolated_window(tmp_path, "controls")
+    qtbot.addWidget(window)
+    dialog = ControlsDialog(window._shortcut_bindings(), language="en", parent=window)
+    qtbot.addWidget(dialog)
+
+    labels = [dialog.table.item(row, 0).text() for row in range(dialog.table.rowCount())]
+    shortcuts = [dialog.table.item(row, 1).text() for row in range(dialog.table.rowCount())]
+    assert "Generate Page" in labels
+    assert any("Ctrl" in value and ("Enter" in value or "Return" in value) for value in shortcuts)
+    gestures = dialog.findChild(QLabel, "controls-gestures")
+    assert "Ctrl+click" in gestures.text()
+    assert "Space+drag" in gestures.text()
+    assert window.controls_action in window.help_menu.actions()
+
+
+def test_program_settings_remaps_shortcut_changes_language_and_persists(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    from handwriting_plotter.gui.dialogs import ProgramSettingsDialog
+
+    settings_path = str(tmp_path / "program-settings.ini")
+    window = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))
+    qtbot.addWidget(window)
+
+    def configure(dialog):
+        dialog.shortcut_edits["generate"].setKeySequence(QKeySequence("Ctrl+G"))
+        dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("uk"))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ProgramSettingsDialog, "exec", configure)
+    window._show_program_settings()
+
+    assert window.generate_action.shortcut() == QKeySequence("Ctrl+G")
+    assert window.language == "uk"
+    reopened = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))
+    qtbot.addWidget(reopened)
+    assert reopened.generate_action.shortcut() == QKeySequence("Ctrl+G")
+    assert reopened.language == "uk"
+
+
+def test_about_reports_build_project_format_and_hardware_status(qtbot, tmp_path, monkeypatch) -> None:
+    window = isolated_window(tmp_path, "about")
+    qtbot.addWidget(window)
+    captured = {}
+    monkeypatch.setattr(
+        QMessageBox,
+        "about",
+        lambda _parent, title, body: captured.update(title=title, body=body),
+    )
+
+    window._about()
+
+    assert "Handwriting Plotter" in captured["title"]
+    assert "hp-desktop-project/1.5" in captured["body"]
+    assert "simulation only" in captured["body"]
+    assert "github.com/6axam/CADPisun" in captured["body"]
 
 
 def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot, tmp_path) -> None:
