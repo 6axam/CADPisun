@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title description">
+  <title id="title">Handwriting Plotter</title>
+  <desc id="description">Text to deterministic handwriting, SVG, and virtual G-code</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.55" stop-color="#172554"/>
+      <stop offset="1" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#60a5fa"/>
+      <stop offset="0.5" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1200" height="340" rx="28" fill="url(#background)"/>
+  <circle cx="1080" cy="70" r="180" fill="#4f46e5" opacity=".16"/>
+  <circle cx="105" cy="310" r="160" fill="#0ea5e9" opacity=".10"/>
+  <g transform="translate(80 66)">
+    <rect width="164" height="208" rx="12" fill="#f8fafc" opacity=".98"/>
+    <rect x="19" y="20" width="126" height="168" rx="3" fill="none" stroke="#bfdbfe" stroke-width="2" stroke-dasharray="6 5"/>
+    <path d="M32 72 C48 42 60 103 78 67 S107 45 129 76" fill="none" stroke="url(#accent)" stroke-width="7" stroke-linecap="round"/>
+    <path d="M33 115 C49 92 57 139 73 112 S103 91 130 119" fill="none" stroke="#334155" stroke-width="5" stroke-linecap="round"/>
+    <path d="M34 153 C52 134 62 171 80 149 S108 137 131 157" fill="none" stroke="#334155" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="32" cy="72" r="5" fill="#22c55e"/>
+    <circle cx="129" cy="76" r="5" fill="#ef4444"/>
+  </g>
+  <g transform="translate(300 74)">
+    <text x="0" y="58" fill="#f8fafc" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="58" font-weight="750" letter-spacing="-1">Handwriting Plotter</text>
+    <text x="2" y="102" fill="#cbd5e1" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="24">Текст → направленные штрихи → SVG → virtual G-code</text>
+    <rect x="2" y="137" width="708" height="1" fill="url(#accent)" opacity=".8"/>
+    <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="600">
+      <g transform="translate(2 164)"><rect width="150" height="40" rx="20" fill="#1e3a8a"/><text x="75" y="26" text-anchor="middle" fill="#dbeafe">A4 workspace</text></g>
+      <g transform="translate(166 164)"><rect width="170" height="40" rx="20" fill="#3730a3"/><text x="85" y="26" text-anchor="middle" fill="#ede9fe">PySide6 desktop</text></g>
+      <g transform="translate(350 164)"><rect width="158" height="40" rx="20" fill="#5b21b6"/><text x="79" y="26" text-anchor="middle" fill="#f3e8ff">Deterministic</text></g>
+      <g transform="translate(522 164)"><rect width="188" height="40" rx="20" fill="#831843"/><text x="94" y="26" text-anchor="middle" fill="#fce7f3">Simulation-first</text></g>
+    </g>
+  </g>
+  <path d="M1040 245 C1075 218 1098 270 1132 236" fill="none" stroke="url(#accent)" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+</svg>
