@@ -8,9 +8,9 @@ Last updated: 2026-10-23
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 2 / 25 tasks |
-| Last completed | TASK 01 — Canonical photo import model |
-| Next | TASK 02 — Photo import UI |
+| Completed | 3 / 25 tasks |
+| Last completed | TASK 02 — Photo import UI |
+| Next | TASK 03 — Perspective and page correction |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -153,6 +153,70 @@ Linux was executed locally. Windows behavior remains unverified in this task;
 the repository CI installs the GUI extra on Windows, but this feature branch has
 not yet run a pull-request workflow.
 
+## TASK 02 — Photo import UI
+
+Status: `[x]` DONE
+
+Completion commit: `1ad775128f822a80623c781fe9159657c12d57df`
+
+### Implemented behavior
+
+- Added a dedicated **Import from photo** workflow inside Handwriting Studio.
+  It remains separate from the document canvas and from online pointer capture.
+- The system file picker accepts the formats actually supported by the TASK 01
+  decoder: PNG, JPEG, WebP, BMP, and static GIF. Successful imports use the
+  existing bounded decoder and immutable content-addressed repository.
+- Original and corrected-preview viewers appear side by side with synchronized
+  zoom out/in, 1:1, fit, reset, and 90-degree preview rotation. Rotation never
+  mutates exact source bytes or records a transform that has not been produced
+  by the future correction pipeline.
+- The right viewer explicitly says that perspective correction has not run.
+  Diagnostics expose the content-detected format/media type, dimensions,
+  encoded size, embedded orientation, display rotation, original SHA-256,
+  immutable manifest path, ruling state, and correction state.
+- Invalid files produce an inline error while preserving the last verified
+  image. The latest verified import is restored from immutable storage when the
+  workspace reopens; a missing or tampered record is reported rather than used.
+- English and Ukrainian UI text and the desktop usage guide were updated. The
+  tabs are positioned beside the workspace so adding photo import does not
+  change capture-canvas height or saved guide geometry.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/gui/test_photo_import_gui.py \
+  tests/gui/test_studio.py \
+  tests/learning/test_photo_import.py
+```
+
+Result: `35 passed in 3.43s`. The six new GUI tests cover exact source storage,
+side-by-side previews and diagnostics, zoom/rotation/reset without mutation,
+invalid input, latest-photo restore, file-picker/Ukrainian text, and isolation
+from online capture.
+
+```bash
+git diff --check
+uv run python -m compileall -q src tests
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Result: `249 passed in 23.37s`; whitespace and bytecode compilation checks
+passed.
+
+```bash
+uv build --out-dir /tmp/cadpisun-task02-build-jnln3R
+```
+
+Result: source distribution and wheel built successfully; wheel inspection
+confirmed the new GUI module and its Studio/i18n integration are packaged.
+
+Visual QA used an offscreen 1440×900 full `MainWindow` with a generated ruled
+PNG fixture. Both previews, controls, notices, diagnostics, and side workflow
+tabs were visible without overlap. The temporary screenshot was not committed.
+
+Linux was executed locally. Windows was not executed during TASK 02.
+
 ## Open blockers and gates
 
 | ID | Scope | State | Unblock condition |
@@ -163,24 +227,24 @@ not yet run a pull-request workflow.
 | PH-BLK-004 | HandwritingDatasetGen code reuse | BLOCKED | Upstream adds a compatible explicit license; until then use papers/behavior as references only |
 | PH-BLK-005 | Windows CV/ML behavior | UNVERIFIED | Windows CI/runtime tasks execute the implemented provider and image fixtures |
 
-None of these blocks TASK 01.
+None of these blocks TASK 03.
 
 ## Next task estimate
 
-**TASK 02 — Photo import UI**
+**TASK 03 — Perspective and page correction**
 
 - Recommended tier: MEDIUM.
-- Complexity: 6/12 (architecture 1, modules 1, algorithms 0, examples 1,
-  testing 1, regression risk 1, expected iteration 1).
-- Estimated implementation: 7k–14k tokens, roughly 18–35 tool calls, 6–10 files.
+- Complexity: 7/12 (architecture 1, modules 1, algorithms 2, examples 1,
+  testing 1, regression risk 1, expected iteration 0).
+- Estimated implementation: 8k–16k tokens, roughly 20–40 tool calls, 7–12 files.
 - Relative quota pressure: MEDIUM.
-- Main uncertainty: fitting original/corrected comparison, zoom/rotation and
-  diagnostics into Handwriting Studio without regressing its dense existing UI.
-- Natural split if needed: workspace/viewer first, then import persistence and
-  headless interaction tests. Both are required before TASK 02 can be DONE.
+- Main uncertainty: robust page-corner proposal across shadows and background
+  clutter while keeping the four-corner manual fallback precise and testable.
+- Natural split if needed: Qt-free homography/transform contract first, then
+  optional OpenCV proposal and manual overlay. All are required before TASK 03
+  can be DONE.
 
 Recommended message at the next boundary:
 
-> Рекомендую переключить Codex на MEDIUM, потому что следующая задача — обычный
-> PySide6 workspace поверх уже готового import contract и headless UI-тесты.
-> Сильная модель здесь не нужна.
+> Рекомендую оставить Codex на MEDIUM: следующая задача сочетает проверяемую
+> геометрию homography с ограниченным PySide6 overlay, но не требует HTR или ML.
