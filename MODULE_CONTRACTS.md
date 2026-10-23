@@ -205,6 +205,21 @@ transform: orientation сохраняется как metadata, а видимое
 явным `ImageTransform` в preprocessing. Import UI TASK 02 вызывает этот contract,
 но сам contract не импортирует PySide6.
 
+Реализованный planar correction contract состоит из Qt-free
+`learning.correction` и optional `adapters.images.opencv`. Adapter предлагает
+quadrilateral через blur/Canny/morphology/contours и возвращает typed proposal;
+это предложение, а не автоматическое подтверждение. Manual four-corner input
+проходит тот же bounded warp path. `correct()` композиционно включает embedded
+orientation, homography и optional fine deskew в одну forward matrix, сохраняет
+inverse и выдаёт детерминированно кодируемый PNG.
+
+`persist_correction()` проверяет frame/corners, публикует derivative по SHA-256,
+добавляет новый frame/transform/page region и пишет новый immutable manifest,
+повторно проверяя original bytes. OpenCV остаётся за optional extra `photo-cv`;
+import `handwriting_plotter.learning` не загружает cv2/numpy. Если extra
+отсутствует или auto proposal не найден, исходник продолжает открываться, а UI
+явно предлагает manual fallback после установки extra.
+
 | Port | Вход → выход | Инварианты и отказ |
 |---|---|---|
 | ImagePreprocessor | SourceAsset + config + optional corners → ProcessedAsset + transforms | original immutable; неизвестный physical scale остаётся unknown; DEWARP_REQUIRED при кривизне |

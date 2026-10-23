@@ -32,6 +32,28 @@ Ctrl+Shift+V, в большинстве Linux-терминалов — такж�
 Системный Python менять не требуется. Все команды установки проекта нужно
 выполнять в папке, где находятся `pyproject.toml`, `uv.lock` и `README.md`.
 
+### Дополнительное исправление перспективы фото
+
+Основной GUI работает с командой `--extra gui`. Чтобы также включить поиск
+границ тетрадной страницы и исправление перспективы в Handwriting Studio,
+добавьте optional extra `photo-cv` при синхронизации.
+
+PowerShell:
+
+```powershell
+uv sync --python 3.12.12 --extra gui --extra photo-cv
+```
+
+Bash:
+
+```bash
+uv sync --python 3.12.12 --extra gui --extra photo-cv
+```
+
+Он устанавливает headless OpenCV и NumPy из `uv.lock`. Git для этого не нужен.
+Без `photo-cv` импорт и просмотр фотографий доступны, а кнопки коррекции
+перспективы отключены.
+
 ## Скачать ZIP
 
 1. Откройте страницу [6axam/CADPisun](https://github.com/6axam/CADPisun).

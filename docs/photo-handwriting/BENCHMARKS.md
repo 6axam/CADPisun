@@ -1,15 +1,15 @@
 # Photo-to-Handwriting benchmark protocol
 
 Created: 2026-10-23. This file defines measurements before implementation so
-later results cannot be selected after seeing outcomes. No photo/HTR/reconstruction
-benchmark has run yet.
+later results cannot be selected after seeing outcomes. Synthetic rectification
+correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
 
 ## Result state
 
 | Benchmark | State | Measured result |
 |---|---|---|
 | Photo import throughput and memory | DEFERRED — TASK 23; TASK 01 covers correctness/resource rejection | — |
-| Rectification accuracy | NOT RUN — TASK 03 | — |
+| Rectification accuracy | SYNTHETIC CORRECTNESS ONLY — TASK 03 | Corner RMSE 0 px; max 0 px; inverse RMSE 1.24e-13 px; max 2.43e-13 px on one clean generated quad |
 | Paper classification | NOT RUN — TASK 04 | — |
 | Grid/ruling geometry | NOT RUN — TASK 05 | — |
 | Ink separation | NOT RUN — TASK 07 | — |
@@ -67,6 +67,16 @@ page or session may not cross train/validation/test boundaries.
 - Known grid-intersection error after homography.
 - Aspect-ratio error.
 - Failure classification for no page, partial page, and curved page.
+
+TASK 03 measured the deterministic clean fixture committed in
+`tests/learning/test_page_correction.py`: an 840×640 dark scene with a known
+four-corner light page. The contour proposal recovered all four integer corners
+exactly in this fixture. Across a 12×12 grid in the 676×477 corrected frame,
+forward→inverse reprojection RMSE was `1.24442785236e-13 px` and maximum error
+was `2.42835191822e-13 px`. These values validate matrix composition and the
+clean synthetic detector path only. They do not establish accuracy on shadows,
+partial/curved pages, compression, or genuine notebook photographs; those gates
+remain open for the private corpus and TASK 22.
 
 ### Ruling classification and geometry
 

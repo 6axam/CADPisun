@@ -240,6 +240,28 @@ Provisional import limits v1: 32 MiB encoded bytes, 60 million decoded pixels,
 а не свойство пользовательского фото; их можно пересмотреть отдельной ревизией
 после измерений Linux/Windows.
 
+### 8.2 Planar page correction v1
+
+Исправленный кадр не заменяет SourceAsset. Его PNG хранится отдельно как
+`derivatives/<hash-prefix>/<sha256>.png`, а новый canonical photo manifest
+добавляет `PixelFrame`, `ImageTransform(kind=homography)` и page `PhotoRegion`.
+Старый manifest и точные original bytes остаются доступными.
+
+Четыре угла задаются в порядке top-left, top-right, bottom-right, bottom-left и
+образуют выпуклый clockwise polygon ненулевой площади. Автоматические углы имеют
+отдельный heuristic confidence и всегда требуют визуальной проверки; ручные
+углы не получают выдуманную confidence. Выходные width/height вычисляются по
+максимальным длинам противоположных сторон, поэтому aspect ratio следует
+выбранной странице, а не размеру preview widget.
+
+Transform хранит source→corrected и corrected→source 3×3 matrices, hashes обоих
+изображений, input/output frame IDs, algorithm/version, oriented corners,
+embedded orientation, optional deskew angle, output dimensions, interpolation,
+artifact path и `planar_only=true`. Embedded orientation входит в общую матрицу
+и не применяется скрыто второй раз. Homography пригодна только для плоской
+страницы; отсутствие надёжного quadrilateral или видимая кривизна остаются
+явной диагностикой и не маскируются crop прямоугольником.
+
 ## 9. Persistent storage и журнал задания
 
 ### 9.1 Desktop project v1

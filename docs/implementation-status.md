@@ -1,5 +1,21 @@
 # Состояние реализации
 
+## PHOTO-03 — исправление перспективы страницы, 2026-10-23
+
+- Optional `photo-cv` фиксирует OpenCV headless 4.13.0.92. Base/CLI и обычный
+  photo import не импортируют cv2 или NumPy.
+- Автоматический contour/quad proposal остаётся проверяемой эвристикой; ручные
+  четыре перетаскиваемых угла доступны как обязательный fallback. Отсутствие
+  страницы и ограничение planar-only показываются явно.
+- Embedded orientation, homography и optional fine deskew составляются в одну
+  forward matrix; inverse проверяется. Aspect ratio выводится из сторон
+  quadrilateral, а не из размеров GUI.
+- Corrected PNG хранится по SHA-256. Новый immutable photo manifest добавляет
+  frame, transform и page polygon, сохраняя точные байты исходника и старую
+  revision.
+- Synthetic tests проверяют auto/manual paths, no-page diagnostics, orientation,
+  inverse-map error, persistence и повторное открытие corrected preview.
+
 ## PHOTO-02 — интерфейс импорта фото, 2026-10-23
 
 - В Handwriting Studio добавлен отдельный workflow выбора и безопасного импорта

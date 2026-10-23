@@ -33,8 +33,14 @@ Pydantic используется только для validation, без обл�
 Photo ingest v1 использует `QImageReader` из того же PySide6 extra как narrow
 decoder adapter для PNG/JPEG/WebP и дополнительных явно разрешённых raster
 formats. Core photo models/repository не импортируют Qt; base dependency graph и
-CLI остаются прежними. OpenCV не добавляется ради TASK 01 и впервые понадобится
-только для preprocessing после отдельного vision lock.
+CLI остаются прежними.
+
+Planar correction TASK 03 использует optional extra `photo-cv` с
+`opencv-python-headless==4.13.0.92` и разрешённым lock `numpy==2.2.6`. Extra
+реализует только локальные contour/homography/warp операции и не входит в base
+или обычный `gui` install. Headless wheel выбран намеренно: workspace отображает
+результат через Qt и не использует OpenCV HighGUI. Более тяжёлые segmentation,
+skeleton и HTR environments по-прежнему изолируются отдельно.
 
 ## 2. Тестовые зависимости
 
@@ -54,7 +60,9 @@ CLI остаются прежними. OpenCV не добавляется рад
 
 ## 4. Vision окружение II-B
 
-Отдельный локальный venv `vision`, Python 3.12. Обмен через DTO/job files. Стартовые кандидаты:
+Для TASK 03 минимальный OpenCV adapter доступен как `photo-cv`; будущий полный
+`vision` worker остаётся отдельным локальным venv на Python 3.12 с обменом через
+DTO/job files. Стартовые кандидаты:
 
 | Компонент | Роль | Ограничения и замена |
 |---|---|---|
@@ -98,4 +106,4 @@ InkSight Small-p допускается только после E-07 из RISKS.
 
 I-00 создаёт base lock с exact transitive versions и hashes из выбранных distributions, фиксирует Python patch и architecture. Каждый adapter тестируется на golden fixtures upstream и наших контрактов. Обновление dependency — отдельное изменение lock + relevant contract tests. Если upstream прекращает сопровождение, immutable data schema и port позволяют заменить один adapter; собственный Stroke IR остаётся рабочим.
 
-Network нужен при первоначальной установке зависимостей или явной загрузке будущих проверенных весов; generated pages и styles не отправляются наружу. Base/dev/import-svg зависимости установлены в отдельное `.venv`; vision/HTR/serial не устанавливались.
+Network нужен при первоначальной установке зависимостей или явной загрузке будущих проверенных весов; generated pages и styles не отправляются наружу. Base/dev/import-svg/photo-cv зависимости установлены в отдельное `.venv`; HTR/serial не устанавливались.

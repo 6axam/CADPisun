@@ -64,6 +64,11 @@ analysis, and manual fallbacks are the initial page pipeline. They are local,
 inspectable, testable with exact synthetic geometry, and adequate for planar
 pages. Curved-page dewarping remains a separate future capability.
 
+TASK 03 resolves the first adapter pin as optional
+`opencv-python-headless==4.13.0.92` with locked NumPy 2.2.6. It implements only
+page proposal, orientation composition, homography, and fine deskew. This pin
+does not select the later segmentation/skeleton stack or HTR environment.
+
 ## PH-ADR-007 — Isolate HTR providers
 
 **Status:** Accepted.
@@ -126,7 +131,7 @@ shrinking or applying nonuniform per-glyph stretches.
 
 | Decision | Earliest task | Required evidence |
 |---|---|---|
-| Final image decoder and CV dependency pins | TASK 01 / TASK 03 | Linux/Windows install and real PNG/JPEG/WebP security tests |
+| Full vision worker dependency pins | TASK 05 / TASK 07 | Ruling/mask fixtures, worker isolation, Linux/Windows install |
 | Grid/ruling estimator algorithm | TASK 05 | Synthetic/real overlay errors and handwriting/table negatives |
 | Ink color/separation profiles | TASK 07 | Approved masks for representative pen/paper conditions |
 | Primary and fallback HTR provider | TASK 09 | Identical-corpus quality, latency, RAM, rights, and install report |
@@ -134,4 +139,4 @@ shrinking or applying nonuniform per-glyph stretches.
 | Stroke-order scoring weights | TASK 14 | Paired online/photo subset plus manual correction time |
 | Clustering/deduplication thresholds | TASK 15 | Repeated authentic variants with reviewer decisions |
 
-No deferred choice blocks the canonical import model in TASK 01.
+No deferred choice blocks the implemented planar correction or TASK 04.

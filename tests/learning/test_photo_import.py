@@ -339,6 +339,7 @@ def test_repository_rejects_symlink_escape_from_data_root(tmp_path: Path) -> Non
 def test_learning_core_import_does_not_load_qt() -> None:
     script = (
         "import sys; import handwriting_plotter.learning; "
-        "assert not any(name.startswith('PySide6') for name in sys.modules)"
+        "assert not any(name.startswith('PySide6') for name in sys.modules); "
+        "assert 'cv2' not in sys.modules; assert 'numpy' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", script], check=True)

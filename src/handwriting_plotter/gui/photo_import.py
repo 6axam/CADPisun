@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap, QResizeEvent, QTransform
+from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap, QResizeEvent, QTransform
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
+    QGraphicsEllipseItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
@@ -25,7 +28,14 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
-from handwriting_plotter.learning import PhotoRecord, PhotoRepository
+from handwriting_plotter.adapters.images.opencv import OpenCvPageCorrector, opencv_available
+from handwriting_plotter.learning import (
+    PageCorners,
+    PhotoRecord,
+    PhotoRepository,
+    PixelPoint,
+    persist_correction,
+)
 from handwriting_plotter.version import __version__
 
 from .i18n import Language, tr
@@ -45,6 +55,7 @@ class PhotoPreviewView(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self._item = QGraphicsPixmapItem()
         self._scene.addItem(self._item)
+        self._corner_handles: list[QGraphicsEllipseItem] = []
         self.setScene(self._scene)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -66,6 +77,45 @@ class PhotoPreviewView(QGraphicsView):
         self._item.setPixmap(pixmap)
         self._scene.setSceneRect(self._item.boundingRect())
         self.fit_image()
+
+    def clear_corners(self) -> None:
+        for handle in self._corner_handles:
+            self._scene.removeItem(handle)
+        self._corner_handles.clear()
+
+    def set_corners(self, corners: PageCorners) -> None:
+        self.clear_corners()
+        colors = ("#ff5252", "#ffd740", "#69f0ae", "#40c4ff")
+        for point, color in zip(corners.points, colors, strict=True):
+            handle = QGraphicsEllipseItem(-7, -7, 14, 14)
+            handle.setBrush(QBrush(QColor(color)))
+            handle.setPen(QPen(QColor("#202124"), 2))
+            handle.setPos(point.x, point.y)
+            handle.setZValue(10)
+            handle.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIsMovable, True)
+            handle.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+            handle.setFlag(QGraphicsEllipseItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+            self._scene.addItem(handle)
+            self._corner_handles.append(handle)
+
+    def corners(self, frame_id: str) -> PageCorners:
+        if len(self._corner_handles) != 4:
+            raise ValueError("PAGE_CORNERS_NOT_SET")
+        bounds = self._item.boundingRect()
+        points = tuple(
+            PixelPoint(
+                x=max(0.0, min(bounds.width() - 1, handle.pos().x())),
+                y=max(0.0, min(bounds.height() - 1, handle.pos().y())),
+            )
+            for handle in self._corner_handles
+        )
+        return PageCorners(
+            frame_id=frame_id,
+            top_left=points[0],
+            top_right=points[1],
+            bottom_right=points[2],
+            bottom_left=points[3],
+        )
 
     def set_zoom_factor(self, factor: float) -> None:
         self._fit = False
@@ -105,7 +155,10 @@ class PhotoImportWorkspace(QWidget):
         self.repository = PhotoRepository(root)
         self.current_record: PhotoRecord | None = None
         self._source_pixmap = QPixmap()
+        self._corrected_pixmap = QPixmap()
         self._display_rotation = 0
+        self._proposal_method = "manual-four-corner/1"
+        self._proposal_confidence = None
         self._status_key = "photo.status.empty"
         self._status_values: dict[str, object] = {}
         self._build_ui()
@@ -163,6 +216,27 @@ class PhotoImportWorkspace(QWidget):
         tools.addStretch(1)
         layout.addLayout(tools)
 
+        correction_tools = QHBoxLayout()
+        self.detect_page_button = QPushButton()
+        self.manual_corners_button = QPushButton()
+        self.apply_correction_button = QPushButton()
+        self.apply_correction_button.setEnabled(False)
+        self.deskew_check = QCheckBox()
+        self.deskew_spin = QDoubleSpinBox()
+        self.deskew_spin.setRange(-5.0, 5.0)
+        self.deskew_spin.setDecimals(2)
+        self.deskew_spin.setSingleStep(0.25)
+        self.deskew_spin.setSuffix("°")
+        self.deskew_spin.setEnabled(False)
+        correction_tools.addWidget(self.detect_page_button)
+        correction_tools.addWidget(self.manual_corners_button)
+        correction_tools.addWidget(self.apply_correction_button)
+        correction_tools.addSpacing(12)
+        correction_tools.addWidget(self.deskew_check)
+        correction_tools.addWidget(self.deskew_spin)
+        correction_tools.addStretch(1)
+        layout.addLayout(correction_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -208,6 +282,10 @@ class PhotoImportWorkspace(QWidget):
         self.rotate_left_button.clicked.connect(lambda: self.rotate_preview(-90))
         self.rotate_right_button.clicked.connect(lambda: self.rotate_preview(90))
         self.reset_button.clicked.connect(self.reset_view)
+        self.detect_page_button.clicked.connect(self.detect_page)
+        self.manual_corners_button.clicked.connect(self.enable_manual_corners)
+        self.apply_correction_button.clicked.connect(self.apply_correction)
+        self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -243,7 +321,10 @@ class PhotoImportWorkspace(QWidget):
             records = self.repository.list_records()
             if not records:
                 return
-            record = max(records, key=lambda item: item.photo.metadata.imported_at_utc)
+            record = max(
+                records,
+                key=lambda item: (item.photo.metadata.imported_at_utc, len(item.photo.transforms)),
+            )
             self._show_record(record, self._read_preview(record))
             self._set_status("photo.status.restored", name=record.photo.metadata.original_filename)
         except (OSError, ValueError) as exc:
@@ -253,15 +334,19 @@ class PhotoImportWorkspace(QWidget):
         image = QImage.fromData(self.repository.read_original(record.photo))
         if image.isNull():
             raise ValueError("PHOTO_PREVIEW_DECODE_FAILED")
-        return image
+        return self._apply_orientation(image, record.photo.metadata.embedded_orientation)
 
     def _show_record(self, record: PhotoRecord, image: QImage) -> None:
         self.current_record = record
         self._source_pixmap = QPixmap.fromImage(image)
+        self._corrected_pixmap = QPixmap()
+        self.original_view.clear_corners()
         self._display_rotation = 0
         self.original_view.set_pixmap(self._source_pixmap)
+        self._restore_correction_preview(record)
         self._refresh_corrected_preview()
         self._set_controls_enabled(True)
+        self.apply_correction_button.setEnabled(False)
         self._refresh_diagnostics()
 
     def rotate_preview(self, degrees: int) -> None:
@@ -281,8 +366,134 @@ class PhotoImportWorkspace(QWidget):
 
     def _refresh_corrected_preview(self) -> None:
         transform = QTransform().rotate(self._display_rotation)
-        display = self._source_pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        base = self._corrected_pixmap if not self._corrected_pixmap.isNull() else self._source_pixmap
+        display = base.transformed(transform, Qt.TransformationMode.SmoothTransformation)
         self.corrected_view.set_pixmap(display)
+
+    def detect_page(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            photo = self.current_record.photo
+            proposal = OpenCvPageCorrector().propose(
+                self.repository.read_original(photo),
+                orientation=photo.metadata.embedded_orientation,
+                source_frame_id=self._preview_frame_id(photo.metadata.embedded_orientation),
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.correction.failed", error=str(exc))
+            return
+        if proposal.status == "not_found" or proposal.corners is None:
+            self._set_status("photo.correction.not_found")
+            self.apply_correction_button.setEnabled(False)
+            return
+        self.original_view.set_corners(proposal.corners)
+        self._proposal_method = proposal.method
+        self._proposal_confidence = proposal.confidence
+        self.apply_correction_button.setEnabled(True)
+        confidence = f"{proposal.confidence.value:.0%}" if proposal.confidence else "—"
+        self._set_status("photo.correction.proposed", confidence=confidence)
+
+    def enable_manual_corners(self) -> None:
+        if self.current_record is None or self._source_pixmap.isNull():
+            return
+        width = self._source_pixmap.width()
+        height = self._source_pixmap.height()
+        inset_x = max(1.0, width * 0.05)
+        inset_y = max(1.0, height * 0.05)
+        self.original_view.set_corners(
+            PageCorners(
+                frame_id=self._preview_frame_id(
+                    self.current_record.photo.metadata.embedded_orientation
+                ),
+                top_left=PixelPoint(x=inset_x, y=inset_y),
+                top_right=PixelPoint(x=width - 1 - inset_x, y=inset_y),
+                bottom_right=PixelPoint(
+                    x=width - 1 - inset_x, y=height - 1 - inset_y
+                ),
+                bottom_left=PixelPoint(x=inset_x, y=height - 1 - inset_y),
+            )
+        )
+        self._proposal_method = "manual-four-corner/1"
+        self._proposal_confidence = None
+        self.apply_correction_button.setEnabled(True)
+        self._set_status("photo.correction.manual")
+
+    def apply_correction(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            photo = self.current_record.photo
+            corners = self.original_view.corners(
+                self._preview_frame_id(photo.metadata.embedded_orientation)
+            )
+            raster = OpenCvPageCorrector().correct(
+                self.repository.read_original(photo),
+                corners,
+                orientation=photo.metadata.embedded_orientation,
+                deskew_degrees=(
+                    self.deskew_spin.value() if self.deskew_check.isChecked() else 0.0
+                ),
+            )
+            correction = persist_correction(
+                self.repository,
+                self.current_record,
+                raster,
+                proposal_method=self._proposal_method,
+                confidence=self._proposal_confidence,
+            )
+            image = QImage.fromData(raster.content)
+            if image.isNull():
+                raise ValueError("CORRECTED_PHOTO_PREVIEW_FAILED")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.correction.failed", error=str(exc))
+            return
+        self.current_record = correction.record
+        self._corrected_pixmap = QPixmap.fromImage(image)
+        self._display_rotation = 0
+        self._refresh_corrected_preview()
+        self.correction_notice.setText(tr(self.language, "photo.correction.applied"))
+        self._set_status(
+            "photo.correction.complete", width=raster.width_px, height=raster.height_px
+        )
+        self._refresh_diagnostics()
+
+    def _restore_correction_preview(self, record: PhotoRecord) -> None:
+        if not record.photo.transforms:
+            self.correction_notice.setText(tr(self.language, "photo.correction.notice"))
+            return
+        transform = record.photo.transforms[-1]
+        image = QImage.fromData(
+            self.repository.derivative_path(transform.output_sha256, "png").read_bytes()
+        )
+        if image.isNull():
+            raise ValueError("CORRECTED_PHOTO_PREVIEW_FAILED")
+        self._corrected_pixmap = QPixmap.fromImage(image)
+        self.correction_notice.setText(tr(self.language, "photo.correction.applied"))
+
+    @staticmethod
+    def _preview_frame_id(orientation: str) -> str:
+        return "source-pixels" if orientation == "none" else "oriented-preview"
+
+    @staticmethod
+    def _apply_orientation(image: QImage, orientation: str) -> QImage:
+        if orientation == "none":
+            return image
+        if orientation == "mirror_horizontal":
+            return image.mirrored(True, False)
+        if orientation == "flip_vertical":
+            return image.mirrored(False, True)
+        if orientation == "rotate_180":
+            return image.transformed(QTransform().rotate(180))
+        if orientation == "rotate_90":
+            return image.transformed(QTransform().rotate(90))
+        if orientation == "rotate_270":
+            return image.transformed(QTransform().rotate(-90))
+        if orientation == "mirror_horizontal_rotate_90":
+            return image.mirrored(True, False).transformed(QTransform().rotate(-90))
+        if orientation == "flip_vertical_rotate_90":
+            return image.mirrored(True, False).transformed(QTransform().rotate(90))
+        raise ValueError("UNSUPPORTED_PHOTO_ORIENTATION")
 
     def _set_zoom(self, factor: float) -> None:
         self.original_view.set_zoom_factor(factor)
@@ -307,6 +518,9 @@ class PhotoImportWorkspace(QWidget):
             self.reset_button,
         ):
             button.setEnabled(enabled)
+        cv_enabled = enabled and opencv_available()
+        self.detect_page_button.setEnabled(cv_enabled)
+        self.manual_corners_button.setEnabled(cv_enabled)
 
     def _set_status(self, key: str, **values: object) -> None:
         self._status_key = key
@@ -319,6 +533,10 @@ class PhotoImportWorkspace(QWidget):
             return
         photo = self.current_record.photo
         metadata = photo.metadata
+        correction_status = tr(self.language, "photo.correction.pending")
+        if photo.transforms:
+            latest = photo.transforms[-1]
+            correction_status = f"{latest.algorithm_id} · {latest.output_frame_id}"
         diagnostics = (
             ("photo.diagnostics.file", metadata.original_filename),
             ("photo.diagnostics.format", f"{metadata.detected_format} · {metadata.media_type}"),
@@ -329,7 +547,7 @@ class PhotoImportWorkspace(QWidget):
             ("photo.diagnostics.hash", photo.original_sha256),
             ("photo.diagnostics.storage", str(self.current_record.path)),
             ("photo.diagnostics.ruling", photo.ruling.status),
-            ("photo.diagnostics.correction", tr(self.language, "photo.correction.pending")),
+            ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
             "\n".join(f"{tr(self.language, key)}: {value}" for key, value in diagnostics)
@@ -342,9 +560,18 @@ class PhotoImportWorkspace(QWidget):
         self.choose_button.setText(tr(language, "photo.choose"))
         self.fit_button.setText(tr(language, "photo.fit"))
         self.reset_button.setText(tr(language, "photo.reset"))
+        self.detect_page_button.setText(tr(language, "photo.correction.detect"))
+        self.manual_corners_button.setText(tr(language, "photo.correction.manual_button"))
+        self.apply_correction_button.setText(tr(language, "photo.correction.apply"))
+        self.deskew_check.setText(tr(language, "photo.correction.deskew"))
         self.original_group.setTitle(tr(language, "photo.original"))
         self.corrected_group.setTitle(tr(language, "photo.corrected"))
-        self.correction_notice.setText(tr(language, "photo.correction.notice"))
+        correction_key = (
+            "photo.correction.applied"
+            if self.current_record is not None and self.current_record.photo.transforms
+            else "photo.correction.notice"
+        )
+        self.correction_notice.setText(tr(language, correction_key))
         self.diagnostics_group.setTitle(tr(language, "photo.diagnostics"))
         self._set_status(self._status_key, **self._status_values)
         self._refresh_diagnostics()

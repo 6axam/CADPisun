@@ -30,7 +30,7 @@ jobs:
           enable-cache: true
 
       - name: Install locked test dependencies
-        run: uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev
+        run: uv sync --locked --python 3.12.12 --extra dev --extra import-svg --extra gui-dev --extra photo-cv
 
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'

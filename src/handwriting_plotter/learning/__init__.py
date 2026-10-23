@@ -20,14 +20,30 @@ from .repository import (
     load_photo_bytes,
     serialize_photo,
 )
+from .correction import (
+    CorrectedRaster,
+    CorrectionRecord,
+    PageCorrectionAdapter,
+    PageCorrectionProposal,
+    PageCorners,
+    map_point,
+    order_page_corners,
+    persist_correction,
+    validate_corners_in_frame,
+)
 
 __all__ = [
     "ConfidenceValue",
+    "CorrectedRaster",
+    "CorrectionRecord",
     "DecodedImageInfo",
     "ImageDecoder",
     "ImageTransform",
     "NotebookPhoto",
     "PageDimensions",
+    "PageCorrectionAdapter",
+    "PageCorrectionProposal",
+    "PageCorners",
     "PhotoImportLimits",
     "PhotoImportMetadata",
     "PhotoRecord",
@@ -37,5 +53,9 @@ __all__ = [
     "PixelPoint",
     "RulingEstimate",
     "load_photo_bytes",
+    "map_point",
+    "order_page_corners",
+    "persist_correction",
     "serialize_photo",
+    "validate_corners_in_frame",
 ]

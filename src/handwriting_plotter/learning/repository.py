@@ -99,6 +99,25 @@ class PhotoRepository:
         digest = self._valid_digest(digest)
         return self._safe_child(f"manifests/{digest[:2]}/{digest}.hp-photo.json")
 
+    def derivative_relative_path(self, digest: str, suffix: str) -> str:
+        digest = self._valid_digest(digest)
+        if not re.fullmatch(r"[a-z0-9]{1,12}", suffix):
+            raise ValueError("INVALID_PHOTO_DERIVATIVE_SUFFIX")
+        return f"derivatives/{digest[:2]}/{digest}.{suffix}"
+
+    def derivative_path(self, digest: str, suffix: str) -> Path:
+        return self._safe_child(self.derivative_relative_path(digest, suffix))
+
+    def store_derivative(self, content: bytes, *, suffix: str) -> tuple[str, Path]:
+        if not content:
+            raise ValueError("EMPTY_PHOTO_DERIVATIVE")
+        if len(content) > self.limits.max_encoded_bytes:
+            raise ValueError("PHOTO_DERIVATIVE_TOO_LARGE")
+        digest = sha256(content).hexdigest()
+        target = self.derivative_path(digest, suffix)
+        self._store_immutable(target, content, "PHOTO_DERIVATIVE_HASH_MISMATCH")
+        return digest, target
+
     def import_file(
         self,
         path: Path,

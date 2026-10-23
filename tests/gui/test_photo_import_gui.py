@@ -10,6 +10,9 @@ pytest.importorskip("PySide6")
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog
 
+import cv2
+import numpy as np
+
 from handwriting_plotter.gui.photo_import import PhotoImportWorkspace
 from handwriting_plotter.gui.studio import HandwritingStudio
 
@@ -20,6 +23,18 @@ def _write_photo(path: Path, width: int = 180, height: int = 120) -> bytes:
     for x in range(15, width - 15):
         image.setPixelColor(x, height // 2, QColor("#23395d"))
     assert image.save(str(path), "PNG")
+    return path.read_bytes()
+
+
+def _write_perspective_page(path: Path) -> bytes:
+    image = np.full((520, 760, 3), 32, dtype=np.uint8)
+    page = np.array(((100, 55), (665, 82), (700, 470), (72, 448)), dtype=np.int32)
+    cv2.fillConvexPoly(image, page, (244, 242, 226))
+    for y in range(125, 430, 45):
+        cv2.line(image, (105, y), (660, y + 12), (205, 175, 115), 2)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    path.write_bytes(encoded.tobytes())
     return path.read_bytes()
 
 
@@ -135,3 +150,59 @@ def test_photo_import_is_a_separate_studio_workflow(qtbot, tmp_path: Path) -> No
     assert studio.workflow_tabs.tabText(1) == "Import from photo"
     assert studio.workflow_tabs.widget(0).isAncestorOf(studio.capture_canvas)
     assert not studio.capture_canvas.isAncestorOf(studio.photo_import)
+
+
+def test_automatic_page_proposal_correction_and_restore(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "perspective.png"
+    original = _write_perspective_page(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+
+    workspace.detect_page_button.click()
+
+    assert len(workspace.original_view._corner_handles) == 4
+    assert workspace.apply_correction_button.isEnabled()
+    assert "proposal ready" in workspace.status_label.text().lower()
+    workspace.deskew_check.setChecked(True)
+    workspace.deskew_spin.setValue(0.5)
+    workspace.apply_correction_button.click()
+
+    assert workspace.current_record is not None
+    assert len(workspace.current_record.photo.transforms) == 1
+    transform = workspace.current_record.photo.transforms[0]
+    assert transform.parameters["proposal_method"] == "opencv-contour-quad/1"
+    assert transform.parameters["deskew_degrees"] == 0.5
+    assert workspace.repository.read_original(workspace.current_record.photo) == original
+    assert not workspace._corrected_pixmap.isNull()
+    assert "Correction saved" in workspace.status_label.text()
+
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert reopened.current_record is not None
+    assert len(reopened.current_record.photo.transforms) == 1
+    assert not reopened._corrected_pixmap.isNull()
+    assert "perspective correction applied" in reopened.correction_notice.text().lower()
+
+
+def test_no_page_diagnostic_leads_to_manual_corner_fallback(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "blank.png"
+    _write_photo(source, width=320, height=240)
+    workspace = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+
+    workspace.detect_page_button.click()
+
+    assert "No reliable planar page boundary" in workspace.status_label.text()
+    assert not workspace.apply_correction_button.isEnabled()
+    workspace.manual_corners_button.click()
+    assert len(workspace.original_view._corner_handles) == 4
+    assert workspace.apply_correction_button.isEnabled()
+
+    workspace.apply_correction_button.click()
+
+    assert workspace.current_record is not None
+    assert len(workspace.current_record.photo.transforms) == 1
+    assert workspace.current_record.photo.transforms[0].parameters["proposal_method"] == "manual-four-corner/1"
