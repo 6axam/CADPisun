@@ -8,7 +8,7 @@ benchmark has run yet.
 
 | Benchmark | State | Measured result |
 |---|---|---|
-| Photo import throughput and memory | NOT RUN — TASK 01 | — |
+| Photo import throughput and memory | DEFERRED — TASK 23; TASK 01 covers correctness/resource rejection | — |
 | Rectification accuracy | NOT RUN — TASK 03 | — |
 | Paper classification | NOT RUN — TASK 04 | — |
 | Grid/ruling geometry | NOT RUN — TASK 05 | — |

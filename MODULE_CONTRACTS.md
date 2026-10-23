@@ -188,6 +188,23 @@ Events: sent, accepted, status, checkpoint_confirmed, alarm, disconnect, complet
 
 Файлы `learning/{ingest,preprocess,regions,recognition,reconstruction,corrections,datasets,training}.py`; тяжёлые backends в отдельных adapter packages/envs.
 
+Реализованная ingest boundary v1 состоит из Qt-free `learning.models` и
+`learning.repository` плюс optional `adapters.images.qt`. `ImageDecoder.probe`
+получает bytes и explicit `PhotoImportLimits`, обязан выполнить настоящий полный
+decode после header limits и вернуть только dimensions/format/media type/decoder
+version/orientation. Repository не доверяет adapter limits: повторно проверяет
+dimensions и encoded size, связывает manifest с exact original hash, пишет оба
+immutable файла через fsync/atomic link и при load заново проверяет hashes/path.
+Symlink или `..`, выводящий stored path за data root, отклоняется. Внешний source
+path используется только для явного чтения выбранного пользователем файла и не
+сохраняется в portable manifest.
+
+Qt adapter поддерживает content-detected PNG, JPEG, WebP, BMP и static GIF,
+запрещает SVG/PDF/неизвестный raster и multi-frame input. Он не применяет EXIF
+transform: orientation сохраняется как metadata, а видимое преобразование станет
+явным `ImageTransform` в preprocessing. Import UI TASK 02 вызывает этот contract,
+но сам contract не импортирует PySide6.
+
 | Port | Вход → выход | Инварианты и отказ |
 |---|---|---|
 | ImagePreprocessor | SourceAsset + config + optional corners → ProcessedAsset + transforms | original immutable; неизвестный physical scale остаётся unknown; DEWARP_REQUIRED при кривизне |

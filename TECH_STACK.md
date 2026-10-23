@@ -30,6 +30,12 @@ Pydantic используется только для validation, без обл�
 не вызывает Xlib и не принуждает XWayland. `QT_QPA_PLATFORM=offscreen`
 разрешён только для CI/визуального render smoke test.
 
+Photo ingest v1 использует `QImageReader` из того же PySide6 extra как narrow
+decoder adapter для PNG/JPEG/WebP и дополнительных явно разрешённых raster
+formats. Core photo models/repository не импортируют Qt; base dependency graph и
+CLI остаются прежними. OpenCV не добавляется ради TASK 01 и впервые понадобится
+только для preprocessing после отдельного vision lock.
+
 ## 2. Тестовые зависимости
 
 | Pin | Роль | Лицензия / граница |

@@ -205,6 +205,41 @@ Confidence — набор отдельных nullable оценок: text_confide
 
 Correction operations: set_transcript, adjust_polygon, split_region, merge_regions, assign_graphemes, split_stroke, join_strokes, reverse_stroke, set_order, adjust_control_points, set_anchor, mark_critical_feature, accept/reject. Каждый op обязан сохранить source refs; split/merge не требует соответствия «одна буква = один component».
 
+### 8.1 Canonical notebook photo v1
+
+Первый реализованный SourceAsset имеет `format=hp-notebook-photo` и
+`schema_version=1.0`. Manifest — canonical UTF-8 JSON, адресованный собственным
+SHA-256. Точные исходные bytes хранятся отдельно как
+`originals/<hash-prefix>/<sha256>.bin`; manifest обязан содержать ровно этот
+безопасный относительный путь, hash и encoded size. Повторный импорт никогда не
+перезаписывает существующий content.
+
+Корень содержит `source_id`, `original_sha256`, `original_relative_path`,
+`metadata`, `page_dimensions`, `frames[]`, `transforms[]`, `regions[]` и
+`ruling`. `metadata` фиксирует только basename исходного файла, UTC import time,
+application/decoder versions, обнаруженный raster format/media type, embedded
+orientation и явный rights status. Полный внешний путь в manifest не попадает.
+
+`page_dimensions` всегда содержит pixel width/height. Физические width/height
+mm либо заданы парой с `user_entered|verified_reference`, либо оба отсутствуют
+при `physical_scale_source=unknown`. Первый `PixelFrame` совпадает с исходными
+размерами, origin top-left, X вправо, Y вниз. Каждый transform хранит input/output
+hashes и frames, algorithm id, согласованные forward/inverse 3×3 matrices и
+bounded canonical-JSON parameters. Region polygon имеет минимум три различные
+точки и ненулевую площадь, лежит в объявленном frame; parent references уникальны
+и ацикличны.
+
+Начальный `RulingEstimate` имеет `classification=unknown`,
+`status=not_evaluated` и не содержит выдуманной geometry/confidence. Confidence
+— отдельная величина 0…1 с meaning и origin; `calibrated` требует calibration
+reference и не превращает эвристику в вероятность.
+
+Provisional import limits v1: 32 MiB encoded bytes, 60 million decoded pixels,
+20,000 px на сторону и 8 MiB manifest. Decoder проверяет заголовочные размеры до
+полного decode и повторяет проверку после него. Эти пределы versioned policy,
+а не свойство пользовательского фото; их можно пересмотреть отдельной ревизией
+после измерений Linux/Windows.
+
 ## 9. Persistent storage и журнал задания
 
 ### 9.1 Desktop project v1

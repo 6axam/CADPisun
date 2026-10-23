@@ -8,9 +8,9 @@ Last updated: 2026-10-23
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 1 / 25 tasks |
-| Last completed | TASK 00 — Repository and research audit |
-| Next | TASK 01 — Canonical photo import model |
+| Completed | 2 / 25 tasks |
+| Last completed | TASK 01 — Canonical photo import model |
+| Next | TASK 02 — Photo import UI |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -92,6 +92,67 @@ Result: `223 passed in 23.73s`.
 No model weights, datasets, or user photographs were downloaded. Windows was
 not executed locally during TASK 00.
 
+## TASK 01 — Canonical photo import model
+
+Status: `[x]` DONE
+
+Completion commit: `PENDING_RECORD`
+
+### Implemented behavior
+
+- Added strict Qt-free `hp-notebook-photo/1.0` models for exact original hash,
+  import metadata, pixel/optional physical page dimensions, coordinate frames,
+  invertible image transforms, bounded canonical parameters, regions, ruling
+  placeholders, rights state, and confidence provenance.
+- Added content-addressed immutable storage. Original bytes and canonical
+  manifests have independent SHA-256 addresses, atomic link/fsync publication,
+  tamper detection, idempotent repeat import, safe relative paths, and load/list
+  APIs. Changing or deleting the external source after import cannot change the
+  stored record.
+- Added explicit default limits: 32 MiB encoded bytes, 60 million decoded
+  pixels, 20,000 px per side, and 8 MiB manifest. Both decoder and repository
+  enforce relevant limits; direct repository calls cannot bypass pixel limits.
+- Added an optional `QImageReader` adapter that content-detects and fully decodes
+  PNG, JPEG, WebP, BMP, and static GIF without applying hidden EXIF transforms.
+  Multi-frame, SVG, PDF, corrupt, unsupported, and oversized inputs are rejected.
+- The adapter imports PySide6 only when selected. Importing
+  `handwriting_plotter.learning` in the base environment does not load Qt.
+- During regression work, Qt 6.12 on the current Linux host segfaulted while
+  decoding a tiny TIFF it had encoded. TIFF was removed from the allowlist and
+  is not claimed as supported until a separately isolated cross-platform check
+  proves it safe.
+- `DATA_MODELS.md`, `MODULE_CONTRACTS.md`, and `TECH_STACK.md` now document the
+  implemented schema, import boundary, safety limits, and dependency boundary.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q tests/learning/test_photo_import.py
+```
+
+Result: `20 passed in 0.74s`. This includes real Qt encode/decode for PNG, JPEG,
+WebP, BMP, and a real static GIF fixture; canonical round trip; source mutation;
+tampered bytes/manifests; duplicate JSON; unknown schema; file/pixel/dimension
+limits; unsafe/canonical paths; symlink escape; transform/region/confidence/scale
+invariants; explicit pre-decode TIFF rejection; and the Qt-free core import boundary.
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Result: `243 passed in 23.47s`.
+
+```bash
+uv build --out-dir /tmp/cadpisun-task01-build-20261023
+```
+
+Result: source distribution and wheel built successfully; wheel inspection
+confirmed all `learning` and `adapters/images` modules are packaged.
+
+Linux was executed locally. Windows behavior remains unverified in this task;
+the repository CI installs the GUI extra on Windows, but this feature branch has
+not yet run a pull-request workflow.
+
 ## Open blockers and gates
 
 | ID | Scope | State | Unblock condition |
@@ -106,20 +167,20 @@ None of these blocks TASK 01.
 
 ## Next task estimate
 
-**TASK 01 — Canonical photo import model**
+**TASK 02 — Photo import UI**
 
 - Recommended tier: MEDIUM.
 - Complexity: 6/12 (architecture 1, modules 1, algorithms 0, examples 1,
   testing 1, regression risk 1, expected iteration 1).
-- Estimated implementation: 6k–12k tokens, roughly 15–30 tool calls, 5–8 files.
+- Estimated implementation: 7k–14k tokens, roughly 18–35 tool calls, 6–10 files.
 - Relative quota pressure: MEDIUM.
-- Main uncertainty: choosing strict decoded-pixel/decompression limits that work
-  consistently through the Qt image adapter on Linux and Windows.
-- Natural split if needed: models/repository first, real decoder/security tests
-  second. Both are required before TASK 01 can be DONE.
+- Main uncertainty: fitting original/corrected comparison, zoom/rotation and
+  diagnostics into Handwriting Studio without regressing its dense existing UI.
+- Natural split if needed: workspace/viewer first, then import persistence and
+  headless interaction tests. Both are required before TASK 02 can be DONE.
 
 Recommended message at the next boundary:
 
-> Рекомендую переключить Codex на MEDIUM, потому что следующая задача — строго
-> типизированные модели, безопасное файловое хранение и известные тесты импорта.
+> Рекомендую переключить Codex на MEDIUM, потому что следующая задача — обычный
+> PySide6 workspace поверх уже готового import contract и headless UI-тесты.
 > Сильная модель здесь не нужна.
