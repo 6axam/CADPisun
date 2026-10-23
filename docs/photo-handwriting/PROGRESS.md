@@ -8,9 +8,9 @@ Last updated: 2026-10-23
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 3 / 25 tasks |
-| Last completed | TASK 02 — Photo import UI |
-| Next | TASK 03 — Perspective and page correction |
+| Completed | 4 / 25 tasks |
+| Last completed | TASK 03 — Perspective and page correction |
+| Next | TASK 04 — Notebook paper classification |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -217,6 +217,81 @@ tabs were visible without overlap. The temporary screenshot was not committed.
 
 Linux was executed locally. Windows was not executed during TASK 02.
 
+## TASK 03 — Perspective and page correction
+
+Status: `[x]` DONE
+
+Completion commit: `332b1d75f291858d231ddd654f1296d8733d9173`
+
+### Implemented behavior
+
+- Added Qt-free corner/proposal/correction contracts with clockwise convex
+  four-corner validation, bounded output dimensions, forward/inverse 3×3
+  matrices, explicit frame IDs, and content-addressed derivative persistence.
+- Added optional `photo-cv` with pinned
+  `opencv-python-headless==4.13.0.92` and locked NumPy 2.2.6. The adapter uses
+  local blur, Canny, morphology, contour/quad filtering, homography, crop, PNG
+  encoding, and optional fine deskew. Core/base imports do not load cv2/NumPy.
+- All eight recorded orientation values have explicit raster operations and
+  matrices. Orientation, homography, and deskew compose into one source-to-
+  corrected transform; the inverse is stored and tested.
+- Output aspect ratio derives from the selected quadrilateral's opposing edge
+  lengths. The implementation never stretches a source to assumed A4 geometry.
+- Studio now displays automatic heuristic proposals as four colored draggable
+  handles. Manual corners use the identical correction path. No-page results
+  recommend the manual fallback and explicitly state that curved pages require
+  a future dewarping workflow.
+- Applying a correction writes a SHA-256-addressed PNG plus a new immutable
+  photo manifest containing the output frame, homography, source page polygon,
+  algorithm/version, parameters, and artifact path. Original bytes and earlier
+  manifests remain unchanged; identical reapplication is idempotent.
+- The last correction restores with its real rectified preview. English and
+  Ukrainian UI, install instructions, data/contracts/stack documentation,
+  benchmark record, and CI dependency installation were synchronized.
+
+### Verification
+
+```bash
+uv run pytest -q tests/learning/test_page_correction.py
+```
+
+Result: `13 passed in 1.00s`. Coverage includes corner ordering/rejection,
+automatic/no-page proposal, manual persistence, all eight orientation matrices,
+homography round trip, optional deskew, immutable source/derivative tampering,
+idempotent persistence, and reopen.
+
+```bash
+uv lock --check
+git diff --check
+uv run python -m compileall -q src tests
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Result: `264 passed in 26.49s`; lock, whitespace, and bytecode compilation
+checks passed.
+
+```bash
+uv build --out-dir /tmp/cadpisun-task03-build-gygCzT
+```
+
+Result: sdist and wheel built successfully. Wheel inspection found the new
+correction and OpenCV adapter modules. Installing the wheel without extras in a
+fresh Python 3.12.12 venv imported `handwriting_plotter.learning` without cv2 or
+NumPy.
+
+The committed clean 840×640 synthetic page fixture produced corner RMSE/max
+`0 px`; a 12×12 corrected-frame grid produced forward/inverse reprojection RMSE
+`1.24442785236e-13 px` and max `2.42835191822e-13 px`. These measurements prove
+the clean synthetic path and matrix math only, not real-photo quality.
+
+Visual QA used the full 1440×900 `MainWindow` with an angled generated notebook
+page. The automatic handles aligned with the quadrilateral and the 817×530
+rectified result, controls, notice, and diagnostics displayed without overlap.
+The temporary screenshot was not committed.
+
+Linux was executed locally. Windows was not executed during TASK 03; CI is
+configured to install `photo-cv` on Linux and Windows when a pull request runs.
+
 ## Open blockers and gates
 
 | ID | Scope | State | Unblock condition |
@@ -227,24 +302,26 @@ Linux was executed locally. Windows was not executed during TASK 02.
 | PH-BLK-004 | HandwritingDatasetGen code reuse | BLOCKED | Upstream adds a compatible explicit license; until then use papers/behavior as references only |
 | PH-BLK-005 | Windows CV/ML behavior | UNVERIFIED | Windows CI/runtime tasks execute the implemented provider and image fixtures |
 
-None of these blocks TASK 03.
+None of these blocks TASK 04.
 
 ## Next task estimate
 
-**TASK 03 — Perspective and page correction**
+**TASK 04 — Notebook paper classification**
 
 - Recommended tier: MEDIUM.
-- Complexity: 7/12 (architecture 1, modules 1, algorithms 2, examples 1,
+- Complexity: 6/12 (architecture 1, modules 1, algorithms 1, examples 1,
   testing 1, regression risk 1, expected iteration 0).
-- Estimated implementation: 8k–16k tokens, roughly 20–40 tool calls, 7–12 files.
+- Estimated implementation: 6k–12k tokens, roughly 16–32 tool calls, 6–10 files.
 - Relative quota pressure: MEDIUM.
-- Main uncertainty: robust page-corner proposal across shadows and background
-  clutter while keeping the four-corner manual fallback precise and testable.
-- Natural split if needed: Qt-free homography/transform contract first, then
-  optional OpenCV proposal and manual overlay. All are required before TASK 03
-  can be DONE.
+- Main uncertainty: separating genuine squared/ruled periodic evidence from
+  handwriting strokes, table borders, shadows, and mixed/unknown pages without
+  overstating heuristic confidence.
+- Natural split if needed: deterministic feature extraction/classification
+  first, then overlay/manual override and persistence. Both are required before
+  TASK 04 can be DONE.
 
 Recommended message at the next boundary:
 
-> Рекомендую оставить Codex на MEDIUM: следующая задача сочетает проверяемую
-> геометрию homography с ограниченным PySide6 overlay, но не требует HTR или ML.
+> Рекомендую оставить Codex на MEDIUM: следующая задача — ограниченная
+> классификация blank/squared/ruled/mixed с синтетическими fixtures и ручным
+> override, без HTR или обучения модели.
