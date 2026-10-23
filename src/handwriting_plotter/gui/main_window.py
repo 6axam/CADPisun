@@ -41,6 +41,7 @@ from .document import (
 )
 from .exporting import export_artifact
 from .i18n import Language, normalize_language, tr
+from .mode_workspaces import ArtifactModeWorkspace
 from .properties import PropertiesPanel
 from .styles import discover_styles
 from .studio import HandwritingStudio, handwriting_data_root
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         self._canvas_objects_signature: tuple | None = None
         self._margin_signature: tuple[float, float, float, float] | None = None
         self._document_dock_visibility: dict[str, bool] = {}
+        self._workspace = "document"
         self._build_canvas()
         self._build_docks()
         self._build_actions()
@@ -105,10 +107,14 @@ class MainWindow(QMainWindow):
 
     def _build_canvas(self) -> None:
         self.canvas = PageCanvas(self)
+        self.preview_workspace = ArtifactModeWorkspace("preview", self)
+        self.execution_workspace = ArtifactModeWorkspace("execution", self)
         self.studio = HandwritingStudio(self.user_data_root, language=self.language, parent=self)
         self.workspace_stack = QStackedWidget(self)
         self.workspace_stack.setObjectName("workspace-stack")
         self.workspace_stack.addWidget(self.canvas)
+        self.workspace_stack.addWidget(self.preview_workspace)
+        self.workspace_stack.addWidget(self.execution_workspace)
         self.workspace_stack.addWidget(self.studio)
         self.studio.style_published.connect(self._style_published)
         self.setCentralWidget(self.workspace_stack)
@@ -177,20 +183,17 @@ class MainWindow(QMainWindow):
         self.document_workspace_action.setChecked(True)
         self.object_mode_action = self.document_workspace_action
         self.preview_mode_action = self._action(
-            self._t("action.mode.preview"), lambda: None
+            self._t("action.mode.preview"), lambda: self.set_workspace("preview")
         )
         self.execution_mode_action = self._action(
-            self._t("action.mode.execution"), lambda: None
+            self._t("action.mode.execution"), lambda: self.set_workspace("execution")
         )
-        for action, tooltip_key in (
-            (self.preview_mode_action, "action.mode.preview_planned"),
-            (self.execution_mode_action, "action.mode.execution_planned"),
-        ):
+        for action in (self.preview_mode_action, self.execution_mode_action):
             action.setCheckable(True)
-            action.setEnabled(False)
-            action.setProperty("implementationStatus", "planned")
-            action.setToolTip(self._t(tooltip_key))
+            action.setProperty("implementationStatus", "implemented")
             self.workspace_group.addAction(action)
+        self.preview_mode_action.setToolTip(self._t("action.mode.preview_tip"))
+        self.execution_mode_action.setToolTip(self._t("action.mode.execution_tip"))
         self.preview_mode_action.setData("preview")
         self.execution_mode_action.setData("execution")
         self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
@@ -490,8 +493,8 @@ class MainWindow(QMainWindow):
         self.output_tabs.setTabText(0, self._t("tab.console"))
         self.output_tabs.setTabText(1, self._t("tab.diagnostics"))
         self.output_tabs.setTabText(2, self._t("tab.toolpath"))
-        self.preview_mode_action.setToolTip(self._t("action.mode.preview_planned"))
-        self.execution_mode_action.setToolTip(self._t("action.mode.execution_planned"))
+        self.preview_mode_action.setToolTip(self._t("action.mode.preview_tip"))
+        self.execution_mode_action.setToolTip(self._t("action.mode.execution_tip"))
         progress_state = self.generation_progress.property("state")
         if progress_state == "running":
             self.generation_progress.setFormat(self._t("status.progress.generating"))
@@ -509,16 +512,18 @@ class MainWindow(QMainWindow):
             self._t("canvas.preview_stale"),
         )
         self.properties.set_language(self.language)
+        self.preview_workspace.set_language(self.language)
+        self.execution_workspace.set_language(self.language)
         self.studio.set_language(self.language)
         self._refresh_tree(self.controller.snapshot)
         self._show_status(self._t("status.ready"), timeout=2500)
 
     def set_workspace(self, workspace: str) -> None:
-        if workspace not in {"document", "studio"}:
+        if workspace not in {"document", "preview", "execution", "studio"}:
             raise ValueError("UNKNOWN_WORKSPACE")
         docks = self._document_docks()
         if workspace == "studio":
-            if self.workspace_stack.currentWidget() is self.canvas:
+            if self._workspace == "document":
                 self._document_dock_visibility = {
                     dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
                 }
@@ -527,12 +532,31 @@ class MainWindow(QMainWindow):
                 dock.hide()
             self.studio_workspace_action.setChecked(True)
             self.telemetry_label.hide()
-        else:
+        elif workspace == "document":
             self.workspace_stack.setCurrentWidget(self.canvas)
             for dock in docks:
                 dock.setVisible(self._document_dock_visibility.get(dock.objectName(), True))
             self.document_workspace_action.setChecked(True)
             self.telemetry_label.show()
+        else:
+            if self._workspace == "document":
+                self._document_dock_visibility = {
+                    dock.objectName(): dock.toggleViewAction().isChecked() for dock in docks
+                }
+            target = self.preview_workspace if workspace == "preview" else self.execution_workspace
+            self.workspace_stack.setCurrentWidget(target)
+            for dock in docks:
+                dock.setVisible(dock in {self.modes_dock, self.view_tools_dock, self.output_dock})
+            (self.preview_mode_action if workspace == "preview" else self.execution_mode_action).setChecked(True)
+            self.telemetry_label.hide()
+            current = (
+                self.generated_result is not None
+                and self.generated_source_hash == generation_source_hash(self.controller.snapshot)
+            )
+            target.set_stale(not current)
+            if self.generated_result is None and self._generation_worker is None:
+                self.generate_page()
+        self._workspace = workspace
 
     def _document_docks(self) -> tuple[QDockWidget, ...]:
         return (
@@ -714,6 +738,8 @@ class MainWindow(QMainWindow):
                 not current,
                 self._t("canvas.preview_stale"),
             )
+            self.preview_workspace.set_stale(not current)
+            self.execution_workspace.set_stale(not current)
             if current:
                 self.generated_revision = revision
                 self._update_export_actions()
@@ -839,6 +865,8 @@ class MainWindow(QMainWindow):
         self._regeneration_pending = True
         self._regeneration_timer.start()
         self.canvas.clear_artifacts()
+        self.preview_workspace.clear()
+        self.execution_workspace.clear()
         self.generated_result = None
         self.generated_revision = None
         self.generated_source_hash = None
@@ -995,6 +1023,8 @@ class MainWindow(QMainWindow):
         self._selected_kind, self._selected_value = "page", None
         self.controller.reset(default_project())
         self.canvas.clear_artifacts()
+        self.preview_workspace.clear()
+        self.execution_workspace.clear()
         self.generated_result = None
         self.generated_revision = None
         self.generated_source_hash = None
@@ -1015,6 +1045,8 @@ class MainWindow(QMainWindow):
             self._selected_kind, self._selected_value = "page", None
             self.controller.reset(loaded.snapshot, Path(filename))
             self.canvas.clear_artifacts()
+            self.preview_workspace.clear()
+            self.execution_workspace.clear()
             self.generated_result = None
             self.generated_revision = None
             self.generated_source_hash = None
@@ -1100,6 +1132,13 @@ class MainWindow(QMainWindow):
         files = result.files
         self.canvas.set_artifacts(files["page-0001.svg"], files["page-0001.preview.svg"],
                                   files["page-0001.plan.json"])
+        for workspace in (self.preview_workspace, self.execution_workspace):
+            workspace.set_artifacts(
+                files["page-0001.svg"],
+                files["page-0001.preview.svg"],
+                files["page-0001.plan.json"],
+                files["page-0001.gcode"],
+            )
         self.canvas.set_object_overflows(result.report.get("overflow_object_ids", ()))
         self.canvas.set_preview_stale(False, self._t("canvas.preview_stale"))
         diagnostics = result.report.get("diagnostics", [])
@@ -1228,7 +1267,7 @@ class MainWindow(QMainWindow):
 
     def _save_window_state(self) -> None:
         docks = self._document_docks()
-        if self.workspace_stack.currentWidget() is self.studio:
+        if self._workspace != "document":
             visibility = self._document_dock_visibility
         else:
             visibility = {

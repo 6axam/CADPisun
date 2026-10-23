@@ -70,7 +70,7 @@ def test_issue_nine_splits_responsive_tool_docks_and_exposes_them_in_view(qtbot,
     assert window.editing_tools_panel.column_count > 1
 
 
-def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds(qtbot, tmp_path) -> None:
+def test_issue_nine_modes_switch_to_real_preview_and_execution_workspaces(qtbot, tmp_path) -> None:
     window = isolated_window(tmp_path, "issue-seven-modes")
     qtbot.addWidget(window)
     window.show()
@@ -80,12 +80,31 @@ def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds
     assert window.modes_dock.toggleViewAction() in window.view_menu.actions()
     assert window.object_mode_action.isChecked()
     assert window.object_mode_action.isEnabled()
-    assert not window.preview_mode_action.isEnabled()
-    assert not window.execution_mode_action.isEnabled()
-    assert window.preview_mode_action.property("implementationStatus") == "planned"
-    assert window.execution_mode_action.property("implementationStatus") == "planned"
+    assert window.preview_mode_action.isEnabled()
+    assert window.execution_mode_action.isEnabled()
+    assert window.preview_mode_action.property("implementationStatus") == "implemented"
+    assert window.execution_mode_action.property("implementationStatus") == "implemented"
     assert window.preview_mode_action.data() == "preview"
     assert window.execution_mode_action.data() == "execution"
+
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    window.preview_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.preview_workspace
+    assert window.preview_workspace.has_artifact
+    assert "G21" in window.preview_workspace.gcode.toPlainText()
+    assert window.preview_workspace.timeline.maximum() > 0
+
+    window.execution_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.execution_workspace
+    assert "SIMULATION ONLY" in window.execution_workspace.state_label.text()
+    before = window.execution_workspace.timeline.value()
+    window.execution_workspace.play_button.click()
+    qtbot.waitUntil(lambda: window.execution_workspace.timeline.value() > before, timeout=2_000)
+    window.execution_workspace.play_button.click()
+
+    window.object_mode_action.trigger()
+    assert window.workspace_stack.currentWidget() is window.canvas
 
 
 def test_properties_scroll_and_output_dock_use_non_overlapping_corner(qtbot, tmp_path) -> None:

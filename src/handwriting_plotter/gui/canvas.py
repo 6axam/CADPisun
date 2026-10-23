@@ -144,6 +144,8 @@ class PageCanvas(QGraphicsView):
         self.scene().addItem(self._selection_item)
         self._show_travel = False
         self._show_markers = False
+        self._interaction_enabled = True
+        self._head_item: QGraphicsEllipseItem | None = None
         self._preview_is_stale = False
         self._page_rect = QRectF(0.0, 0.0, self.PAGE_WIDTH_MM, self.PAGE_HEIGHT_MM)
         self._build_page()
@@ -228,8 +230,39 @@ class PageCanvas(QGraphicsView):
         self._production_item = None
         self._preview_item = None
         self._marker_items.clear()
+        self.set_head_position(None)
         self.set_object_overflows(())
         self.set_preview_stale(False)
+
+    def set_interaction_enabled(self, enabled: bool) -> None:
+        """Enable object editing while retaining zoom and pan navigation."""
+
+        self._interaction_enabled = enabled
+        if not enabled:
+            self._reset_pointer_operation()
+
+    def set_head_position(self, point: QPointF | None, *, pen_down: bool = False) -> None:
+        """Show the virtual plotter head at a logical page position."""
+
+        if point is None:
+            if self._head_item is not None and self._head_item.scene() is self.scene():
+                self.scene().removeItem(self._head_item)
+            self._head_item = None
+            return
+        if self._head_item is None:
+            self._head_item = QGraphicsEllipseItem()
+            self._head_item.setZValue(40)
+            self.scene().addItem(self._head_item)
+        diameter = 4.2
+        self._head_item.setRect(
+            point.x() - diameter / 2,
+            point.y() - diameter / 2,
+            diameter,
+            diameter,
+        )
+        self._head_item.setPen(QPen(QColor("#ffffff"), 0.45))
+        self._head_item.setBrush(QColor("#ef6b73" if pen_down else "#4b8df8"))
+        self._head_item.show()
 
     def set_preview_stale(self, stale: bool, label: str | None = None) -> None:
         self._preview_is_stale = bool(stale and self.has_artifact)
@@ -499,6 +532,9 @@ class PageCanvas(QGraphicsView):
         self._resize_initial_rect = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._interaction_enabled:
+            super().mousePressEvent(event)
+            return
         if event.button() == Qt.MouseButton.LeftButton and self.dragMode() == QGraphicsView.DragMode.NoDrag:
             point = self.mapToScene(event.position().toPoint())
             self._selection_origin = point
@@ -534,7 +570,7 @@ class PageCanvas(QGraphicsView):
         self.cursor_position_changed.emit(
             QPointF(scene_point) if self._page_rect.contains(scene_point) else None
         )
-        if self._selection_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
+        if self._interaction_enabled and self._selection_origin is not None and event.buttons() & Qt.MouseButton.LeftButton:
             self._selection_current = scene_point
             if self._active_resize_handle is not None:
                 self._preview_resize(scene_point)
@@ -569,6 +605,9 @@ class PageCanvas(QGraphicsView):
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._interaction_enabled:
+            super().mouseReleaseEvent(event)
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._selection_origin is not None:
             end = self.mapToScene(event.position().toPoint())
             if self._active_resize_handle is not None and self._resize_object_id is not None:
