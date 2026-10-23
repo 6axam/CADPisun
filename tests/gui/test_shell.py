@@ -5,6 +5,8 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox
 
 from handwriting_plotter.gui.document import ProjectSnapshot, TextObject
 from handwriting_plotter.gui.main_window import MainWindow
@@ -183,6 +185,67 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
     qtbot.addWidget(reopened)
     assert reopened.language == "uk"
     assert reopened.ukrainian_language_action.isChecked()
+
+
+def test_controls_dialog_lists_current_shortcuts_and_canvas_gestures(qtbot, tmp_path) -> None:
+    from handwriting_plotter.gui.dialogs import ControlsDialog
+
+    window = isolated_window(tmp_path, "controls")
+    qtbot.addWidget(window)
+    dialog = ControlsDialog(window._shortcut_bindings(), language="en", parent=window)
+    qtbot.addWidget(dialog)
+
+    labels = [dialog.table.item(row, 0).text() for row in range(dialog.table.rowCount())]
+    shortcuts = [dialog.table.item(row, 1).text() for row in range(dialog.table.rowCount())]
+    assert "Generate Page" in labels
+    assert any("Ctrl" in value and ("Enter" in value or "Return" in value) for value in shortcuts)
+    gestures = dialog.findChild(QLabel, "controls-gestures")
+    assert "Ctrl+click" in gestures.text()
+    assert "Space+drag" in gestures.text()
+    assert window.controls_action in window.help_menu.actions()
+
+
+def test_program_settings_remaps_shortcut_changes_language_and_persists(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    from handwriting_plotter.gui.dialogs import ProgramSettingsDialog
+
+    settings_path = str(tmp_path / "program-settings.ini")
+    window = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))
+    qtbot.addWidget(window)
+
+    def configure(dialog):
+        dialog.shortcut_edits["generate"].setKeySequence(QKeySequence("Ctrl+G"))
+        dialog.language_combo.setCurrentIndex(dialog.language_combo.findData("uk"))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ProgramSettingsDialog, "exec", configure)
+    window._show_program_settings()
+
+    assert window.generate_action.shortcut() == QKeySequence("Ctrl+G")
+    assert window.language == "uk"
+    reopened = MainWindow(QSettings(settings_path, QSettings.Format.IniFormat))
+    qtbot.addWidget(reopened)
+    assert reopened.generate_action.shortcut() == QKeySequence("Ctrl+G")
+    assert reopened.language == "uk"
+
+
+def test_about_reports_build_project_format_and_hardware_status(qtbot, tmp_path, monkeypatch) -> None:
+    window = isolated_window(tmp_path, "about")
+    qtbot.addWidget(window)
+    captured = {}
+    monkeypatch.setattr(
+        QMessageBox,
+        "about",
+        lambda _parent, title, body: captured.update(title=title, body=body),
+    )
+
+    window._about()
+
+    assert "Handwriting Plotter" in captured["title"]
+    assert "hp-desktop-project/1.5" in captured["body"]
+    assert "simulation only" in captured["body"]
+    assert "github.com/6axam/CADPisun" in captured["body"]
 
 
 def test_canvas_selection_is_mirrored_in_tree_and_batch_delete_is_undoable(qtbot, tmp_path) -> None:

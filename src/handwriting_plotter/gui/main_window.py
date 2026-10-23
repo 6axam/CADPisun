@@ -41,6 +41,7 @@ from .document import (
     load_project_file,
     save_project,
 )
+from .dialogs import ControlsDialog, ProgramSettingsDialog, ShortcutBinding
 from .exporting import export_artifact, export_page_png
 from .i18n import Language, normalize_language, tr
 from .mode_workspaces import ArtifactModeWorkspace
@@ -228,6 +229,7 @@ class MainWindow(QMainWindow):
             self.export_svg_action, self.export_preview_action, self.export_png_action,
             self.export_gcode_action, self.export_report_action,
         )
+        self._configure_shortcuts()
         self._update_export_actions()
 
     def _build_tool_docks(self) -> None:
@@ -323,12 +325,18 @@ class MainWindow(QMainWindow):
         self.tools_menu.addAction(self.generate_action)
         self.tools_menu.addSeparator()
         self.tools_menu.addAction(self.studio_workspace_action)
+        self.tools_menu.addSeparator()
+        self.program_settings_action = self._action(
+            self._t("action.program_settings"), self._show_program_settings
+        )
+        self.tools_menu.addAction(self.program_settings_action)
         self.machine_menu = self.menuBar().addMenu(self._t("menu.machine"))
         self.virtual_profile_action = self._action(self._t("action.virtual_profile"), self._virtual_profile_info)
         self.machine_menu.addAction(self.virtual_profile_action)
         self.help_menu = self.menuBar().addMenu(self._t("menu.help"))
+        self.controls_action = self._action(self._t("action.controls"), self._show_controls, "F1")
         self.about_action = self._action(self._t("action.about"), self._about)
-        self.help_menu.addAction(self.about_action)
+        self.help_menu.addActions([self.controls_action, self.about_action])
 
     def _build_status_bar(self) -> None:
         self._canvas_fps = 0.0
@@ -485,6 +493,8 @@ class MainWindow(QMainWindow):
             self.export_gcode_action: "action.export_gcode",
             self.export_report_action: "action.export_report",
             self.virtual_profile_action: "action.virtual_profile",
+            self.program_settings_action: "action.program_settings",
+            self.controls_action: "action.controls",
             self.about_action: "action.about",
             self.fit_page_action: "action.fit_page",
             self.travel_action: "action.travel",
@@ -1404,7 +1414,83 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         return action
 
+    def _configure_shortcuts(self) -> None:
+        specifications = (
+            ("new", self.new_action, "Ctrl+N"),
+            ("open", self.open_action, "Ctrl+O"),
+            ("import_artwork", self.import_artwork_action, "Ctrl+Shift+I"),
+            ("save", self.save_action, "Ctrl+S"),
+            ("save_as", self.save_as_action, "Ctrl+Shift+S"),
+            ("undo", self.undo_action, "Ctrl+Z"),
+            ("redo", self.redo_action, "Ctrl+Shift+Z"),
+            ("add_text", self.add_text_action, "Insert"),
+            ("delete", self.delete_action, "Delete"),
+            ("generate", self.generate_action, "Ctrl+Return"),
+            ("fit_page", self.fit_page_action, "F"),
+        )
+        self._shortcut_specs = specifications
+        for identifier, action, default in specifications:
+            stored = self.settings.value(f"shortcuts/{identifier}", None)
+            action.setShortcut(QKeySequence(str(stored) if stored is not None else default))
+
+    def _shortcut_bindings(self) -> tuple[ShortcutBinding, ...]:
+        return tuple(
+            ShortcutBinding(identifier, action.text(), action, default)
+            for identifier, action, default in self._shortcut_specs
+        )
+
+    def _show_controls(self) -> None:
+        dialog = ControlsDialog(self._shortcut_bindings(), language=self.language, parent=self)
+        dialog.exec()
+
+    def _show_program_settings(self) -> None:
+        dialog = ProgramSettingsDialog(
+            self._shortcut_bindings(), language=self.language, parent=self
+        )
+        if dialog.exec() != ProgramSettingsDialog.DialogCode.Accepted:
+            return
+        for identifier, sequence in dialog.shortcut_values().items():
+            action = next(action for key, action, _default in self._shortcut_specs if key == identifier)
+            action.setShortcut(sequence)
+            self.settings.setValue(
+                f"shortcuts/{identifier}",
+                sequence.toString(QKeySequence.SequenceFormat.PortableText),
+            )
+        if dialog.reset_layout_requested:
+            self._reset_dock_layout()
+        self.settings.sync()
+        self.set_language(dialog.selected_language)
+
+    def _reset_dock_layout(self) -> None:
+        self.set_workspace("document")
+        for dock in self._document_docks():
+            dock.setFloating(False)
+            dock.show()
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tools_dock)
+        self.splitDockWidget(self.project_dock, self.project_tools_dock, Qt.Orientation.Vertical)
+        self.splitDockWidget(self.project_tools_dock, self.editing_tools_dock, Qt.Orientation.Vertical)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.properties_dock)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.modes_dock)
+        self.splitDockWidget(self.modes_dock, self.view_tools_dock, Qt.Orientation.Horizontal)
+        self.resizeDocks(
+            [self.project_dock, self.properties_dock], [275, 340], Qt.Orientation.Horizontal
+        )
+        self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
+        self._document_dock_visibility = {
+            dock.objectName(): True for dock in self._document_docks()
+        }
+        self.settings.remove("main/state")
+        self.settings.remove("main/geometry")
+        self.settings.remove("main/document_docks")
+
     def _about(self) -> None:
-        QMessageBox.about(self, "About Handwriting Plotter",
-                          f"Handwriting Plotter {__version__}\n\n"
-                          "Deterministic single-line handwriting and virtual plotter planning.")
+        QMessageBox.about(
+            self,
+            self._t("about.title"),
+            self._t("about.body").format(
+                version=__version__,
+                styles=len(tuple(style for style in self.styles if style.valid)),
+            ),
+        )
