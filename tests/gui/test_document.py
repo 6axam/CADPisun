@@ -396,8 +396,13 @@ def test_text_properties_expose_issue_five_controls_and_ukrainian_labels(qtbot) 
     assert panel._labels["properties.x_height"].text() == "Висота символів"
     assert len(panel.color_group_buttons) == 16
     assert panel.color_group_buttons[3].isChecked()
-    assert panel.content_layout.getItemPosition(panel.content_layout.indexOf(panel.name_field))[0] == 1
-    assert panel.content_layout.getItemPosition(panel.content_layout.indexOf(panel.text_field))[0] == 1
+    panel.resize(600, 900)
+    panel.show()
+    qtbot.wait(1)
+    assert abs(panel.name_field.width() - panel.text_field.width()) <= 2
+    assert abs(panel.display_diameter_field.width() - panel.text_field.width()) <= 2
+    assert panel.display_diameter_field.geometry().top() < panel.text_field.geometry().bottom()
+    assert panel.color_palette.width() >= panel.text_field.width() * 2 - 20
 
     panel.character_spacing_field.setValue(2.0)
     panel.rotation_field.setValue(-25)

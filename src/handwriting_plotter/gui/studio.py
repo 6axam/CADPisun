@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -211,7 +212,7 @@ class HandwritingStudio(QWidget):
         center_layout.setContentsMargins(6, 0, 6, 0)
         self.capture_canvas = HandwritingCaptureWidget()
         center_layout.addWidget(self.capture_canvas, 1)
-        primary_controls = QHBoxLayout()
+        primary_controls = QGridLayout()
         self.undo_button = QPushButton()
         self.redo_button = QPushButton()
         self.remove_stroke_button = QPushButton()
@@ -221,12 +222,12 @@ class HandwritingStudio(QWidget):
         self.retry_button = QPushButton()
         self.open_existing_button = QPushButton()
         self.reject_button = QPushButton()
-        for button in (
+        for index, button in enumerate((
             self.undo_button, self.redo_button, self.remove_stroke_button,
             self.clear_button, self.retry_button, self.save_button, self.save_next_button,
             self.open_existing_button, self.reject_button,
-        ):
-            primary_controls.addWidget(button)
+        )):
+            primary_controls.addWidget(button, index // 5, index % 5)
         center_layout.addLayout(primary_controls)
         view_controls = QHBoxLayout()
         self.points_check = QCheckBox()
@@ -241,7 +242,7 @@ class HandwritingStudio(QWidget):
             view_controls.addWidget(widget)
         view_controls.addStretch(1)
         center_layout.addLayout(view_controls)
-        processing_controls = QHBoxLayout()
+        processing_controls = QGridLayout()
         self.tolerance_label = QLabel()
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setObjectName("studio-processing-tolerance")
@@ -260,14 +261,13 @@ class HandwritingStudio(QWidget):
         self.raw_check.setChecked(True)
         self.processed_check = QCheckBox()
         self.processed_check.setChecked(True)
-        for widget in (
+        for index, widget in enumerate((
             self.tolerance_label, self.tolerance_spin, self.smoothing_label, self.smoothing_spin,
             self.process_button, self.undo_processing_button, self.raw_check, self.processed_check,
-        ):
-            processing_controls.addWidget(widget)
-        processing_controls.addStretch(1)
+        )):
+            processing_controls.addWidget(widget, index // 4, index % 4)
         center_layout.addLayout(processing_controls)
-        normalization_controls = QHBoxLayout()
+        normalization_controls = QGridLayout()
         self.physical_size_label = QLabel()
         self.physical_size_spin = QDoubleSpinBox()
         self.physical_size_spin.setRange(2.5, 5.0)
@@ -290,15 +290,14 @@ class HandwritingStudio(QWidget):
         self.set_metrics_button = QPushButton()
         self.normalize_button = QPushButton()
         self.normalize_button.setObjectName("studio-normalize")
-        for widget in (
+        for index, widget in enumerate((
             self.physical_size_label, self.physical_size_spin,
             self.left_bearing_label, self.left_bearing_spin,
             self.right_bearing_label, self.right_bearing_spin,
             self.baseline_offset_label, self.baseline_offset_spin,
             self.set_metrics_button, self.normalize_button,
-        ):
-            normalization_controls.addWidget(widget)
-        normalization_controls.addStretch(1)
+        )):
+            normalization_controls.addWidget(widget, index // 5, index % 5)
         center_layout.addLayout(normalization_controls)
         upper.addWidget(center)
 
@@ -487,9 +486,14 @@ class HandwritingStudio(QWidget):
         right_scroll.setWidgetResizable(True)
         right_scroll.setWidget(right)
         upper.addWidget(right_scroll)
+        self.collection_panel.setMinimumWidth(200)
+        center.setMinimumWidth(420)
+        right_scroll.setMinimumWidth(260)
+        upper.setChildrenCollapsible(False)
         upper.setStretchFactor(0, 1)
         upper.setStretchFactor(1, 4)
         upper.setStretchFactor(2, 1)
+        upper.setSizes((230, 650, 300))
 
         diagnostics_panel = QWidget()
         diagnostics_layout = QVBoxLayout(diagnostics_panel)

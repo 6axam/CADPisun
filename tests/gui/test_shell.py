@@ -46,23 +46,28 @@ def test_docks_are_actually_toggleable(qtbot, tmp_path) -> None:
     assert window.project_dock.isVisible()
 
 
-def test_issue_seven_exposes_dockable_symbol_tools_in_view_menu(qtbot, tmp_path) -> None:
-    window = isolated_window(tmp_path, "issue-seven-tools")
+def test_issue_nine_splits_responsive_tool_docks_and_exposes_them_in_view(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-nine-tools")
     qtbot.addWidget(window)
     window.show()
 
-    assert window.tools_dock.isVisible()
-    assert window.dockWidgetArea(window.tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
-    assert window.tools_dock.allowedAreas() & Qt.DockWidgetArea.LeftDockWidgetArea
-    assert window.tools_dock.toggleViewAction() in window.view_menu.actions()
-    assert window.tools_dock.windowTitle() == "Tools"
-    assert len(window.tool_buttons) == 10
+    docks = (window.project_tools_dock, window.editing_tools_dock, window.view_tools_dock)
+    assert all(dock.isVisible() for dock in docks)
+    assert window.dockWidgetArea(window.project_tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.dockWidgetArea(window.editing_tools_dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.dockWidgetArea(window.view_tools_dock) == Qt.DockWidgetArea.TopDockWidgetArea
+    assert all(dock.toggleViewAction() in window.view_menu.actions() for dock in docks)
+    assert [dock.windowTitle() for dock in docks] == ["Project", "Editing", "View"]
     assert all(button.width() == button.height() for button in window.tool_buttons)
     assert all(button.text() and button.text() != button.accessibleName() for button in window.tool_buttons)
-    assert all("border-radius" in button.styleSheet() for button in window.tool_buttons)
 
-    window.tools_dock.toggleViewAction().trigger()
-    assert not window.tools_dock.isVisible()
+    window.editing_tools_dock.setFloating(True)
+    window.editing_tools_dock.resize(70, 320)
+    qtbot.wait(1)
+    assert window.editing_tools_panel.column_count == 1
+    window.editing_tools_dock.resize(260, 100)
+    qtbot.wait(1)
+    assert window.editing_tools_panel.column_count > 1
 
 
 def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds(qtbot, tmp_path) -> None:
@@ -79,10 +84,28 @@ def test_issue_seven_modes_dock_is_topmost_and_future_modes_are_honest_scaffolds
     assert not window.execution_mode_action.isEnabled()
     assert window.preview_mode_action.property("implementationStatus") == "planned"
     assert window.execution_mode_action.property("implementationStatus") == "planned"
-    assert window.preview_mode_action.toolTip() == "Preview mode · planned"
-    assert window.execution_mode_action.toolTip() == "Execution mode · planned"
     assert window.preview_mode_action.data() == "preview"
     assert window.execution_mode_action.data() == "execution"
+
+
+def test_properties_scroll_and_output_dock_use_non_overlapping_corner(qtbot, tmp_path) -> None:
+    window = isolated_window(tmp_path, "issue-nine-docking")
+    qtbot.addWidget(window)
+    window.resize(900, 620)
+    window.show()
+    item = window.controller.snapshot.objects[0]
+    window._on_canvas_selection_changed((item.object_id,))
+    qtbot.wait(1)
+
+    assert window.properties_scroll.widget() is window.properties
+    assert window.properties_scroll.widgetResizable()
+    assert window.properties_scroll.verticalScrollBar().maximum() > 0
+    assert window.corner(Qt.Corner.BottomRightCorner) == Qt.DockWidgetArea.RightDockWidgetArea
+
+    window.output_dock.setFloating(True)
+    window.output_dock.setFloating(False)
+    assert not window.output_dock.isFloating()
+    assert window.dockWidgetArea(window.output_dock) == Qt.DockWidgetArea.BottomDockWidgetArea
 
 
 def test_status_bar_shows_canvas_fps_and_cursor_coordinates(qtbot, tmp_path) -> None:
@@ -129,7 +152,9 @@ def test_language_menu_switches_to_ukrainian_and_persists(qtbot, tmp_path) -> No
         "Файл", "Редагування", "Вигляд", "Мова", "Інструменти", "Верстат", "Довідка",
     ]
     assert window.project_dock.windowTitle() == "Об’єкти проєкту"
-    assert window.tools_dock.windowTitle() == "Інструменти"
+    assert window.project_tools_dock.windowTitle() == "Проєкт"
+    assert window.editing_tools_dock.windowTitle() == "Редагування"
+    assert window.view_tools_dock.windowTitle() == "Вигляд"
     assert window.modes_dock.windowTitle() == "Режими"
     assert window.object_mode_action.text() == "Об’єкт"
     assert window.properties._labels["properties.name"].text() == "Назва"

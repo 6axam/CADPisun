@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
@@ -48,10 +48,10 @@ def test_composition_builds_one_authoritative_plan_for_positioned_objects() -> N
     assert any(stroke.startswith("second/") for stroke in stroke_ids)
 
 
-def test_generation_progress_reports_running_success_and_failure(qtbot) -> None:
+def test_generation_progress_reports_running_success_and_failure(qtbot, tmp_path) -> None:
     from handwriting_plotter.gui.main_window import MainWindow
 
-    window = MainWindow()
+    window = MainWindow(QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat))
     qtbot.addWidget(window)
     window.show()
 

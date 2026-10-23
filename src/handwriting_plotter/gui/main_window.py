@@ -11,17 +11,16 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
-    QGridLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QScrollArea,
     QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +45,7 @@ from .properties import PropertiesPanel
 from .styles import discover_styles
 from .studio import HandwritingStudio, handwriting_data_root
 from .theme import COLORS
+from .tool_panels import ResponsiveActionPanel
 from .workers import GenerationWorker
 
 ROLE_KIND = int(Qt.ItemDataRole.UserRole)
@@ -131,10 +131,20 @@ class MainWindow(QMainWindow):
         self.project_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         project_layout.addWidget(self.project_tree)
         self.project_dock = self._dock(self._t("dock.project"), "project-dock", project_panel)
+        self.project_dock.setMinimumWidth(200)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_dock)
 
         self.properties = PropertiesPanel(self.styles, language=self.language)
-        self.properties_dock = self._dock(self._t("dock.properties"), "properties-dock", self.properties)
+        self.properties_scroll = QScrollArea()
+        self.properties_scroll.setObjectName("properties-scroll")
+        self.properties_scroll.setWidgetResizable(True)
+        self.properties_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.properties_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.properties_scroll.setWidget(self.properties)
+        self.properties_dock = self._dock(
+            self._t("dock.properties"), "properties-dock", self.properties_scroll
+        )
+        self.properties_dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.properties_dock)
 
         self.console = self._read_only_log("Application events will appear here.")
@@ -147,6 +157,8 @@ class MainWindow(QMainWindow):
         self.output_tabs.addTab(self.toolpath, self._t("tab.toolpath"))
         self.output_dock = self._dock(self._t("dock.output"), "output-dock", self.output_tabs)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.output_dock)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
         self.resizeDocks([self.project_dock, self.properties_dock], [275, 340], Qt.Orientation.Horizontal)
         self.resizeDocks([self.output_dock], [200], Qt.Orientation.Vertical)
 
@@ -208,80 +220,66 @@ class MainWindow(QMainWindow):
         )
         self._update_export_actions()
 
-    def _symbol_button(self, symbol: str, action: QAction, object_name: str) -> QToolButton:
-        button = QToolButton()
-        button.setObjectName(object_name)
-        button.setText(symbol)
-        button.setFixedSize(38, 38)
-        button.setCheckable(action.isCheckable())
-        button.setStyleSheet(
-            "QToolButton { border: 1px solid #343943; border-radius: 6px; "
-            "background: #262A31; font-size: 16px; font-weight: 600; padding: 0; }"
-            "QToolButton:hover { border-color: #64A0FF; background: #303640; }"
-            "QToolButton:checked { border-color: #4B8DF8; background: #294F86; }"
-            "QToolButton:disabled { color: #676E79; background: #202329; }"
-        )
-
-        def sync_action() -> None:
-            label = action.text().replace("&", "")
-            button.setAccessibleName(label)
-            button.setToolTip(action.toolTip() or label)
-            button.setEnabled(action.isEnabled())
-            button.setChecked(action.isChecked())
-
-        button.clicked.connect(lambda _checked=False: action.trigger())
-        action.changed.connect(sync_action)
-        sync_action()
-        return button
-
     def _build_tool_docks(self) -> None:
-        tools_panel = QWidget()
-        tools_layout = QGridLayout(tools_panel)
-        tools_layout.setContentsMargins(6, 6, 6, 6)
-        tools_layout.setSpacing(5)
-        specifications = (
+        project_specifications = (
             ("◇", self.new_action, "tool-new"),
             ("↥", self.open_action, "tool-open"),
             ("▣", self.save_action, "tool-save"),
+            ("▶", self.generate_action, "tool-generate"),
+        )
+        editing_specifications = (
+            ("↶", self.undo_action, "tool-undo"),
+            ("↷", self.redo_action, "tool-redo"),
             ("T+", self.add_text_action, "tool-add-text"),
             ("▦", self.add_grid_action, "tool-add-grid"),
             ("⌫", self.delete_action, "tool-delete"),
-            ("▶", self.generate_action, "tool-generate"),
+        )
+        view_specifications = (
             ("⛶", self.fit_page_action, "tool-fit-page"),
             ("↝", self.travel_action, "tool-travel"),
             ("●", self.markers_action, "tool-markers"),
         )
-        self.tool_buttons = []
-        for index, (symbol, action, name) in enumerate(specifications):
-            button = self._symbol_button(symbol, action, name)
-            tools_layout.addWidget(button, index // 5, index % 5)
-            self.tool_buttons.append(button)
-        self.add_text_button = self.tool_buttons[3]
-        self.add_grid_button = self.tool_buttons[4]
-        self.remove_text_button = self.tool_buttons[5]
-        tools_layout.setRowStretch(2, 1)
-        self.tools_dock = self._dock(self._t("dock.tools"), "tools-dock", tools_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.tools_dock)
-        self.splitDockWidget(self.project_dock, self.tools_dock, Qt.Orientation.Vertical)
-        self.resizeDocks([self.project_dock, self.tools_dock], [620, 150], Qt.Orientation.Vertical)
+        self.project_tools_panel = ResponsiveActionPanel(project_specifications)
+        self.editing_tools_panel = ResponsiveActionPanel(editing_specifications)
+        self.view_tools_panel = ResponsiveActionPanel(view_specifications)
+        self.project_tools_dock = self._dock(
+            self._t("dock.project_tools"), "project-tools-dock", self.project_tools_panel
+        )
+        self.editing_tools_dock = self._dock(
+            self._t("dock.editing"), "editing-tools-dock", self.editing_tools_panel
+        )
+        self.view_tools_dock = self._dock(
+            self._t("dock.view_tools"), "view-tools-dock", self.view_tools_panel
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tools_dock)
+        self.splitDockWidget(self.project_dock, self.project_tools_dock, Qt.Orientation.Vertical)
+        self.splitDockWidget(self.project_tools_dock, self.editing_tools_dock, Qt.Orientation.Vertical)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.editing_tools_dock)
+        self.resizeDocks(
+            [self.project_dock, self.project_tools_dock, self.editing_tools_dock],
+            [560, 105, 105],
+            Qt.Orientation.Vertical,
+        )
+        self.tool_buttons = list(
+            self.project_tools_panel.buttons
+            + self.editing_tools_panel.buttons
+            + self.view_tools_panel.buttons
+        )
+        self.add_text_button = self.editing_tools_panel.buttons[2]
+        self.add_grid_button = self.editing_tools_panel.buttons[3]
+        self.remove_text_button = self.editing_tools_panel.buttons[4]
 
-        modes_panel = QWidget()
-        modes_layout = QGridLayout(modes_panel)
-        modes_layout.setContentsMargins(6, 6, 6, 6)
-        modes_layout.setSpacing(5)
         mode_specs = (
             ("□", self.object_mode_action, "mode-object"),
             ("▶", self.preview_mode_action, "mode-preview"),
             ("⚙", self.execution_mode_action, "mode-execution"),
         )
-        self.mode_buttons = []
-        for column, (symbol, action, name) in enumerate(mode_specs):
-            button = self._symbol_button(symbol, action, name)
-            modes_layout.addWidget(button, 0, column)
-            self.mode_buttons.append(button)
-        modes_layout.setColumnStretch(len(mode_specs), 1)
-        self.modes_dock = self._dock(self._t("dock.modes"), "modes-dock", modes_panel)
+        self.modes_panel = ResponsiveActionPanel(mode_specs)
+        self.mode_buttons = list(self.modes_panel.buttons)
+        self.modes_dock = self._dock(self._t("dock.modes"), "modes-dock", self.modes_panel)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.modes_dock)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.view_tools_dock)
+        self.splitDockWidget(self.modes_dock, self.view_tools_dock, Qt.Orientation.Horizontal)
 
     def _build_menus(self) -> None:
         self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
@@ -296,7 +294,8 @@ class MainWindow(QMainWindow):
         self.edit_menu.addActions([self.add_text_action, self.add_grid_action, self.delete_action])
         self.view_menu = self.menuBar().addMenu(self._t("menu.view"))
         for dock in (
-            self.project_dock, self.tools_dock, self.modes_dock,
+            self.project_dock, self.project_tools_dock, self.editing_tools_dock,
+            self.modes_dock, self.view_tools_dock,
             self.properties_dock, self.output_dock,
         ):
             self.view_menu.addAction(dock.toggleViewAction())
@@ -482,7 +481,9 @@ class MainWindow(QMainWindow):
         self.english_language_action.setChecked(self.language == "en")
         self.ukrainian_language_action.setChecked(self.language == "uk")
         self.project_dock.setWindowTitle(self._t("dock.project"))
-        self.tools_dock.setWindowTitle(self._t("dock.tools"))
+        self.project_tools_dock.setWindowTitle(self._t("dock.project_tools"))
+        self.editing_tools_dock.setWindowTitle(self._t("dock.editing"))
+        self.view_tools_dock.setWindowTitle(self._t("dock.view_tools"))
         self.modes_dock.setWindowTitle(self._t("dock.modes"))
         self.properties_dock.setWindowTitle(self._t("dock.properties"))
         self.output_dock.setWindowTitle(self._t("dock.output"))
@@ -515,7 +516,7 @@ class MainWindow(QMainWindow):
     def set_workspace(self, workspace: str) -> None:
         if workspace not in {"document", "studio"}:
             raise ValueError("UNKNOWN_WORKSPACE")
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        docks = self._document_docks()
         if workspace == "studio":
             if self.workspace_stack.currentWidget() is self.canvas:
                 self._document_dock_visibility = {
@@ -532,6 +533,16 @@ class MainWindow(QMainWindow):
                 dock.setVisible(self._document_dock_visibility.get(dock.objectName(), True))
             self.document_workspace_action.setChecked(True)
             self.telemetry_label.show()
+
+    def _document_docks(self) -> tuple[QDockWidget, ...]:
+        return (
+            self.project_dock,
+            self.project_tools_dock,
+            self.editing_tools_dock,
+            self.view_tools_dock,
+            self.properties_dock,
+            self.output_dock,
+        )
 
     def _connect_model(self) -> None:
         self.controller.snapshot_changed.connect(self._on_snapshot_changed)
@@ -1181,7 +1192,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state, 1)
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        docks = self._document_docks()
         visibility_keys = {
             dock.objectName(): f"main/document_docks/{dock.objectName()}/visible"
             for dock in docks
@@ -1196,7 +1207,10 @@ class MainWindow(QMainWindow):
                     type=bool,
                 )
                 dock.setVisible(visible)
-        elif state is not None and not any(dock.toggleViewAction().isChecked() for dock in docks):
+        elif state is not None and not any(
+            dock.toggleViewAction().isChecked()
+            for dock in (self.project_dock, self.properties_dock, self.output_dock)
+        ):
             # Older builds saved Studio's temporary all-hidden state as the
             # Document layout. Recover that state once without overriding a
             # user's explicitly persisted per-dock choices in newer builds.
@@ -1213,7 +1227,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_show_markers(show_markers)
 
     def _save_window_state(self) -> None:
-        docks = (self.project_dock, self.properties_dock, self.output_dock)
+        docks = self._document_docks()
         if self.workspace_stack.currentWidget() is self.studio:
             visibility = self._document_dock_visibility
         else:

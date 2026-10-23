@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, QRegularExpression, Signal
-from PySide6.QtGui import QRegularExpressionValidator
+from PySide6.QtGui import QRegularExpressionValidator, QResizeEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QButtonGroup,
@@ -12,9 +12,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -50,6 +52,7 @@ class PropertiesPanel(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("properties-panel")
+        self.setMinimumWidth(0)
         self._styles = styles
         self.language = normalize_language(language)
         self._object_id: str | None = None
@@ -95,6 +98,7 @@ class PropertiesPanel(QWidget):
             column = index % columns
             label = QLabel()
             label.setBuddy(field)
+            field.setSizePolicy(QSizePolicy.Policy.Ignored, field.sizePolicy().verticalPolicy())
             grid.addWidget(label, row, column)
             grid.addWidget(field, row + 1, column)
             self._labels[label_key] = label
@@ -138,6 +142,7 @@ class PropertiesPanel(QWidget):
         self.name_field = QLineEdit()
         self.text_field = QPlainTextEdit()
         self.text_field.setMinimumHeight(100)
+        self.text_field.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.x_field = _millimetre_spin(0, 209.9)
         self.y_field = _millimetre_spin(0, 296.9)
         self.frame_x_field = _millimetre_spin(0, 209.9)
@@ -165,27 +170,42 @@ class PropertiesPanel(QWidget):
         self.realism_field.setSingleStep(0.05)
         self.realism_field.setDecimals(2)
         content_group = QGroupBox()
-        self.content_layout = QGridLayout(content_group)
+        self.content_layout = QVBoxLayout(content_group)
         self.content_layout.setContentsMargins(8, 10, 8, 8)
-        for column, (key, field) in enumerate((
-            ("properties.name", self.name_field),
-            ("properties.text", self.text_field),
-        )):
-            label = QLabel()
-            label.setBuddy(field)
-            self.content_layout.addWidget(label, 0, column)
-            self.content_layout.addWidget(field, 1, column)
-            self._labels[key] = label
+        content_top = QWidget()
+        content_top_layout = QHBoxLayout(content_top)
+        content_top_layout.setContentsMargins(0, 0, 0, 0)
+        content_top_layout.setSpacing(8)
+        identity = QWidget()
+        self.content_identity_layout = QVBoxLayout(identity)
+        self.content_identity_layout.setContentsMargins(0, 0, 0, 0)
+        name_label = QLabel()
+        name_label.setBuddy(self.name_field)
+        self.content_identity_layout.addWidget(name_label)
+        self.content_identity_layout.addWidget(self.name_field)
         diameter_label = QLabel()
         diameter_label.setBuddy(self.display_diameter_field)
-        self.content_layout.addWidget(diameter_label, 2, 0)
-        self.content_layout.addWidget(self.display_diameter_field, 3, 0)
+        self.content_identity_layout.addWidget(diameter_label)
+        self.content_identity_layout.addWidget(self.display_diameter_field)
+        self.content_identity_layout.addStretch(1)
+        self._labels["properties.name"] = name_label
         self._labels["properties.display_diameter"] = diameter_label
+        text_column = QWidget()
+        text_layout = QVBoxLayout(text_column)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_label = QLabel()
+        text_label.setBuddy(self.text_field)
+        text_layout.addWidget(text_label)
+        text_layout.addWidget(self.text_field)
+        self._labels["properties.text"] = text_label
+        content_top_layout.addWidget(identity, 1)
+        content_top_layout.addWidget(text_column, 1)
+        self.content_layout.addWidget(content_top)
         color_label = QLabel()
-        self.content_layout.addWidget(color_label, 4, 0, 1, 2)
+        self.content_layout.addWidget(color_label)
         self._labels["properties.color_group"] = color_label
-        palette = QWidget()
-        palette_layout = QGridLayout(palette)
+        self.color_palette = QWidget()
+        palette_layout = QGridLayout(self.color_palette)
         palette_layout.setContentsMargins(0, 0, 0, 0)
         palette_layout.setSpacing(3)
         self.color_group_buttons: list[QToolButton] = []
@@ -203,10 +223,13 @@ class PropertiesPanel(QWidget):
             self.color_group_button_group.addButton(button, index)
             palette_layout.addWidget(button, index // 8, index % 8)
             self.color_group_buttons.append(button)
-        self.content_layout.addWidget(palette, 5, 0, 1, 2)
+        self.content_layout.addWidget(self.color_palette)
         self.color_group_settings_button = QToolButton()
         self.color_group_settings_button.setEnabled(False)
-        self.content_layout.addWidget(self.color_group_settings_button, 6, 0, 1, 2)
+        self.color_group_settings_button.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self.content_layout.addWidget(self.color_group_settings_button)
         layout.addWidget(content_group)
         self._groups["properties.group.content"] = content_group
         self._add_group(layout, "properties.group.position", [
@@ -219,12 +242,15 @@ class PropertiesPanel(QWidget):
             ("properties.text_frame_width", self.frame_width_field),
             ("properties.text_frame_height", self.frame_height_field),
         ])
-        self._add_group(layout, "properties.group.typography", [
+        self._typography_fields = [
             ("properties.x_height", self.x_height_field),
             ("properties.line_pitch", self.line_pitch_field),
             ("properties.character_spacing", self.character_spacing_field),
             ("properties.rotation", self.rotation_field),
-        ], columns=4)
+        ]
+        self.typography_group = self._add_group(
+            layout, "properties.group.typography", self._typography_fields, columns=4
+        )
         self._add_group(layout, "properties.group.style", [
             ("properties.style", self.style_field),
             ("properties.realism", self.realism_field),
@@ -244,6 +270,25 @@ class PropertiesPanel(QWidget):
         self.style_field.currentIndexChanged.connect(self._emit_text)
         self.color_group_button_group.idClicked.connect(self._set_color_group)
         return widget
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if hasattr(self, "typography_group"):
+            self._reflow_typography(4 if event.size().width() >= 520 else 2)
+
+    def _reflow_typography(self, columns: int) -> None:
+        if getattr(self, "_typography_columns", None) == columns:
+            return
+        self._typography_columns = columns
+        grid = self.typography_group.layout()
+        for index, (key, field) in enumerate(self._typography_fields):
+            label = self._labels[key]
+            grid.removeWidget(label)
+            grid.removeWidget(field)
+            row = (index // columns) * 2
+            column = index % columns
+            grid.addWidget(label, row, column)
+            grid.addWidget(field, row + 1, column)
 
     def _set_color_group(self, index: int) -> None:
         self._color_group = index
