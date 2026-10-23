@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QFileDialog
+
+from handwriting_plotter.gui.photo_import import PhotoImportWorkspace
+from handwriting_plotter.gui.studio import HandwritingStudio
+
+
+def _write_photo(path: Path, width: int = 180, height: int = 120) -> bytes:
+    image = QImage(width, height, QImage.Format.Format_RGB32)
+    image.fill(QColor("#f7f0dc"))
+    for x in range(15, width - 15):
+        image.setPixelColor(x, height // 2, QColor("#23395d"))
+    assert image.save(str(path), "PNG")
+    return path.read_bytes()
+
+
+def test_import_persists_exact_source_and_populates_comparison(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "зошит.png"
+    original = _write_photo(source)
+    workspace = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(workspace)
+    workspace.resize(1000, 700)
+    workspace.show()
+
+    record = workspace.import_path(source)
+
+    assert record is not None
+    assert record.photo.original_sha256 == sha256(original).hexdigest()
+    assert workspace.repository.original_path(record.photo.original_sha256).read_bytes() == original
+    assert record.path.is_file()
+    assert workspace.original_view.has_image
+    assert workspace.corrected_view.has_image
+    assert workspace.original_view.scene().itemsBoundingRect().size().toSize() == QImage.fromData(original).size()
+    diagnostics = workspace.diagnostics.toPlainText()
+    assert "180 × 120 px" in diagnostics
+    assert record.photo.original_sha256 in diagnostics
+    assert "png · image/png" in diagnostics
+    assert "not applied" in diagnostics
+
+
+def test_preview_controls_do_not_mutate_immutable_source(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "sample.png"
+    original = _write_photo(source, width=160, height=90)
+    workspace = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+
+    workspace.actual_size_button.click()
+    workspace.zoom_in_button.click()
+    assert workspace.original_view.zoom_factor == pytest.approx(1.25)
+    assert workspace.corrected_view.zoom_factor == pytest.approx(1.25)
+
+    workspace.rotate_right_button.click()
+    assert workspace.display_rotation == 90
+    assert workspace.original_view.scene().itemsBoundingRect().size().toSize().width() == 160
+    corrected_size = workspace.corrected_view.scene().itemsBoundingRect().size().toSize()
+    assert (corrected_size.width(), corrected_size.height()) == (90, 160)
+
+    workspace.reset_button.click()
+    assert workspace.display_rotation == 0
+    assert workspace.repository.original_path(sha256(original).hexdigest()).read_bytes() == original
+    assert workspace.current_record is not None
+    assert workspace.current_record.photo.transforms == ()
+
+
+def test_failed_import_keeps_last_verified_photo_visible(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "valid.png"
+    _write_photo(source)
+    invalid = tmp_path / "invalid.png"
+    invalid.write_text("not an image", encoding="utf-8")
+    workspace = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(workspace)
+    record = workspace.import_path(source)
+    assert record is not None
+
+    assert workspace.import_path(invalid) is None
+
+    assert workspace.current_record == record
+    assert workspace.original_view.has_image
+    assert "Import failed" in workspace.status_label.text()
+    assert not workspace.repository.manifest_path(sha256(invalid.read_bytes()).hexdigest()).exists()
+
+
+def test_latest_verified_photo_is_restored(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "restored.png"
+    original = _write_photo(source, width=210, height=140)
+    first = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(first)
+    record = first.import_path(source)
+    assert record is not None
+
+    reopened = PhotoImportWorkspace(tmp_path / "store")
+    qtbot.addWidget(reopened)
+
+    assert reopened.current_record == record
+    assert reopened.original_view.has_image
+    assert reopened.repository.read_original(record.photo) == original
+    assert "Restored verified photo" in reopened.status_label.text()
+
+
+def test_file_picker_and_ukrainian_ui(qtbot, tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "picked.png"
+    _write_photo(source)
+    workspace = PhotoImportWorkspace(tmp_path / "store", language="uk")
+    qtbot.addWidget(workspace)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        lambda *args, **kwargs: (str(source), "Images"),
+    )
+
+    workspace.choose_button.click()
+
+    assert workspace.current_record is not None
+    assert "Імпортовано" in workspace.status_label.text()
+    assert workspace.original_group.title() == "Оригінал"
+    assert "перспектив" in workspace.correction_notice.text().lower()
+
+
+def test_photo_import_is_a_separate_studio_workflow(qtbot, tmp_path: Path) -> None:
+    studio = HandwritingStudio(tmp_path, language="en")
+    qtbot.addWidget(studio)
+
+    assert studio.workflow_tabs.count() == 2
+    assert studio.workflow_tabs.widget(1) is studio.photo_import
+    assert studio.workflow_tabs.tabText(1) == "Import from photo"
+    assert studio.workflow_tabs.widget(0).isAncestorOf(studio.capture_canvas)
+    assert not studio.capture_canvas.isAncestorOf(studio.photo_import)

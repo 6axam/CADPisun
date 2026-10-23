@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -65,6 +66,7 @@ from handwriting_plotter.version import __version__
 from .capture_widget import HandwritingCaptureWidget
 from .i18n import Language, tr
 from .normalization_preview import JoinPairPreview, NormalizationPreview
+from .photo_import import PhotoImportWorkspace
 
 UKRAINIAN_QUEUE = tuple("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
 RUSSIAN_QUEUE = tuple("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
@@ -150,6 +152,16 @@ class HandwritingStudio(QWidget):
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
+        self.workflow_tabs = QTabWidget()
+        self.workflow_tabs.setObjectName("studio-workflow-tabs")
+        # Keep the capture canvas' vertical geometry stable: capture guides and
+        # saved coordinate frames must not shift merely because another workflow
+        # became available.
+        self.workflow_tabs.setTabPosition(QTabWidget.TabPosition.West)
+        capture_page = QWidget()
+        capture_page.setObjectName("studio-capture-workspace")
+        capture_layout = QVBoxLayout(capture_page)
+        capture_layout.setContentsMargins(0, 0, 0, 0)
         vertical = QSplitter(Qt.Orientation.Vertical)
         upper = QSplitter(Qt.Orientation.Horizontal)
         vertical.addWidget(upper)
@@ -508,7 +520,13 @@ class HandwritingStudio(QWidget):
         vertical.addWidget(diagnostics_panel)
         vertical.setStretchFactor(0, 5)
         vertical.setStretchFactor(1, 1)
-        root_layout.addWidget(vertical)
+        capture_layout.addWidget(vertical)
+        self.photo_import = PhotoImportWorkspace(
+            self.root / "photo-imports", language=self.language, parent=self
+        )
+        self.workflow_tabs.addTab(capture_page, "")
+        self.workflow_tabs.addTab(self.photo_import, "")
+        root_layout.addWidget(self.workflow_tabs)
 
     def _connect(self) -> None:
         self.search.textChanged.connect(self._filter_collection)
@@ -570,6 +588,9 @@ class HandwritingStudio(QWidget):
 
     def set_language(self, language: Language) -> None:
         self.language = language
+        self.workflow_tabs.setTabText(0, tr(language, "studio.workflow.capture"))
+        self.workflow_tabs.setTabText(1, tr(language, "studio.workflow.photo"))
+        self.photo_import.set_language(language)
         self.collection_title.setText(tr(language, "studio.collection"))
         self.style_name.setPlaceholderText(tr(language, "studio.style_name"))
         self.search.setPlaceholderText(tr(language, "studio.search"))
