@@ -7,11 +7,13 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QImage
 from shiboken6 import isValid
 
 from handwriting_plotter.gui import document as document_module
 from handwriting_plotter.gui.document import (
     DocumentController,
+    ArtworkObject,
     GridObject,
     ProjectSnapshot,
     TextObject,
@@ -74,7 +76,7 @@ def test_legacy_project_is_loaded_with_text_frames(tmp_path, schema_version) -> 
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.4"
+    assert loaded.schema_version == "1.5"
     assert loaded.project_id == sample_project().project_id
     assert loaded.objects[0].frame_x_mm == 42.0
     assert loaded.objects[0].frame_y_mm == 53.0
@@ -93,7 +95,7 @@ def test_schema_13_project_gets_new_text_layout_defaults(tmp_path) -> None:
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.4"
+    assert loaded.schema_version == "1.5"
     item = loaded.objects[0]
     assert item.character_spacing_mm == 0
     assert item.rotation_deg == 0
@@ -122,6 +124,65 @@ def test_grid_object_round_trips_with_validated_geometry(tmp_path) -> None:
     assert load_project(path) == snapshot
     with pytest.raises(ValueError, match="grid exceeds page width"):
         GridObject(object_id="outside", x_mm=100, width_mm=120)
+
+
+def test_svg_and_raster_artwork_import_is_embedded_and_portable(tmp_path) -> None:
+    from handwriting_plotter.gui.artwork import import_artwork
+
+    svg_path = tmp_path / "reference.svg"
+    svg_path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">'
+        '<path d="M0 0 L200 100" stroke="black"/></svg>',
+        encoding="utf-8",
+    )
+    png_path = tmp_path / "reference.png"
+    image = QImage(80, 40, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#336699"))
+    assert image.save(str(png_path), "PNG")
+
+    svg = import_artwork(svg_path)
+    png = import_artwork(png_path)
+    snapshot = ProjectSnapshot(project_id="artwork-project", objects=(svg, png))
+    project_path = tmp_path / "artwork.hplot.json"
+    save_project(project_path, snapshot)
+    loaded = load_project(project_path)
+
+    assert all(isinstance(item, ArtworkObject) for item in loaded.objects)
+    assert [item.media_type for item in loaded.objects] == ["image/svg+xml", "image/png"]
+    assert loaded.objects[0].content() == svg_path.read_bytes()
+    assert loaded.objects[1].content() == png_path.read_bytes()
+    assert str(tmp_path) not in project_path.read_text(encoding="utf-8")
+
+
+def test_imported_artwork_is_reference_only_and_does_not_stale_generation(qtbot, tmp_path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    from handwriting_plotter.gui.main_window import MainWindow
+
+    svg_path = tmp_path / "layout.svg"
+    svg_path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">'
+        '<rect width="100" height="50" fill="#ddeeff"/></svg>',
+        encoding="utf-8",
+    )
+    window = MainWindow(user_data_root=tmp_path / "user-data")
+    monkeypatch.setattr(window, "_confirm_project_replacement", lambda _action: True)
+    qtbot.addWidget(window)
+    window.generate_page()
+    qtbot.waitUntil(lambda: window._generation_worker is None, timeout=10_000)
+    result = window.generated_result
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args, **kwargs: (str(svg_path), ""))
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+
+    window.import_artwork_file()
+
+    assert not errors
+    artwork = window.controller.snapshot.objects[-1]
+    assert isinstance(artwork, ArtworkObject)
+    assert artwork.object_id in window.canvas._artwork_items
+    assert window.generated_result is result
+    assert window.generated_revision == window.controller.revision
+    assert window.properties.stack.currentWidget() is window.properties.artwork_widget
 
 
 def test_generated_result_round_trips_with_verified_artifacts(tmp_path) -> None:

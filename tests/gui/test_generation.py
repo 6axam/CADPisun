@@ -7,6 +7,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QFileDialog
 
 from handwriting_plotter.gui.backend import GuiBackend
@@ -175,6 +176,20 @@ def test_color_group_colors_production_and_diagnostic_svg() -> None:
     assert expected in result.files["page-0001.preview.svg"]
 
 
+def test_production_svg_exports_to_high_resolution_png(tmp_path) -> None:
+    from handwriting_plotter.gui.exporting import export_page_png
+
+    result = GuiBackend().build(composition_project())
+    target = tmp_path / "page.png"
+
+    export_page_png(result, target, width_px=420)
+
+    image = QImage(str(target))
+    assert not image.isNull()
+    assert image.width() == 420
+    assert image.height() == 594
+
+
 def test_layout_grid_is_strictly_excluded_from_all_generated_artifacts() -> None:
     baseline_project = composition_project()
     with_grid = baseline_project.model_copy(update={
@@ -192,6 +207,31 @@ def test_layout_grid_is_strictly_excluded_from_all_generated_artifacts() -> None
 
     baseline = GuiBackend().build(baseline_project)
     changed = GuiBackend().build(ProjectSnapshot.model_validate(with_grid.model_dump(), strict=True))
+
+    assert changed.document_id == baseline.document_id
+    assert changed.files == baseline.files
+
+
+def test_reference_artwork_is_strictly_excluded_from_generated_artifacts(tmp_path) -> None:
+    from handwriting_plotter.gui.artwork import import_artwork
+
+    path = tmp_path / "reference.svg"
+    path.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
+        '<circle cx="10" cy="10" r="9"/></svg>',
+        encoding="utf-8",
+    )
+    baseline_project = composition_project()
+    artwork = import_artwork(path)
+    with_artwork = ProjectSnapshot(
+        project_id=baseline_project.project_id,
+        name=baseline_project.name,
+        page=baseline_project.page,
+        objects=baseline_project.objects + (artwork,),
+    )
+
+    baseline = GuiBackend().build(baseline_project)
+    changed = GuiBackend().build(with_artwork)
 
     assert changed.document_id == baseline.document_id
     assert changed.files == baseline.files

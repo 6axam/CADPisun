@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, QRegularExpression, Signal
+from PySide6.QtCore import QSize, QRegularExpression, Qt, Signal
 from PySide6.QtGui import QRegularExpressionValidator, QResizeEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .document import GridObject, PageSettings, TEXT_COLOR_GROUPS, TextObject
+from .document import ArtworkObject, GridObject, PageSettings, TEXT_COLOR_GROUPS, TextObject
 from .i18n import Language, normalize_language, tr
 from .styles import StyleSummary
 
@@ -41,6 +41,7 @@ class PropertiesPanel(QWidget):
     text_object_changed = Signal(str, object)
     text_content_changed = Signal(str, object)
     grid_object_changed = Signal(str, object)
+    artwork_object_changed = Signal(str, object)
     page_changed = Signal(object)
 
     def __init__(
@@ -65,10 +66,14 @@ class PropertiesPanel(QWidget):
         self.page_widget = self._build_page_widget()
         self.text_widget = self._build_text_widget()
         self.grid_widget = self._build_grid_widget()
+        self.artwork_widget = self._build_artwork_widget()
         self.resource_widget = self._build_resource_widget()
         self.empty_widget = QLabel()
         self.empty_widget.setWordWrap(True)
-        for widget in (self.empty_widget, self.page_widget, self.text_widget, self.grid_widget, self.resource_widget):
+        for widget in (
+            self.empty_widget, self.page_widget, self.text_widget, self.grid_widget,
+            self.artwork_widget, self.resource_widget,
+        ):
             self.stack.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -357,6 +362,43 @@ class PropertiesPanel(QWidget):
         self.grid_snap_field.toggled.connect(self._emit_grid)
         return widget
 
+    def _build_artwork_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.artwork_name_field = QLineEdit()
+        self.artwork_x_field = _millimetre_spin(0, 209.9)
+        self.artwork_y_field = _millimetre_spin(0, 296.9)
+        self.artwork_width_field = _millimetre_spin(0.01, 210)
+        self.artwork_height_field = _millimetre_spin(0.01, 297)
+        self.artwork_opacity_field = QDoubleSpinBox()
+        self.artwork_opacity_field.setRange(0.05, 1.0)
+        self.artwork_opacity_field.setSingleStep(0.05)
+        self.artwork_opacity_field.setDecimals(2)
+        self.artwork_type_value = QLabel()
+        self.artwork_hash_value = QLabel()
+        self.artwork_hash_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._add_group(layout, "properties.group.artwork", [
+            ("properties.name", self.artwork_name_field),
+            ("properties.artwork_opacity", self.artwork_opacity_field),
+            ("properties.artwork_type", self.artwork_type_value),
+            ("properties.artwork_hash", self.artwork_hash_value),
+        ], columns=1)
+        self._add_group(layout, "properties.group.artwork_geometry", [
+            ("properties.frame_x", self.artwork_x_field),
+            ("properties.frame_y", self.artwork_y_field),
+            ("properties.frame_width", self.artwork_width_field),
+            ("properties.frame_height", self.artwork_height_field),
+        ])
+        layout.addStretch(1)
+        self.artwork_name_field.editingFinished.connect(self._emit_artwork)
+        for field in (
+            self.artwork_x_field, self.artwork_y_field, self.artwork_width_field,
+            self.artwork_height_field, self.artwork_opacity_field,
+        ):
+            field.valueChanged.connect(self._emit_artwork)
+        return widget
+
     def set_language(self, language: Language) -> None:
         self.language = normalize_language(language)
         self.empty_widget.setText(tr(self.language, "properties.empty"))
@@ -428,6 +470,21 @@ class PropertiesPanel(QWidget):
         self.grid_snap_field.setChecked(item.snap_enabled)
         self._loading = False
         self.stack.setCurrentWidget(self.grid_widget)
+
+    def show_artwork_object(self, item: ArtworkObject) -> None:
+        self._loading = True
+        self._object_id = item.object_id
+        self._shown_style = None
+        self.artwork_name_field.setText(item.name)
+        self.artwork_x_field.setValue(item.x_mm)
+        self.artwork_y_field.setValue(item.y_mm)
+        self.artwork_width_field.setValue(item.width_mm)
+        self.artwork_height_field.setValue(item.height_mm)
+        self.artwork_opacity_field.setValue(item.opacity)
+        self.artwork_type_value.setText(item.media_type)
+        self.artwork_hash_value.setText(item.sha256[:16] + "…")
+        self._loading = False
+        self.stack.setCurrentWidget(self.artwork_widget)
 
     def show_style(self, style: StyleSummary) -> None:
         self._object_id = None
@@ -521,4 +578,16 @@ class PropertiesPanel(QWidget):
             "line_style": self.grid_line_style_field.currentData(),
             "color": self.grid_color_field.text().upper(),
             "snap_enabled": self.grid_snap_field.isChecked(),
+        })
+
+    def _emit_artwork(self) -> None:
+        if self._loading or self._object_id is None:
+            return
+        self.artwork_object_changed.emit(self._object_id, {
+            "name": self.artwork_name_field.text().strip() or "Artwork",
+            "x_mm": self.artwork_x_field.value(),
+            "y_mm": self.artwork_y_field.value(),
+            "width_mm": self.artwork_width_field.value(),
+            "height_mm": self.artwork_height_field.value(),
+            "opacity": self.artwork_opacity_field.value(),
         })

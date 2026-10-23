@@ -29,8 +29,10 @@ from handwriting_plotter.version import __version__
 from handwriting_plotter.application.resources import style_root
 
 from .backend import GuiBackend, generation_source_hash
+from .artwork import import_artwork
 from .canvas import PageCanvas
 from .document import (
+    ArtworkObject,
     DocumentController,
     GridObject,
     ProjectSnapshot,
@@ -39,7 +41,7 @@ from .document import (
     load_project_file,
     save_project,
 )
-from .exporting import export_artifact
+from .exporting import export_artifact, export_page_png
 from .i18n import Language, normalize_language, tr
 from .mode_workspaces import ArtifactModeWorkspace
 from .properties import PropertiesPanel
@@ -198,6 +200,9 @@ class MainWindow(QMainWindow):
         self.execution_mode_action.setData("execution")
         self.new_action = self._action(self._t("action.new"), self.new_project, QKeySequence.StandardKey.New)
         self.open_action = self._action(self._t("action.open"), self.open_project, QKeySequence.StandardKey.Open)
+        self.import_artwork_action = self._action(
+            self._t("action.import_artwork"), self.import_artwork_file, QKeySequence("Ctrl+Shift+I")
+        )
         self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
         self.save_as_action = self._action(self._t("action.save_as"), self.save_project_as, QKeySequence.StandardKey.SaveAs)
         self.exit_action = self._action(self._t("action.exit"), self.close, QKeySequence.StandardKey.Quit)
@@ -216,10 +221,12 @@ class MainWindow(QMainWindow):
         self.markers_action.setCheckable(True)
         self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
         self.export_preview_action = self._action(self._t("action.export_preview"), lambda: self._export("page-0001.preview.svg"))
+        self.export_png_action = self._action(self._t("action.export_png"), lambda: self._export("page-0001.png"))
         self.export_gcode_action = self._action(self._t("action.export_gcode"), lambda: self._export("page-0001.gcode"))
         self.export_report_action = self._action(self._t("action.export_report"), lambda: self._export("report.json"))
         self.export_actions = (
-            self.export_svg_action, self.export_preview_action, self.export_gcode_action, self.export_report_action,
+            self.export_svg_action, self.export_preview_action, self.export_png_action,
+            self.export_gcode_action, self.export_report_action,
         )
         self._update_export_actions()
 
@@ -227,6 +234,7 @@ class MainWindow(QMainWindow):
         project_specifications = (
             ("◇", self.new_action, "tool-new"),
             ("↥", self.open_action, "tool-open"),
+            ("▧", self.import_artwork_action, "tool-import-artwork"),
             ("▣", self.save_action, "tool-save"),
             ("▶", self.generate_action, "tool-generate"),
         )
@@ -286,7 +294,10 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
-        self.file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        self.file_menu.addActions([
+            self.new_action, self.open_action, self.import_artwork_action,
+            self.save_action, self.save_as_action,
+        ])
         self.export_menu = self.file_menu.addMenu(self._t("menu.export"))
         self.export_menu.addActions(self.export_actions)
         self.file_menu.addSeparator()
@@ -458,6 +469,7 @@ class MainWindow(QMainWindow):
             self.execution_mode_action: "action.mode.execution",
             self.new_action: "action.new",
             self.open_action: "action.open",
+            self.import_artwork_action: "action.import_artwork",
             self.save_action: "action.save",
             self.save_as_action: "action.save_as",
             self.exit_action: "action.exit",
@@ -469,6 +481,7 @@ class MainWindow(QMainWindow):
             self.generate_action: "action.generate",
             self.export_svg_action: "action.export_svg",
             self.export_preview_action: "action.export_preview",
+            self.export_png_action: "action.export_png",
             self.export_gcode_action: "action.export_gcode",
             self.export_report_action: "action.export_report",
             self.virtual_profile_action: "action.virtual_profile",
@@ -583,6 +596,7 @@ class MainWindow(QMainWindow):
         self.properties.text_object_changed.connect(self._update_text_object)
         self.properties.text_content_changed.connect(self._update_text_content)
         self.properties.grid_object_changed.connect(self._update_grid_object)
+        self.properties.artwork_object_changed.connect(self._update_artwork_object)
         self.properties.page_changed.connect(self._update_page)
 
     def _dock(self, title: str, name: str, widget: QWidget) -> QDockWidget:
@@ -661,7 +675,7 @@ class MainWindow(QMainWindow):
                     item.display_diameter_mm,
                     item.color_group,
                 ))
-            else:
+            elif isinstance(item, GridObject):
                 signatures.append((
                     item.kind,
                     item.object_id,
@@ -675,6 +689,18 @@ class MainWindow(QMainWindow):
                     item.line_style,
                     item.color,
                     item.snap_enabled,
+                ))
+            else:
+                signatures.append((
+                    item.kind,
+                    item.object_id,
+                    item.visible,
+                    item.x_mm,
+                    item.y_mm,
+                    item.width_mm,
+                    item.height_mm,
+                    item.opacity,
+                    item.sha256,
                 ))
         return tuple(signatures)
 
@@ -708,7 +734,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _find_object_tree_item(self, object_id: str) -> QTreeWidgetItem | None:
-        for kind in ("text", "grid"):
+        for kind in ("text", "grid", "artwork"):
             item = self._find_tree_item(kind, object_id)
             if item is not None:
                 return item
@@ -767,10 +793,11 @@ class MainWindow(QMainWindow):
         selected_ids = {
             item.data(0, ROLE_VALUE)
             for item in self.project_tree.selectedItems()
-            if item.data(0, ROLE_KIND) in {"text", "grid"} and isinstance(item.data(0, ROLE_VALUE), str)
+            if item.data(0, ROLE_KIND) in {"text", "grid", "artwork"}
+            and isinstance(item.data(0, ROLE_VALUE), str)
         }
         current = self.project_tree.currentItem()
-        if current is not None and current.data(0, ROLE_KIND) in {"text", "grid"}:
+        if current is not None and current.data(0, ROLE_KIND) in {"text", "grid", "artwork"}:
             self._selected_kind = current.data(0, ROLE_KIND)
             self._selected_value = current.data(0, ROLE_VALUE)
             selected_ids.add(self._selected_value)
@@ -830,16 +857,22 @@ class MainWindow(QMainWindow):
             item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
             if isinstance(item, GridObject):
                 self.properties.show_grid_object(item)
+        elif self._selected_kind == "artwork":
+            item = next((obj for obj in self.controller.snapshot.objects if obj.object_id == self._selected_value), None)
+            if isinstance(item, ArtworkObject):
+                self.properties.show_artwork_object(item)
         elif self._selected_kind == "style":
             style = next((obj for obj in self.styles if obj.reference == self._selected_value), None)
             if style:
                 self.properties.show_style(style)
 
     def _on_tree_item_changed(self, node: QTreeWidgetItem, column: int) -> None:
-        if self._refreshing_tree or node.data(0, ROLE_KIND) not in {"text", "grid"}:
+        if self._refreshing_tree or node.data(0, ROLE_KIND) not in {"text", "grid", "artwork"}:
             return
         object_id = node.data(0, ROLE_VALUE)
-        fallback_name = "Grid" if node.data(0, ROLE_KIND) == "grid" else "Text"
+        fallback_name = {"grid": "Grid", "artwork": "Artwork", "text": "Text"}[
+            node.data(0, ROLE_KIND)
+        ]
         name = node.text(0).strip() or fallback_name
         visible = node.checkState(0) == Qt.CheckState.Checked
         QTimer.singleShot(0, lambda: self._apply_tree_item_change(object_id, name, visible))
@@ -855,8 +888,11 @@ class MainWindow(QMainWindow):
         visibility_changed = item.visible != visible
         if isinstance(item, TextObject):
             self.controller.update_text_object(object_id, name=name, visible=visible)
-        else:
+        elif isinstance(item, GridObject):
             self.controller.update_grid_object(object_id, name=name, visible=visible)
+            self._preserve_generation_revision(had_current_generation)
+        else:
+            self.controller.update_artwork_object(object_id, name=name, visible=visible)
             self._preserve_generation_revision(had_current_generation)
         if isinstance(item, TextObject) and visibility_changed and (had_current_generation or self._regeneration_pending):
             self._schedule_regeneration("Visibility changed · updating page…")
@@ -931,8 +967,13 @@ class MainWindow(QMainWindow):
                 )
                 if had_current_generation or self._regeneration_pending:
                     self._schedule_regeneration("Object resized · updating page…")
-            else:
+            elif isinstance(item, GridObject):
                 self.controller.update_grid_object(
+                    object_id, x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm
+                )
+                self._preserve_generation_revision(had_current_generation)
+            else:
+                self.controller.update_artwork_object(
                     object_id, x_mm=x_mm, y_mm=y_mm, width_mm=width_mm, height_mm=height_mm
                 )
                 self._preserve_generation_revision(had_current_generation)
@@ -967,6 +1008,46 @@ class MainWindow(QMainWindow):
             self._show_status(str(exc), "error", 5000)
             return
         self._preserve_generation_revision(had_current_generation)
+
+    def _update_artwork_object(self, object_id: str, changes: dict) -> None:
+        had_current_generation = (
+            self.generated_result is not None
+            and self.generated_revision == self.controller.revision
+        )
+        try:
+            self.controller.update_artwork_object(object_id, **changes)
+        except ValueError as exc:
+            self._show_status(str(exc), "error", 5000)
+            return
+        self._preserve_generation_revision(had_current_generation)
+
+    def import_artwork_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            self._t("dialog.import_artwork"),
+            "",
+            "Artwork (*.svg *.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+        )
+        if not filename:
+            return
+        try:
+            item = import_artwork(Path(filename))
+            had_current_generation = (
+                self.generated_result is not None
+                and self.generated_revision == self.controller.revision
+            )
+            self.controller.add_artwork_object(item)
+            self._preserve_generation_revision(had_current_generation)
+            self._selected_kind, self._selected_value = "artwork", item.object_id
+            self._selected_object_ids = {item.object_id}
+            self._refresh_tree(self.controller.snapshot)
+            self._sync_tree_selection()
+            self._show_status(
+                self._t("status.artwork_imported").format(name=item.name), "success", 5000
+            )
+        except Exception as exc:
+            self._show_status(str(exc), "error", 7000)
+            QMessageBox.critical(self, self._t("dialog.import_failed"), str(exc))
 
     def _preserve_generation_revision(self, had_current_generation: bool) -> None:
         if had_current_generation and self.generated_result is not None:
@@ -1008,7 +1089,7 @@ class MainWindow(QMainWindow):
             and self.generated_revision == self.controller.revision
         )
         self.controller.remove_objects(selected)
-        if selected_models and all(isinstance(item, GridObject) for item in selected_models):
+        if selected_models and all(not isinstance(item, TextObject) for item in selected_models):
             self._preserve_generation_revision(had_current_generation)
         self._selected_object_ids.clear()
         self._selected_kind, self._selected_value = "page", None
@@ -1201,6 +1282,7 @@ class MainWindow(QMainWindow):
         specifications = {
             "page-0001.svg": ("Export Production SVG", "page.svg", "SVG (*.svg)"),
             "page-0001.preview.svg": ("Export Diagnostic SVG", "page.preview.svg", "SVG (*.svg)"),
+            "page-0001.png": ("Export Page Image", "page.png", "PNG image (*.png)"),
             "page-0001.gcode": ("Export Virtual G-code — Simulation Only", "page.virtual.gcode", "G-code (*.gcode *.nc)"),
             "report.json": ("Export Validation Report", "validation-report.json", "JSON (*.json)"),
         }
@@ -1209,7 +1291,10 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            export_artifact(self.generated_result, artifact, Path(filename))
+            if artifact == "page-0001.png":
+                export_page_png(self.generated_result, Path(filename))
+            else:
+                export_artifact(self.generated_result, artifact, Path(filename))
             self._show_status(f"Exported {filename}", "success", 5000)
             self.console.appendPlainText(f"Exported {artifact} to {filename}")
         except Exception as exc:

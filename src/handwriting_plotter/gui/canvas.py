@@ -9,7 +9,7 @@ from collections import deque
 from typing import Any, ClassVar
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen, QWheelEvent
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
 )
 
-from .document import GridObject, TEXT_COLOR_GROUPS, TextObject
+from .document import ArtworkObject, GridObject, TEXT_COLOR_GROUPS, TextObject
 from .theme import COLORS
 
 OBJECT_ID_ROLE = 0
@@ -81,6 +81,32 @@ class GridPageItem(QGraphicsItem):
             y += self.grid.cell_height_mm
 
 
+class ArtworkPageItem(QGraphicsItem):
+    """Render embedded reference artwork without treating it as plot geometry."""
+
+    def __init__(self, artwork: ArtworkObject) -> None:
+        super().__init__()
+        self.artwork = artwork
+        self._rect = QRectF(artwork.x_mm, artwork.y_mm, artwork.width_mm, artwork.height_mm)
+        content = artwork.content()
+        self._svg = QSvgRenderer(QByteArray(content)) if artwork.media_type == "image/svg+xml" else None
+        self._image = QImage.fromData(content) if self._svg is None else QImage()
+        if (self._svg is not None and not self._svg.isValid()) or (
+            self._svg is None and self._image.isNull()
+        ):
+            raise ValueError("INVALID_EMBEDDED_ARTWORK")
+        self.setOpacity(artwork.opacity)
+
+    def boundingRect(self) -> QRectF:  # noqa: N802
+        return QRectF(self._rect)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
+        if self._svg is not None:
+            self._svg.render(painter, self._rect)
+        else:
+            painter.drawImage(self._rect, self._image)
+
+
 class PageCanvas(QGraphicsView):
     """A zoomable scene whose coordinates are physical millimetres."""
 
@@ -122,6 +148,7 @@ class PageCanvas(QGraphicsView):
         self._object_frames: dict[str, QGraphicsRectItem] = {}
         self._object_models: dict[str, object] = {}
         self._grid_items: dict[str, GridPageItem] = {}
+        self._artwork_items: dict[str, ArtworkPageItem] = {}
         self._selected_object_ids: set[str] = set()
         self._hovered_object_id: str | None = None
         self._resize_handles: dict[str, QGraphicsRectItem] = {}
@@ -286,8 +313,15 @@ class PageCanvas(QGraphicsView):
             if item.scene() is self.scene():
                 self.scene().removeItem(item)
         self._grid_items.clear()
+        for item in self._artwork_items.values():
+            if item.scene() is self.scene():
+                self.scene().removeItem(item)
+        self._artwork_items.clear()
         self._selected_object_ids = set(selected_ids)
-        ordered_objects = sorted(objects, key=lambda obj: 0 if isinstance(obj, GridObject) else 1)
+        ordered_objects = sorted(
+            objects,
+            key=lambda obj: 0 if isinstance(obj, GridObject) else 1 if isinstance(obj, ArtworkObject) else 2,
+        )
         for obj in ordered_objects:
             if not obj.visible:
                 continue
@@ -296,6 +330,11 @@ class PageCanvas(QGraphicsView):
                 grid_item.setZValue(4)
                 self.scene().addItem(grid_item)
                 self._grid_items[obj.object_id] = grid_item
+            elif isinstance(obj, ArtworkObject):
+                artwork_item = ArtworkPageItem(obj)
+                artwork_item.setZValue(1.5)
+                self.scene().addItem(artwork_item)
+                self._artwork_items[obj.object_id] = artwork_item
             bounds = self._object_rect(obj)
             frame = QGraphicsRectItem(bounds)
             frame.setData(OBJECT_ID_ROLE, obj.object_id)
@@ -314,6 +353,8 @@ class PageCanvas(QGraphicsView):
             return QRectF(obj.frame_x_mm, obj.frame_y_mm, obj.frame_width_mm, obj.frame_height_mm)
         if isinstance(obj, GridObject):
             return QRectF(obj.x_mm, obj.y_mm, obj.width_mm, obj.height_mm)
+        if isinstance(obj, ArtworkObject):
+            return QRectF(obj.x_mm, obj.y_mm, obj.width_mm, obj.height_mm)
         raise TypeError(type(obj).__name__)
 
     def set_selected_objects(self, object_ids) -> None:  # noqa: ANN001
@@ -326,7 +367,11 @@ class PageCanvas(QGraphicsView):
             selected = object_id in self._selected_object_ids
             model = self._object_models[object_id]
             is_grid = isinstance(model, GridObject)
-            base_color = model.color if is_grid else TEXT_COLOR_GROUPS[model.color_group]
+            base_color = (
+                model.color if is_grid else
+                "#8B5CF6" if isinstance(model, ArtworkObject) else
+                TEXT_COLOR_GROUPS[model.color_group]
+            )
             color = QColor(base_color)
             color.setAlpha(255 if selected else (0 if is_grid else 105))
             hovered = object_id == self._hovered_object_id
@@ -368,7 +413,12 @@ class PageCanvas(QGraphicsView):
             handle = QGraphicsRectItem(
                 center.x() - diameter / 2, center.y() - diameter / 2, diameter, diameter
             )
-            handle.setBrush(QColor(TEXT_COLOR_GROUPS[model.color_group]) if isinstance(model, TextObject) else QColor(model.color))
+            handle_color = (
+                TEXT_COLOR_GROUPS[model.color_group] if isinstance(model, TextObject) else
+                model.color if isinstance(model, GridObject) else
+                "#8B5CF6"
+            )
+            handle.setBrush(QColor(handle_color))
             handle.setPen(QPen(QColor("#FFFFFF"), 0.3))
             handle.setZValue(12)
             self.scene().addItem(handle)

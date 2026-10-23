@@ -210,9 +210,9 @@ Correction operations: set_transcript, adjust_polygon, split_region, merge_regio
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.4`. Корень содержит `project_id`, пользовательское `name`,
+`schema_version=1.5`. Корень содержит `project_id`, пользовательское `name`,
 `page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
-Версии 1.0–1.3 читаются и мигрируют в памяти в 1.4; неизвестная версия или
+Версии 1.0–1.4 читаются и мигрируют в памяти в 1.5; неизвестная версия или
 лишнее поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
@@ -233,6 +233,14 @@ x_mm/y_mm, width_mm/height_mm, cell_width_mm/cell_height_mm, line_style
 (`solid|dashed|dash_dot`), цвет `#RRGGBB` и snap_enabled. Сетка хранится в
 проекте и рисуется GUI, но composition adapter обязан исключать её из layout,
 PenPlan, production/diagnostic SVG, MotionPlan и G-code.
+
+`kind=artwork` обозначает переносимый референсный `ArtworkObject`: object_id,
+name, visible, MIME type, base64 исходных bytes, SHA-256, x_mm/y_mm,
+width_mm/height_mm и opacity. GUI декодирует SVG, PNG, JPEG, WebP, BMP и GIF до
+добавления объекта и проверяет хеш при каждом чтении проекта. Референс не
+является centerline-геометрией и исключается из layout, PenPlan, SVG и G-code.
+Импорт SVG для создания глифов по-прежнему проходит отдельный строгий
+authoring-контракт из MODULE_CONTRACTS.md.
 
 Файл кодируется canonical UTF-8 JSON с LF и записывается temp + fsync + atomic
 replace в том же каталоге. `generation_cache` хранит base64 артефакты
