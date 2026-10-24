@@ -31,6 +31,12 @@ from .correction import (
     persist_correction,
     validate_corners_in_frame,
 )
+from .ruling import (
+    PaperClassification,
+    RulingClassifier,
+    manual_ruling_estimate,
+    persist_ruling_estimate,
+)
 
 __all__ = [
     "ConfidenceValue",
@@ -44,6 +50,7 @@ __all__ = [
     "PageCorrectionAdapter",
     "PageCorrectionProposal",
     "PageCorners",
+    "PaperClassification",
     "PhotoImportLimits",
     "PhotoImportMetadata",
     "PhotoRecord",
@@ -52,10 +59,13 @@ __all__ = [
     "PixelFrame",
     "PixelPoint",
     "RulingEstimate",
+    "RulingClassifier",
     "load_photo_bytes",
     "map_point",
+    "manual_ruling_estimate",
     "order_page_corners",
     "persist_correction",
+    "persist_ruling_estimate",
     "serialize_photo",
     "validate_corners_in_frame",
 ]

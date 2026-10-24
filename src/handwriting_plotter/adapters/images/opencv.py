@@ -10,6 +10,7 @@ from handwriting_plotter.learning import (
     PageCorrectionProposal,
     PageCorners,
     PixelPoint,
+    RulingEstimate,
     map_point,
     order_page_corners,
     validate_corners_in_frame,
@@ -236,3 +237,89 @@ class OpenCvPageCorrector:
             raise ValueError("PHOTO_DIMENSION_LIMIT_EXCEEDED")
         if width * height > MAX_PHOTO_PIXELS:
             raise ValueError("PHOTO_PIXEL_LIMIT_EXCEEDED")
+
+
+class OpenCvRulingClassifier:
+    """Classify paper from repeated long horizontal and vertical line evidence."""
+
+    MIN_REPEATED_LINES = 3
+    LINE_SPAN_RATIO = 0.18
+
+    def classify(self, content: bytes, *, frame_id: str) -> RulingEstimate:
+        cv2, np = _cv_modules()
+        image = OpenCvPageCorrector._decode(content)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, ink = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        dark_ratio = float(np.count_nonzero(ink)) / ink.size
+        height, width = ink.shape
+        horizontal = cv2.morphologyEx(
+            ink,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (max(24, width // 10), 1)),
+        )
+        vertical = cv2.morphologyEx(
+            ink,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(24, height // 10))),
+        )
+        horizontal_count, horizontal_strength = self._line_evidence(
+            horizontal, axis=1, span=width
+        )
+        vertical_count, vertical_strength = self._line_evidence(
+            vertical, axis=0, span=height
+        )
+        horizontal_repeated = horizontal_count >= self.MIN_REPEATED_LINES
+        vertical_repeated = vertical_count >= self.MIN_REPEATED_LINES
+
+        if horizontal_repeated and vertical_repeated:
+            classification = "squared"
+            signal = min(horizontal_strength, vertical_strength)
+            confidence = min(0.95, 0.55 + signal * 0.45)
+        elif horizontal_repeated and not vertical_repeated:
+            classification = "ruled"
+            confidence = min(0.95, 0.55 + horizontal_strength * 0.45)
+        elif dark_ratio < 0.004:
+            classification = "blank"
+            confidence = min(0.95, 0.75 + (0.004 - dark_ratio) * 50.0)
+        elif dark_ratio >= 0.04 or horizontal_count > 0 or vertical_count > 0:
+            classification = "mixed"
+            confidence = min(0.75, 0.35 + min(0.4, dark_ratio) + 0.05 * (horizontal_count + vertical_count))
+        else:
+            classification = "unknown"
+            confidence = 0.2
+        return RulingEstimate(
+            frame_id=frame_id,
+            classification=classification,
+            status="proposed",
+            method="opencv-ruling-classifier/1",
+            confidence=ConfidenceValue(
+                value=confidence,
+                origin="heuristic",
+                meaning=(
+                    "repeated long horizontal and vertical line evidence; "
+                    f"horizontal_runs={horizontal_count}, vertical_runs={vertical_count}, "
+                    f"dark_ratio={dark_ratio:.6f}"
+                ),
+            ),
+        )
+
+    @classmethod
+    def _line_evidence(cls, mask, *, axis: int, span: int) -> tuple[int, float]:
+        _, np = _cv_modules()
+        ratios = np.count_nonzero(mask, axis=axis) / max(1, span)
+        active = ratios >= cls.LINE_SPAN_RATIO
+        count = 0
+        strengths: list[float] = []
+        index = 0
+        while index < len(active):
+            if not active[index]:
+                index += 1
+                continue
+            end = index + 1
+            while end < len(active) and active[end]:
+                end += 1
+            strengths.append(float(np.max(ratios[index:end])))
+            count += 1
+            index = end
+        return count, (sum(strengths) / len(strengths) if strengths else 0.0)

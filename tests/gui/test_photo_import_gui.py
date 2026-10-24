@@ -38,6 +38,18 @@ def _write_perspective_page(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _write_ruled_page(path: Path) -> bytes:
+    image = np.full((360, 520, 3), 245, dtype=np.uint8)
+    for y in range(30, 350, 30):
+        cv2.line(image, (10, y), (510, y), (190, 155, 100), 1)
+    for x in range(40, 440, 65):
+        cv2.line(image, (x, 92), (x + 35, 98), (35, 35, 35), 2)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    path.write_bytes(encoded.tobytes())
+    return path.read_bytes()
+
+
 def test_import_persists_exact_source_and_populates_comparison(qtbot, tmp_path: Path) -> None:
     source = tmp_path / "зошит.png"
     original = _write_photo(source)
@@ -178,6 +190,10 @@ def test_automatic_page_proposal_correction_and_restore(qtbot, tmp_path: Path) -
     assert not workspace._corrected_pixmap.isNull()
     assert "Correction saved" in workspace.status_label.text()
 
+    workspace.analyze_paper_button.click()
+    assert workspace.current_record.photo.ruling.status == "proposed"
+    assert workspace.current_record.photo.ruling.frame_id == transform.output_frame_id
+
     reopened = PhotoImportWorkspace(root)
     qtbot.addWidget(reopened)
     assert reopened.current_record is not None
@@ -206,3 +222,34 @@ def test_no_page_diagnostic_leads_to_manual_corner_fallback(qtbot, tmp_path: Pat
     assert workspace.current_record is not None
     assert len(workspace.current_record.photo.transforms) == 1
     assert workspace.current_record.photo.transforms[0].parameters["proposal_method"] == "manual-four-corner/1"
+
+
+def test_paper_analysis_and_manual_override_are_persisted(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "ruled.png"
+    _write_ruled_page(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+
+    workspace.analyze_paper_button.click()
+
+    assert workspace.current_record is not None
+    assert workspace.current_record.photo.ruling.classification == "ruled"
+    assert workspace.current_record.photo.ruling.status == "proposed"
+    assert "Paper proposal: Ruled" in workspace.status_label.text()
+    assert "Ruled · proposed" in workspace.diagnostics.toPlainText()
+
+    workspace.paper_classification_combo.setCurrentIndex(
+        workspace.paper_classification_combo.findData("squared")
+    )
+    workspace.override_ruling_button.click()
+
+    assert workspace.current_record.photo.ruling.classification == "squared"
+    assert workspace.current_record.photo.ruling.status == "overridden"
+    assert "Paper classification saved: Squared" in workspace.status_label.text()
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert reopened.current_record is not None
+    assert reopened.current_record.photo.ruling.classification == "squared"
+    assert reopened.current_record.photo.ruling.status == "overridden"

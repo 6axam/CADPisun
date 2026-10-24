@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap, QResizeEvent, QTransform
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -28,13 +29,19 @@ from PySide6.QtWidgets import (
 )
 
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
-from handwriting_plotter.adapters.images.opencv import OpenCvPageCorrector, opencv_available
+from handwriting_plotter.adapters.images.opencv import (
+    OpenCvPageCorrector,
+    OpenCvRulingClassifier,
+    opencv_available,
+)
 from handwriting_plotter.learning import (
     PageCorners,
     PhotoRecord,
     PhotoRepository,
     PixelPoint,
+    manual_ruling_estimate,
     persist_correction,
+    persist_ruling_estimate,
 )
 from handwriting_plotter.version import __version__
 
@@ -237,6 +244,27 @@ class PhotoImportWorkspace(QWidget):
         correction_tools.addStretch(1)
         layout.addLayout(correction_tools)
 
+        ruling_tools = QHBoxLayout()
+        self.analyze_paper_button = QPushButton()
+        self.paper_classification_label = QLabel()
+        self.paper_classification_combo = QComboBox()
+        self.paper_classification_combo.setObjectName("photo-paper-classification")
+        for classification in ("unknown", "blank", "squared", "ruled", "mixed"):
+            self.paper_classification_combo.addItem("", classification)
+        self.override_ruling_button = QPushButton()
+        self.paper_summary_label = QLabel()
+        self.paper_summary_label.setObjectName("photo-paper-summary")
+        self.analyze_paper_button.setEnabled(False)
+        self.paper_classification_combo.setEnabled(False)
+        self.override_ruling_button.setEnabled(False)
+        ruling_tools.addWidget(self.analyze_paper_button)
+        ruling_tools.addSpacing(12)
+        ruling_tools.addWidget(self.paper_classification_label)
+        ruling_tools.addWidget(self.paper_classification_combo)
+        ruling_tools.addWidget(self.override_ruling_button)
+        ruling_tools.addWidget(self.paper_summary_label, 1)
+        layout.addLayout(ruling_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -285,6 +313,8 @@ class PhotoImportWorkspace(QWidget):
         self.detect_page_button.clicked.connect(self.detect_page)
         self.manual_corners_button.clicked.connect(self.enable_manual_corners)
         self.apply_correction_button.clicked.connect(self.apply_correction)
+        self.analyze_paper_button.clicked.connect(self.analyze_paper)
+        self.override_ruling_button.clicked.connect(self.apply_ruling_override)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -323,7 +353,11 @@ class PhotoImportWorkspace(QWidget):
                 return
             record = max(
                 records,
-                key=lambda item: (item.photo.metadata.imported_at_utc, len(item.photo.transforms)),
+                key=lambda item: (
+                    item.photo.metadata.imported_at_utc,
+                    len(item.photo.transforms),
+                    {"not_evaluated": 0, "proposed": 1, "confirmed": 2, "overridden": 3}[item.photo.ruling.status],
+                ),
             )
             self._show_record(record, self._read_preview(record))
             self._set_status("photo.status.restored", name=record.photo.metadata.original_filename)
@@ -347,6 +381,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_corrected_preview()
         self._set_controls_enabled(True)
         self.apply_correction_button.setEnabled(False)
+        self._refresh_ruling_controls()
         self._refresh_diagnostics()
 
     def rotate_preview(self, degrees: int) -> None:
@@ -355,6 +390,61 @@ class PhotoImportWorkspace(QWidget):
         self._display_rotation = (self._display_rotation + degrees) % 360
         self._refresh_corrected_preview()
         self._refresh_diagnostics()
+
+    def _ruling_input(self) -> tuple[bytes, str]:
+        if self.current_record is None:
+            raise ValueError("PHOTO_NOT_SELECTED")
+        photo = self.current_record.photo
+        if photo.transforms:
+            latest = photo.transforms[-1]
+            return (
+                self.repository.derivative_path(latest.output_sha256, "png").read_bytes(),
+                latest.output_frame_id,
+            )
+        return self.repository.read_original(photo), photo.frames[0].frame_id
+
+    def analyze_paper(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            content, frame_id = self._ruling_input()
+            estimate = OpenCvRulingClassifier().classify(content, frame_id=frame_id)
+            self.current_record = persist_ruling_estimate(
+                self.repository, self.current_record, estimate
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.ruling.failed", error=str(exc))
+            return
+        confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
+        self._refresh_ruling_controls()
+        self._refresh_diagnostics()
+        self._set_status(
+            "photo.ruling.analysis_complete",
+            classification=self._classification_label(estimate.classification),
+            confidence=confidence,
+        )
+
+    def apply_ruling_override(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            _, frame_id = self._ruling_input()
+            classification = self.paper_classification_combo.currentData()
+            if classification not in {"unknown", "blank", "squared", "ruled", "mixed"}:
+                raise ValueError("INVALID_RULING_CLASSIFICATION")
+            estimate = manual_ruling_estimate(classification, frame_id=frame_id)
+            self.current_record = persist_ruling_estimate(
+                self.repository, self.current_record, estimate
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.ruling.failed", error=str(exc))
+            return
+        self._refresh_ruling_controls()
+        self._refresh_diagnostics()
+        self._set_status(
+            "photo.ruling.override_complete",
+            classification=self._classification_label(estimate.classification),
+        )
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -521,6 +611,31 @@ class PhotoImportWorkspace(QWidget):
         cv_enabled = enabled and opencv_available()
         self.detect_page_button.setEnabled(cv_enabled)
         self.manual_corners_button.setEnabled(cv_enabled)
+        self.analyze_paper_button.setEnabled(cv_enabled)
+        self.paper_classification_combo.setEnabled(enabled)
+        self.override_ruling_button.setEnabled(enabled)
+
+    def _classification_label(self, classification: str) -> str:
+        return tr(self.language, f"photo.ruling.classification.{classification}")
+
+    def _refresh_ruling_controls(self) -> None:
+        if self.current_record is None:
+            self.paper_summary_label.clear()
+            return
+        ruling = self.current_record.photo.ruling
+        index = self.paper_classification_combo.findData(ruling.classification)
+        if index >= 0:
+            self.paper_classification_combo.setCurrentIndex(index)
+        confidence = ""
+        if ruling.confidence is not None:
+            confidence = f" · {ruling.confidence.value:.0%}"
+        self.paper_summary_label.setText(
+            tr(self.language, "photo.ruling.summary").format(
+                classification=self._classification_label(ruling.classification),
+                status=tr(self.language, f"photo.ruling.status.{ruling.status}"),
+                confidence=confidence,
+            )
+        )
 
     def _set_status(self, key: str, **values: object) -> None:
         self._status_key = key
@@ -546,7 +661,12 @@ class PhotoImportWorkspace(QWidget):
             ("photo.diagnostics.rotation", f"{self._display_rotation}°"),
             ("photo.diagnostics.hash", photo.original_sha256),
             ("photo.diagnostics.storage", str(self.current_record.path)),
-            ("photo.diagnostics.ruling", photo.ruling.status),
+            (
+                "photo.diagnostics.ruling",
+                f"{self._classification_label(photo.ruling.classification)} · "
+                f"{tr(self.language, f'photo.ruling.status.{photo.ruling.status}')}"
+                + (f" · {photo.ruling.confidence.value:.0%}" if photo.ruling.confidence else ""),
+            ),
             ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
@@ -564,6 +684,14 @@ class PhotoImportWorkspace(QWidget):
         self.manual_corners_button.setText(tr(language, "photo.correction.manual_button"))
         self.apply_correction_button.setText(tr(language, "photo.correction.apply"))
         self.deskew_check.setText(tr(language, "photo.correction.deskew"))
+        self.analyze_paper_button.setText(tr(language, "photo.ruling.analyze"))
+        self.paper_classification_label.setText(tr(language, "photo.ruling.label"))
+        self.override_ruling_button.setText(tr(language, "photo.ruling.override"))
+        for index in range(self.paper_classification_combo.count()):
+            classification = self.paper_classification_combo.itemData(index)
+            self.paper_classification_combo.setItemText(
+                index, self._classification_label(str(classification))
+            )
         self.original_group.setTitle(tr(language, "photo.original"))
         self.corrected_group.setTitle(tr(language, "photo.corrected"))
         correction_key = (
@@ -574,4 +702,5 @@ class PhotoImportWorkspace(QWidget):
         self.correction_notice.setText(tr(language, correction_key))
         self.diagnostics_group.setTitle(tr(language, "photo.diagnostics"))
         self._set_status(self._status_key, **self._status_values)
+        self._refresh_ruling_controls()
         self._refresh_diagnostics()
