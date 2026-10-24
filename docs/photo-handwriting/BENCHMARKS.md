@@ -2,7 +2,8 @@
 
 Created: 2026-10-23. This file defines measurements before implementation so
 later results cannot be selected after seeing outcomes. Synthetic rectification
-correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
+correctness has run. TASK 09 has run one private, single-page HTR pilot; it is
+not evidence for page- or writer-independent recognition quality.
 
 ## Result state
 
@@ -15,7 +16,7 @@ correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
 | Physical-scale calibration | SYNTHETIC CORRECTNESS ONLY — TASK 06 | Exact 5 mm / user-entered conversion, skewed-axis round trip, persistence and geometry-change invalidation |
 | Ink separation | NOT RUN — TASK 07 | — |
 | Line segmentation | NOT RUN — TASK 08 | — |
-| Ukrainian HTR comparison | NOT RUN — TASK 09 | — |
+| Ukrainian HTR comparison | PRIVATE SINGLE-PAGE PILOT — TASK 09 | 19 authorized real lines; select on 15 tuning lines, one frozen 4-line control run. Best tuning: 11.11% CER / 46.88% WER; control: 34.92% CER / 60.00% WER |
 | Skeleton geometry | NOT RUN — TASK 13 | — |
 | Direction/order inference | NOT RUN — TASK 14 | — |
 | End-to-end personal StylePack | NOT RUN — TASK 22 | — |
@@ -47,7 +48,7 @@ page or session may not cross train/validation/test boundaries.
 | `synthetic-security-v1` | Decoder/storage rejection and limits | Generated cases are never used as HTR quality evidence |
 | `synthetic-geometry-v1` | Known corners, transforms, pitch, phase, masks | Exact generator parameters are ground truth |
 | `synthetic-topology-v1` | Skeleton graph and ambiguity | Does not validate natural writing order |
-| `photo-pilot-private-v1` | Real notebook geometry/HTR/ink | Split by whole page/session; rights manifest required |
+| `photo-pilot-private-v1` | Real notebook geometry/HTR/ink | Production-quality comparison splits by whole page/session; rights manifest required. The TASK 09 one-page pilot is explicitly an exception, limited to a text-line split and not called independent |
 | `paired-order-private-v1` | Photo/raster plus true online trace | Split by session; only set allowed for order accuracy |
 
 ## Metrics and gates
@@ -144,6 +145,46 @@ Windows measurement has been benchmarked.
 The initial assistive target is CER ≤ 10% on the private held-out line subset.
 Failure does not permit invented correction; the prediction stays editable and
 requires human review.
+
+#### TASK 09 private single-page HTR pilot
+
+The authorized corpus, its original HEIC bytes, transcription, row boxes, model
+files, per-line predictions, hashes, and raw reports remain in a local private
+store and are deliberately absent from Git. It contains 19 manually reviewed
+line crops from one page. Fifteen rows were designated `tuning` before provider
+selection; four rows were withheld as `control`. This is a leakage-safe
+text-level split, but not a page/session-independent test: a second independently
+written and photographed page is required for that claim.
+
+Both candidates ran CPU-only in separate processes with two PyTorch threads.
+The CRNN checkpoint was SHA-256 verified and deserialized only with
+`torch.load(..., weights_only=True)`; TrOCR loaded local verified
+`safetensors` with `trust_remote_code=False`. No ground-truth string was passed
+to either provider, decoder, or preprocessing step. The benchmark harness now
+rejects predictions from the opposite partition while scoring.
+
+| Configuration | Partition used for selection | CER | WER | Mean line time | Peak RSS | Decision |
+|---|---:|---:|---:|---:|---:|---|
+| CRNN, reviewed original crop, grayscale resize, greedy CTC | tuning (15) | 16.18% | 67.19% | 56.27 ms | ~350 MiB | Baseline |
+| CRNN, CLAHE + rule-mask inpainting, greedy CTC | tuning (15) | 22.61% | 85.94% | 54.40 ms | ~352 MiB | Rejected; worse quality |
+| TrOCR-base, reviewed original crop, standard RGB processor, greedy generation with cache | tuning (15) | **11.11%** | **46.88%** | 4.147 s | ~1.76 GiB | Selected on tuning only |
+| Selected TrOCR-base unchanged | control (4), one final run | 34.92% | 60.00% | 3.681 s | ~1.74 GiB | Does not meet the target |
+
+The user-requested 5% CER goal was not reached. Frequent failures were
+punctuation/hyphen handling, visually similar Cyrillic characters, ruled-paper
+interference, and uncertain narrow strokes. The supplied transcription is
+evaluated faithfully, including its literal wording, rather than silently
+normalised to a dictionary. Manual correction of three final line boxes was
+performed before these three comparable runs; that is segmentation repair, not
+model tuning. No further preprocessing experiments were run after the declared
+three configurations.
+
+This result measures **HTR** only: line-image-to-text recognition. It neither
+validates character/word **segmentation** nor reconstructs pen trajectories;
+**stroke reconstruction** still requires the later geometry, direction, and
+human-review tasks. TrOCR is the quality candidate for a future optional
+provider, while CRNN remains the markedly faster, lower-memory fallback. Neither
+is yet integrated into the application.
 
 ### Skeleton and trajectory
 

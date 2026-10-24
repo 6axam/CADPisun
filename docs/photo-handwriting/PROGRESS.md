@@ -8,11 +8,69 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 10 / 25 tasks |
-| Last completed | TASK 18 — Notebook page templates |
-| Next | No dependency-ready task: TASK 09 is blocked; TASK 10–17 and TASK 19–24 depend on it or TASK 17 |
+| Completed | 11 / 25 tasks |
+| Last completed | TASK 09 — HTR model benchmark |
+| Next | TASK 10 — optional HTR integration; intentionally not started at the TASK 09 checkpoint |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 09 — HTR model benchmark
+
+Status: `[x]` DONE — bounded private single-page pilot; not an independent
+page/session quality claim.
+
+Completion commit: `b9a894bbe76f0751af5544a6e0928c733c899720`
+
+### Private benchmark and safety boundary
+
+- The user-authorized source image, exact transcription, 19 line boxes, model
+  downloads, per-line predictions, checksums and raw reports are in a local
+  private corpus outside the repository. No photo, transcription, large model
+  weight, raw prediction or source hash was added to Git.
+- Fifteen manually reviewed line crops formed the tuning partition; four were
+  frozen as control. The public benchmark contract now rejects cross-partition
+  predictions. This prevents a control transcription from entering provider
+  input or selection accounting.
+- The split is text-line-level because only one page was supplied. It is a
+  useful first pilot but not independent by page or writing session; a second
+  separately written and photographed page is needed before reporting that
+  quality level.
+- `Hukyl/crnn-rukopys` was SHA-256 checked and loaded on CPU only through
+  `torch.load(..., weights_only=True)`. `Hukyl/trocr-rukopys` used verified local
+  safetensors with `trust_remote_code=False`; providers ran in separate
+  processes and never concurrently.
+
+### Measured result
+
+| Candidate/configuration | Selection set | CER / WER | Mean line time | Peak RSS | Outcome |
+|---|---:|---:|---:|---:|---|
+| CRNN raw reviewed crop + greedy CTC | tuning, 15 | 16.18% / 67.19% | 56.27 ms | ~350 MiB | CPU baseline |
+| CRNN CLAHE + rule inpainting + greedy CTC | tuning, 15 | 22.61% / 85.94% | 54.40 ms | ~352 MiB | Rejected; worse |
+| TrOCR raw reviewed crop + cached greedy generation | tuning, 15 | **11.11% / 46.88%** | 4.147 s | ~1.76 GiB | Selected |
+| Selected TrOCR unchanged | control, 4 (one final run) | 34.92% / 60.00% | 3.681 s | ~1.74 GiB | Target not met |
+
+The requested CER ≤ 5% outcome was not reached. Main visible error classes
+were punctuation/hyphen handling, similar Cyrillic glyphs, rule/background
+interference and narrow handwriting. Three final crop boxes were corrected by
+manual segmentation review before the comparable runs; this did not expose
+ground truth to either model. Exactly three configurations were evaluated, then
+the selected configuration was run once on control without changing settings.
+
+This task evaluates **HTR** (line image → text), not character/word
+**segmentation** and not **stroke reconstruction** (pen paths/order). The latter
+remain open work in TASK 12–17. TrOCR is the evidence-based quality candidate
+for optional future integration; CRNN is the much faster/lighter fallback. No
+provider is integrated into the default application yet.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q tests/learning/test_htr_benchmark.py
+```
+
+Focused result: `5 passed`. Full-suite and static checks are recorded at the
+final checkpoint after this documentation update. All measurements were on
+local Linux; Windows was not executed.
 
 ## TASK 18 — Notebook page templates
 
