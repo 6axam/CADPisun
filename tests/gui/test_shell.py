@@ -114,6 +114,9 @@ def test_properties_scroll_and_output_dock_use_non_overlapping_corner(qtbot, tmp
     qtbot.addWidget(window)
     window.resize(900, 620)
     window.show()
+    # The hidden Studio/HTR workflow must not force the document workspace to
+    # its own large minimum geometry through QStackedWidget.
+    assert window.size().toTuple() == (900, 620)
     item = window.controller.snapshot.objects[0]
     window._on_canvas_selection_changed((item.object_id,))
     qtbot.wait(1)

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTabWidget,
     QTreeWidget,
@@ -118,6 +119,12 @@ class MainWindow(QMainWindow):
         self.preview_workspace = ArtifactModeWorkspace("preview", self)
         self.execution_workspace = ArtifactModeWorkspace("execution", self)
         self.studio = HandwritingStudio(self.user_data_root, language=self.language, parent=self)
+        # A hidden workflow page must not enlarge the document window's minimum
+        # geometry. The Studio contains a deliberately dense photo/HTR workflow;
+        # QStackedWidget otherwise propagates that page's minimum size even while
+        # the document canvas is active.
+        self.studio.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.studio.setMinimumSize(0, 0)
         self.workspace_stack = QStackedWidget(self)
         self.workspace_stack.setObjectName("workspace-stack")
         self.workspace_stack.addWidget(self.canvas)
