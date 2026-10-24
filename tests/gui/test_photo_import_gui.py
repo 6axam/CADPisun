@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -15,6 +16,7 @@ import numpy as np
 
 from handwriting_plotter.gui.photo_import import PhotoImportWorkspace
 from handwriting_plotter.gui.studio import HandwritingStudio
+from handwriting_plotter.learning import manual_line_region, persist_line_regions
 
 
 def _write_photo(path: Path, width: int = 180, height: int = 120) -> bytes:
@@ -162,6 +164,44 @@ def test_photo_import_is_a_separate_studio_workflow(qtbot, tmp_path: Path) -> No
     assert studio.workflow_tabs.tabText(1) == "Import from photo"
     assert studio.workflow_tabs.widget(0).isAncestorOf(studio.capture_canvas)
     assert not studio.capture_canvas.isAncestorOf(studio.photo_import)
+
+
+def test_htr_runs_line_crops_off_the_ui_thread_and_restores_local_result(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "page.png"
+    _write_photo(source)
+    worker_script = tmp_path / "fake-htr.py"
+    worker_script.write_text(
+        """import json, sys
+request = json.loads(sys.stdin.readline())
+line = request['lines'][0]
+assert 'transcript' not in json.dumps(request, ensure_ascii=False)
+print(json.dumps({'event': 'progress', 'completed': 1, 'total': 1, 'stage': 'recognizing'}), flush=True)
+print(json.dumps({'event': 'complete', 'model_revision': 'fake-v1', 'model_sha256': 'e' * 64, 'lines': [{'line_id': line['line_id'], 'crop_sha256': line['crop_sha256'], 'text': 'Привіт, їжаче!', 'elapsed_ms': 1.0, 'confidence': None}]}), flush=True)
+""",
+        encoding="utf-8",
+    )
+    workspace = PhotoImportWorkspace(tmp_path / "store", htr_worker_script=worker_script)
+    qtbot.addWidget(workspace)
+    workspace.show()
+    assert workspace.import_path(source) is not None
+    assert workspace.current_record is not None
+    record = persist_line_regions(
+        workspace.repository, workspace.current_record,
+        (manual_line_region(
+            frame_id="source-pixels", region_id="line-001", left=10, top=35, right=170, bottom=85,
+        ),),
+    )
+    workspace._show_record(record, workspace._read_preview(record))
+    workspace.htr_python_path.setText(sys.executable)
+    workspace.htr_model_root.setText(str(tmp_path))
+
+    workspace.htr_run_button.click()
+    qtbot.waitUntil(lambda: workspace._htr_worker is None, timeout=10_000)
+
+    assert "Привіт, їжаче!" in workspace.htr_results_view.toPlainText()
+    assert "Confidence: not provided" in workspace.htr_results_view.toPlainText()
+    assert "completed" in workspace.status_label.text().lower()
+    assert workspace.htr_results.list_for_source(record.sha256)[0].run.lines[0].text == "Привіт, їжаче!"
 
 
 def test_automatic_page_proposal_correction_and_restore(qtbot, tmp_path: Path) -> None:

@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import math
+import os
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QThreadPool, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap, QResizeEvent, QTransform
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
@@ -24,11 +26,14 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QSpinBox,
 )
 
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
@@ -41,12 +46,17 @@ from handwriting_plotter.adapters.images.opencv import (
     opencv_available,
 )
 from handwriting_plotter.learning import (
+    HtrProcessClient,
+    HtrResultRepository,
+    HtrRunRecord,
+    HtrRuntime,
     PageCorners,
     PhotoRecord,
     PhotoRepository,
     PixelPoint,
     RulingEstimate,
     calibration_from_ruling_pitch,
+    make_htr_request,
     manual_ruling_estimate,
     manual_ruling_geometry,
     persist_correction,
@@ -59,6 +69,7 @@ from handwriting_plotter.learning import (
 from handwriting_plotter.version import __version__
 
 from .i18n import Language, tr
+from .workers import HtrRecognitionWorker
 
 PHOTO_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"
 
@@ -217,12 +228,14 @@ class PhotoImportWorkspace(QWidget):
         root: Path,
         *,
         language: Language = "en",
+        htr_worker_script: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("photo-import-workspace")
         self.language = language
         self.repository = PhotoRepository(root)
+        self.htr_results = HtrResultRepository(root)
         self.current_record: PhotoRecord | None = None
         self._source_pixmap = QPixmap()
         self._corrected_pixmap = QPixmap()
@@ -231,6 +244,9 @@ class PhotoImportWorkspace(QWidget):
         self._proposal_confidence = None
         self._status_key = "photo.status.empty"
         self._status_values: dict[str, object] = {}
+        self._htr_worker: HtrRecognitionWorker | None = None
+        self._thread_pool = QThreadPool.globalInstance()
+        self._htr_worker_script = htr_worker_script
         self._build_ui()
         self._set_controls_enabled(False)
         self._connect()
@@ -420,6 +436,56 @@ class PhotoImportWorkspace(QWidget):
         region_tools.addWidget(self.lines_summary_label, 1)
         layout.addLayout(region_tools)
 
+        self.htr_group = QGroupBox()
+        self.htr_group.setObjectName("photo-htr-group")
+        htr_layout = QVBoxLayout(self.htr_group)
+        htr_form = QFormLayout()
+        self.htr_provider_combo = QComboBox()
+        self.htr_provider_combo.setObjectName("photo-htr-provider")
+        self.htr_provider_combo.addItem("CRNN — fast CPU", "crnn-rukopys")
+        self.htr_provider_combo.addItem("TrOCR — quality CPU", "trocr-rukopys")
+        self.htr_python_path = QLineEdit(os.environ.get("HP_HTR_PYTHON", ""))
+        self.htr_python_path.setObjectName("photo-htr-python")
+        self.htr_python_path.setPlaceholderText(tr(self.language, "photo.htr.python_hint"))
+        self.htr_model_root = QLineEdit(os.environ.get("HP_HTR_MODEL_ROOT", ""))
+        self.htr_model_root.setObjectName("photo-htr-model-root")
+        self.htr_model_root.setPlaceholderText(tr(self.language, "photo.htr.model_root_hint"))
+        self.htr_timeout = QSpinBox()
+        self.htr_timeout.setObjectName("photo-htr-timeout")
+        self.htr_timeout.setRange(1, 900)
+        self.htr_timeout.setSuffix(" s")
+        self.htr_timeout.setValue(120)
+        self._htr_labels: dict[str, QLabel] = {}
+        for key, widget in (
+            ("photo.htr.provider", self.htr_provider_combo),
+            ("photo.htr.python", self.htr_python_path),
+            ("photo.htr.model_root", self.htr_model_root),
+            ("photo.htr.timeout", self.htr_timeout),
+        ):
+            label = QLabel()
+            self._htr_labels[key] = label
+            htr_form.addRow(label, widget)
+        htr_layout.addLayout(htr_form)
+        htr_actions = QHBoxLayout()
+        self.htr_run_button = QPushButton()
+        self.htr_run_button.setObjectName("photo-htr-run")
+        self.htr_cancel_button = QPushButton()
+        self.htr_cancel_button.setObjectName("photo-htr-cancel")
+        self.htr_cancel_button.setEnabled(False)
+        self.htr_progress = QProgressBar()
+        self.htr_progress.setObjectName("photo-htr-progress")
+        self.htr_progress.setTextVisible(True)
+        htr_actions.addWidget(self.htr_run_button)
+        htr_actions.addWidget(self.htr_cancel_button)
+        htr_actions.addWidget(self.htr_progress, 1)
+        htr_layout.addLayout(htr_actions)
+        self.htr_results_view = QPlainTextEdit()
+        self.htr_results_view.setObjectName("photo-htr-results")
+        self.htr_results_view.setReadOnly(True)
+        self.htr_results_view.setMaximumHeight(150)
+        htr_layout.addWidget(self.htr_results_view)
+        layout.addWidget(self.htr_group)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -478,6 +544,8 @@ class PhotoImportWorkspace(QWidget):
         self.separate_ink_button.clicked.connect(self.separate_ink)
         self.use_raw_mask_button.clicked.connect(self.use_raw_mask)
         self.detect_lines_button.clicked.connect(self.detect_lines)
+        self.htr_run_button.clicked.connect(self.run_htr)
+        self.htr_cancel_button.clicked.connect(self.cancel_htr)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -550,6 +618,8 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
         self._refresh_line_controls()
+        self._refresh_htr_controls()
+        self._restore_htr_results(record)
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
@@ -736,6 +806,7 @@ class PhotoImportWorkspace(QWidget):
             return
         self._refresh_mask_controls()
         self._refresh_line_controls()
+        self._refresh_htr_controls()
         self._refresh_diagnostics()
         self._set_status("photo.mask.complete")
 
@@ -771,8 +842,135 @@ class PhotoImportWorkspace(QWidget):
             self._set_status("photo.lines.failed", error=str(exc))
             return
         self._refresh_line_controls()
+        self._refresh_htr_controls()
         self._refresh_diagnostics()
         self._set_status("photo.lines.complete", count=len(regions))
+
+    @staticmethod
+    def _png_bytes(image: QImage) -> bytes:
+        payload = QByteArray()
+        buffer = QBuffer(payload)
+        if not buffer.open(QIODevice.OpenModeFlag.WriteOnly) or not image.save(buffer, "PNG"):
+            raise ValueError("HTR_CROP_ENCODE_FAILED")
+        return bytes(payload)
+
+    def _htr_crops(self) -> tuple[str, tuple[tuple[str, str, bytes], ...]]:
+        if self.current_record is None:
+            raise ValueError("PHOTO_NOT_SELECTED")
+        content, frame_id = self._ruling_input()
+        image = QImage.fromData(content)
+        if image.isNull():
+            raise ValueError("HTR_SOURCE_FRAME_DECODE_FAILED")
+        lines = tuple(
+            region for region in self.current_record.photo.regions
+            if region.kind == "line" and region.frame_id == frame_id
+        )
+        if not lines:
+            raise ValueError("HTR_REQUIRES_LINE_REGIONS")
+        crops: list[tuple[str, str, bytes]] = []
+        for region in lines:
+            left = max(0, int(math.floor(min(point.x for point in region.polygon))))
+            top = max(0, int(math.floor(min(point.y for point in region.polygon))))
+            right = min(image.width(), int(math.ceil(max(point.x for point in region.polygon))))
+            bottom = min(image.height(), int(math.ceil(max(point.y for point in region.polygon))))
+            if right <= left or bottom <= top:
+                raise ValueError("HTR_LINE_CROP_OUTSIDE_FRAME")
+            png = self._png_bytes(image.copy(QRect(left, top, right - left, bottom - top)))
+            digest, _path = self.repository.store_derivative(png, suffix="png")
+            crops.append((region.region_id, digest, png))
+        return frame_id, tuple(crops)
+
+    def _htr_runtime(self, provider_id: str) -> HtrRuntime:
+        memory_limit = 1024 * 1024 * 1024 if provider_id == "crnn-rukopys" else 4 * 1024 * 1024 * 1024
+        python_text = self.htr_python_path.text().strip()
+        model_root_text = self.htr_model_root.text().strip()
+        if not python_text:
+            raise ValueError("HTR_PYTHON_NOT_CONFIGURED")
+        if not model_root_text:
+            raise ValueError("HTR_MODEL_ROOT_NOT_CONFIGURED")
+        return HtrRuntime(
+            python_executable=Path(python_text), model_root=Path(model_root_text),
+            timeout_seconds=self.htr_timeout.value(),
+            memory_limit_bytes=memory_limit,
+        )
+
+    def run_htr(self) -> None:
+        if self.current_record is None or self._htr_worker is not None:
+            return
+        provider_id = str(self.htr_provider_combo.currentData())
+        try:
+            frame_id, crops = self._htr_crops()
+            runtime = self._htr_runtime(provider_id)
+            request = make_htr_request(
+                provider_id, crops, timeout_seconds=runtime.timeout_seconds,
+                memory_limit_bytes=runtime.memory_limit_bytes,
+            )
+            client = HtrProcessClient(runtime, worker_script=self._htr_worker_script)
+        except (OSError, ValueError) as exc:
+            self._set_status("photo.htr.failed", error=str(exc))
+            return
+        worker = HtrRecognitionWorker(
+            client, self.htr_results, request,
+            source_manifest_sha256=self.current_record.sha256,
+            original_sha256=self.current_record.photo.original_sha256,
+            frame_id=frame_id,
+        )
+        worker.signals.progress.connect(self._htr_progress)
+        worker.signals.succeeded.connect(self._htr_succeeded)
+        worker.signals.cancelled.connect(self._htr_cancelled)
+        worker.signals.failed.connect(self._htr_failed)
+        self._htr_worker = worker
+        self._refresh_htr_controls()
+        self.htr_progress.setRange(0, len(crops))
+        self.htr_progress.setValue(0)
+        self._set_status("photo.htr.started", count=len(crops))
+        self._thread_pool.start(worker)
+
+    def cancel_htr(self) -> None:
+        if self._htr_worker is not None:
+            self._htr_worker.cancel()
+            self.htr_cancel_button.setEnabled(False)
+            self._set_status("photo.htr.cancelling")
+
+    def _htr_progress(self, completed: int, total: int, _stage: str) -> None:
+        self.htr_progress.setRange(0, total)
+        self.htr_progress.setValue(completed)
+        self._set_status("photo.htr.progress", completed=completed, total=total)
+
+    def _htr_succeeded(self, record: HtrRunRecord) -> None:
+        self._htr_worker = None
+        self._show_htr_run(record)
+        self._refresh_htr_controls()
+        self._set_status("photo.htr.complete", count=len(record.run.lines))
+
+    def _htr_cancelled(self, record: HtrRunRecord) -> None:
+        self._htr_worker = None
+        self._show_htr_run(record)
+        self._refresh_htr_controls()
+        self._set_status("photo.htr.cancelled")
+
+    def _htr_failed(self, record: HtrRunRecord) -> None:
+        self._htr_worker = None
+        self._show_htr_run(record)
+        self._refresh_htr_controls()
+        self._set_status("photo.htr.failed", error=record.run.error_code or "HTR_PROVIDER_FAILED")
+
+    def _restore_htr_results(self, record: PhotoRecord) -> None:
+        runs = self.htr_results.list_for_source(record.sha256)
+        if runs:
+            self._show_htr_run(runs[0])
+        else:
+            self.htr_results_view.setPlainText(tr(self.language, "photo.htr.empty"))
+
+    def _show_htr_run(self, record: HtrRunRecord) -> None:
+        run = record.run
+        header = f"{run.provider_id} · {run.status} · {run.model_revision or '—'}"
+        if run.status != "succeeded":
+            self.htr_results_view.setPlainText(f"{header}\n{run.error_code or '—'}")
+            return
+        rows = [header, tr(self.language, "photo.htr.no_confidence")]
+        rows.extend(f"{item.line_id}: {item.text}" for item in run.lines)
+        self.htr_results_view.setPlainText("\n".join(rows))
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -954,6 +1152,7 @@ class PhotoImportWorkspace(QWidget):
         self.separate_ink_button.setEnabled(False)
         self.use_raw_mask_button.setEnabled(False)
         self.detect_lines_button.setEnabled(False)
+        self.htr_group.setEnabled(False)
         for widget in (
             self.pitch_x_spin,
             self.pitch_y_spin,
@@ -1098,6 +1297,19 @@ class PhotoImportWorkspace(QWidget):
             if lines else tr(self.language, "photo.lines.empty")
         )
 
+    def _refresh_htr_controls(self) -> None:
+        active = self._htr_worker is not None
+        has_lines = self.current_record is not None and any(
+            region.kind == "line" for region in self.current_record.photo.regions
+        )
+        self.htr_group.setEnabled(self.current_record is not None)
+        self.htr_provider_combo.setEnabled(not active)
+        self.htr_python_path.setEnabled(not active)
+        self.htr_model_root.setEnabled(not active)
+        self.htr_timeout.setEnabled(not active)
+        self.htr_run_button.setEnabled(has_lines and not active)
+        self.htr_cancel_button.setEnabled(active)
+
     def _refresh_ruling_overlay(self) -> None:
         self.original_view.clear_ruling_overlay()
         self.corrected_view.clear_ruling_overlay()
@@ -1182,6 +1394,11 @@ class PhotoImportWorkspace(QWidget):
         self.separate_ink_button.setText(tr(language, "photo.mask.separate"))
         self.use_raw_mask_button.setText(tr(language, "photo.mask.use_raw"))
         self.detect_lines_button.setText(tr(language, "photo.lines.detect"))
+        self.htr_group.setTitle(tr(language, "photo.htr.title"))
+        for key, label in self._htr_labels.items():
+            label.setText(tr(language, key))
+        self.htr_run_button.setText(tr(language, "photo.htr.run"))
+        self.htr_cancel_button.setText(tr(language, "photo.htr.cancel"))
         for index in range(self.paper_classification_combo.count()):
             classification = self.paper_classification_combo.itemData(index)
             self.paper_classification_combo.setItemText(
@@ -1202,5 +1419,6 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
         self._refresh_line_controls()
+        self._refresh_htr_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
