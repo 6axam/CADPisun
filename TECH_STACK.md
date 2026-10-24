@@ -46,6 +46,10 @@ TASK 04 использует тот же optional adapter для локальн�
 классификации бумаги. Он не загружает модель, не делает сетевых запросов и не
 добавляет новую зависимость: OpenCV/NumPy остаются только в `photo-cv`.
 
+TASK 05 использует те же local OpenCV primitives — Canny, probabilistic Hough
+segments и robust periodic fitting — для grid/ruling geometry. Никакой ML model,
+external service или dependency не добавлен.
+
 ## 2. Тестовые зависимости
 
 | Pin | Роль | Лицензия / граница |

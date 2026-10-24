@@ -75,7 +75,19 @@ with explicitly heuristic confidence. A user may store a human override. Pitch,
 phase, physical size, overlays, and any learned classifier remain deferred, so
 the first implementation cannot present a page-type guess as measured geometry.
 
-## PH-ADR-007 — Isolate HTR providers
+## PH-ADR-007 — Store periodic pixel geometry, defer physical calibration
+
+**Status:** Accepted.
+
+TASK 05 uses local Canny/Hough evidence and robust periodic fitting to store only
+pixel pitch, phase/origin, direction and fit residual in the immutable ruling
+estimate. The overlay is reconstructed from this compact model. Four repeated
+long lines are required; sparse table borders fail rather than being promoted to
+paper geometry. A user can replace values explicitly. Physical millimetres,
+paper-removal masks, learned deformation and general real-photo accuracy remain
+outside this decision and are deferred to TASK 06–07 and the private corpus.
+
+## PH-ADR-008 — Isolate HTR providers
 
 **Status:** Accepted.
 
@@ -85,7 +97,7 @@ artifacts and canonical results. Providers initialize lazily, can run on CPU,
 report progress/resource limits, support cooperative cancellation, and work
 offline after explicit model installation.
 
-## PH-ADR-008 — Do not select an HTR winner during architecture work
+## PH-ADR-009 — Do not select an HTR winner during architecture work
 
 **Status:** Accepted.
 
@@ -104,7 +116,7 @@ Current planning order:
 
 This order is a download/benchmark strategy, not a quality ranking.
 
-## PH-ADR-009 — Preserve rights and privacy as data invariants
+## PH-ADR-010 — Preserve rights and privacy as data invariants
 
 **Status:** Accepted.
 
@@ -114,7 +126,7 @@ user data root and is excluded from Git by default. Technical logs omit notebook
 content. A missing rights record blocks publication/training but not local
 inspection of the user's own explicitly imported data.
 
-## PH-ADR-010 — Notebook backgrounds are page geometry
+## PH-ADR-011 — Notebook backgrounds are page geometry
 
 **Status:** Accepted for TASK 18.
 
@@ -123,7 +135,7 @@ handwriting PenPlan strokes. Preview/background export can include them; pen-onl
 SVG and virtual G-code exclude ruling unless the user explicitly requests a
 future verified ruling-plot operation. A 5 mm cell is a preset, not an inference.
 
-## PH-ADR-011 — Fit style metrics, never deform each glyph independently
+## PH-ADR-012 — Fit style metrics, never deform each glyph independently
 
 **Status:** Accepted for TASK 19.
 
@@ -137,12 +149,11 @@ shrinking or applying nonuniform per-glyph stretches.
 
 | Decision | Earliest task | Required evidence |
 |---|---|---|
-| Full vision worker dependency pins | TASK 05 / TASK 07 | Ruling/mask fixtures, worker isolation, Linux/Windows install |
-| Grid/ruling estimator algorithm | TASK 05 | Synthetic/real overlay errors and handwriting/table negatives |
+| Full vision worker dependency pins | TASK 07 | Ruling/mask fixtures, worker isolation, Linux/Windows install |
 | Ink color/separation profiles | TASK 07 | Approved masks for representative pen/paper conditions |
 | Primary and fallback HTR provider | TASK 09 | Identical-corpus quality, latency, RAM, rights, and install report |
 | Alignment algorithm | TASK 12 | Ambiguous cursive/diacritic fixtures and alternative preservation |
 | Stroke-order scoring weights | TASK 14 | Paired online/photo subset plus manual correction time |
 | Clustering/deduplication thresholds | TASK 15 | Repeated authentic variants with reviewer decisions |
 
-No deferred choice blocks the implemented planar correction or TASK 04.
+No deferred choice blocks TASK 06.

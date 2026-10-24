@@ -11,7 +11,7 @@ correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
 | Photo import throughput and memory | DEFERRED — TASK 23; TASK 01 covers correctness/resource rejection | — |
 | Rectification accuracy | SYNTHETIC CORRECTNESS ONLY — TASK 03 | Corner RMSE 0 px; max 0 px; inverse RMSE 1.24e-13 px; max 2.43e-13 px on one clean generated quad |
 | Paper classification | SYNTHETIC CORRECTNESS ONLY — TASK 04 | 5/5 classes correct; 4.760 ms/classification mean across 500 runs on local Linux |
-| Grid/ruling geometry | NOT RUN — TASK 05 | — |
+| Grid/ruling geometry | SYNTHETIC CORRECTNESS ONLY — TASK 05 | ±1 px pitch; ±0.5° direction; residual <2 px on occluded/skewed fixtures; 158.245 ms/estimate local mean |
 | Ink separation | NOT RUN — TASK 07 | — |
 | Line segmentation | NOT RUN — TASK 08 | — |
 | Ukrainian HTR comparison | NOT RUN — TASK 09 | — |
@@ -94,6 +94,17 @@ compression, skew, or genuine notebook photo performance.
   recall, angle error, local residual, and overlay reprojection error.
 - Report separately for clean, shadowed, compressed, occluded, table-border, and
   handwriting-heavy fixtures.
+
+TASK 05 measured four deterministic 800×600 fixtures in
+`tests/learning/test_ruling_geometry.py`: clean ruled/grid, then 4° ruled and
+−5° squared pages with a large opaque crossing mark plus short ink strokes.
+Recovered pitch was within 1 px of 40 px, directions within 0.5° and max stored
+residual below 2 px. Three sparse table rows intentionally fail the four-line
+minimum instead of producing notebook geometry. A warm 10×4 loop took
+`158.245 ms` per estimate on local Linux. The offscreen overlay matched the
+generated 40 px grid visually. These are synthetic correctness and latency
+figures only; they do not validate real photos, shadows, JPEG compression,
+curved pages, mm calibration, or universal table rejection.
 
 ### Ink separation
 

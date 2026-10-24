@@ -270,11 +270,14 @@ pixel frame. `classification` ограничен `blank`, `squared`, `ruled`, `m
 `status=overridden` — явный выбор пользователя с `ConfidenceValue` origin
 `human`. Ручной выбор не меняет source/derivative bytes, transform или region.
 
-Первая классификация намеренно не заполняет `cell_pitch_x_px`,
-`cell_pitch_y_px`, `ruling_pitch_px` или origin: эти значения остаются `null`
-до TASK 05. Метод и heuristic confidence описывают только наличие повторяющихся
-длинных горизонтальных/вертикальных линий; confidence не является калиброванной
-вероятностью правильной классификации.
+TASK 05 для `ruled` сохраняет `ruling_pitch_px`, `origin_y_px`, horizontal
+direction и residual; для `squared` — два шага, два origin, horizontal/vertical
+directions и residual. Origin и pitch всегда относятся к пикселям указанного
+frame, не к миллиметрам. Overlay заново строится из этой периодической
+геометрии, поэтому массив линий в manifest не дублируется. Residual — локальный
+fit indicator, а не калиброванная оценка качества. Пользователь может сохранить
+ручные pixel values как `status=overridden`; физический scale остаётся `null` до
+TASK 06.
 
 ## 9. Persistent storage и журнал задания
 

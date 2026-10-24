@@ -8,9 +8,9 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 5 / 25 tasks |
-| Last completed | TASK 04 — Notebook paper classification |
-| Next | TASK 05 — Grid and ruled-line detection |
+| Completed | 6 / 25 tasks |
+| Last completed | TASK 05 — Grid and ruled-line detection |
+| Next | TASK 06 — Physical-scale calibration |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -302,7 +302,7 @@ configured to install `photo-cv` on Linux and Windows when a pull request runs.
 | PH-BLK-004 | HandwritingDatasetGen code reuse | BLOCKED | Upstream adds a compatible explicit license; until then use papers/behavior as references only |
 | PH-BLK-005 | Windows CV/ML behavior | UNVERIFIED | Windows CI/runtime tasks execute the implemented provider and image fixtures |
 
-None of these blocks TASK 05.
+None of these blocks TASK 06.
 
 ## TASK 04 — Notebook paper classification
 
@@ -357,21 +357,70 @@ Analyze paper, selector, override button, 95% heuristic summary, preview panes,
 status, and diagnostics were visible with no overlap. The temporary screenshot
 was not committed. Windows was not executed locally.
 
+## TASK 05 — Grid and ruled-line detection
+
+Status: `[x]` DONE
+
+Completion commit: `6b660c4c4a607be2f2cf0ecd208dafe7f2a56777`
+
+### Implemented behavior
+
+- Added a Qt-free geometry-estimator port and optional OpenCV implementation.
+  It uses Canny, probabilistic Hough segments, median direction, de-duplicated
+  line coordinates, and a bounded periodic fit to derive image-space pitch,
+  phase/origin, direction and residual.
+- The estimator requires four repeated long lines. It handles the committed
+  skew/opaque-mark/crossing-ink fixtures and rejects the sparse table-border
+  negative. Only `ruled` and `squared` classifications can own geometry.
+- Extended `RulingEstimate` additively with optional angles and residuals;
+  pre-existing manifests stay valid. Pixel geometry has no implied physical
+  size. Manual geometry creates a human immutable override.
+- Studio now offers Detect spacing, aligned magenta overlay, residual summary,
+  localized pixel pitch/origin/angle controls, save/reopen and a corrected-frame
+  analysis path. Preview rotation hides the overlay until it can align again.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_ruling_classification.py \
+  tests/learning/test_ruling_geometry.py \
+  tests/gui/test_photo_import_gui.py
+```
+
+Result: `21 passed in 2.51s`. Tests cover known 40 px pitch, phase/origin,
+directions, grid intersections, occlusion, crossing ink, sparse table negative,
+manual persistence and GUI overlay/reopen.
+
+```bash
+uv lock --check
+git diff --check
+uv run python -m compileall -q src tests
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+uv build --out-dir /tmp/cadpisun-task05-build
+```
+
+Result: lock, whitespace, bytecode compilation, sdist, and wheel passed; the
+full local Linux suite was `277 passed in 35.56s`.
+
+Visual QA used an offscreen 1440×1000 generated 40 px grid. The magenta overlay
+matched the blue source grid, and all measurement/manual controls, summary,
+preview panes, status and diagnostics were visible with no overlap. Windows was
+not executed locally.
+
 ## Next task estimate
 
-**TASK 05 — Grid and ruled-line detection**
+**TASK 06 — Physical-scale calibration**
 
-- Recommended tier: HIGH.
-- Complexity: 11/12 (robust estimation, geometry contracts, visualization,
-  manual correction, tests, and interaction risk).
-- Estimated implementation: 15k–30k tokens; split deterministic estimator and
-  overlay/manual correction only if each has its own verified checkpoint.
-- Relative quota pressure: HIGH.
-- Main uncertainty: recovering pitch/phase/origins under skew, handwriting,
-  table borders, partial pages, and local distortion without treating a noisy
-  classifier result as precise geometry.
+- Recommended tier: MEDIUM.
+- Complexity: 6/12 (pixel/reference conversion, provenance, GUI, persistence,
+  tests and compatibility).
+- Estimated implementation: 6k–12k tokens, roughly 6–10 files.
+- Relative quota pressure: MEDIUM.
+- Main uncertainty: retaining explicit uncertainty and never assuming that a
+  detected pixel cell equals 5 mm without a verified reference or human preset.
 
 Recommended message at the next boundary:
 
-> Рекомендую HIGH: следующая задача должна измерять и отображать pitch, phase,
-> origins и overlay с ручной коррекцией, не начиная OCR или обучение.
+> Рекомендую MEDIUM: следующая задача должна добавить physical-scale provenance
+> и explicit 5 mm preset без молчаливой калибровки или OCR.

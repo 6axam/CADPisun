@@ -226,8 +226,15 @@ import `handwriting_plotter.learning` не загружает cv2/numpy. Есл�
 только `blank|squared|ruled|mixed|unknown`, method и heuristic confidence.
 `persist_ruling_estimate()` принимает лишь существующий frame, публикует новый
 immutable manifest и повторно проверяет exact original bytes. `manual_ruling_estimate()`
-создает explicit human override. Ни один из этих контрактов не выводит шаг,
-фазу или физические миллиметры: это отдельные контракты TASK 05–06.
+создает explicit human override.
+
+`RulingGeometryEstimator.estimate(bytes, frame_id, classification) ->
+RulingEstimate` в TASK 05 принимает только ruled/squared и строит periodic
+geometry из длинных Hough segments: pitch, phase/origin, horizontal/vertical
+direction и residual. Sparse table borders не становятся geometry. `manual_ruling_geometry()`
+принимает явные pixel pitch/origin/angle и сохраняет human override; GUI overlay
+перерисовывает линии из этих values. Шаг и origin не имеют единиц millimetres и
+не используются для ink removal или OCR.
 
 | Port | Вход → выход | Инварианты и отказ |
 |---|---|---|

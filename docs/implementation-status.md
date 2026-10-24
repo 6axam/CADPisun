@@ -1,5 +1,17 @@
 # Состояние реализации
 
+## PHOTO-05 — геометрия клеток и линеек, 2026-10-24
+
+- `photo-cv` измеряет periodic pixel geometry для ruled/squared листов:
+  pitch, phase/origin, направления и residual из длинных Hough segments.
+  Модель требует как минимум четыре повторяющиеся линии и отвергает sparse
+  table borders вместо фиктивной геометрии.
+- В Studio есть Detect spacing, magenta overlay измеренного frame, отображение
+  residual и ручные поля pixel pitch/origin/angle. Сохранение создает human
+  override в новом immutable manifest; physical mm не объявляются.
+- Synthetic tests проверяют clean/skewed/occluded/crossing-ink pages, grid
+  intersections, table negative, ручную persistence/reopen и GUI overlay.
+
 ## PHOTO-04 — классификация бумаги тетради, 2026-10-24
 
 - `photo-cv` теперь локально классифицирует blank, squared, ruled, mixed или
