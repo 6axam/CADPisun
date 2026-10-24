@@ -577,7 +577,7 @@ class OpenCvInkSeparator:
 class OpenCvLineSegmenter:
     """Conservative horizontal-projection line proposals from a binary mask."""
 
-    def segment(self, mask_png: bytes, *, frame_id: str) -> tuple[PhotoRegion, ...]:
+    def segment(self, mask_png: bytes, *, frame_id: str, cancelled=None) -> tuple[PhotoRegion, ...]:
         cv2, np = _cv_modules()
         mask = cv2.imdecode(np.frombuffer(mask_png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         if mask is None or mask.size == 0:
@@ -598,6 +598,8 @@ class OpenCvLineSegmenter:
             raise ValueError("HANDWRITING_LINES_NOT_FOUND")
         regions: list[PhotoRegion] = []
         for index, (top, bottom) in enumerate(groups):
+            if cancelled is not None and cancelled():
+                raise RuntimeError("LINE_SEGMENTATION_CANCELLED")
             ys, xs = np.nonzero(mask[top : bottom + 1])
             if len(xs) == 0:
                 continue

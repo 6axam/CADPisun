@@ -52,7 +52,14 @@ from .calibration import (
     ruling_pixel_to_relative,
 )
 from .masks import InkMaskRaster, persist_ink_mask, select_ink_mask_variant
-from .regions import LineSegmenter, manual_line_region, persist_line_regions
+from .regions import (
+    LineSegmenter,
+    manual_line_region,
+    manual_region,
+    persist_line_regions,
+    persist_regions,
+    reading_order_for_regions,
+)
 
 __all__ = [
     "ConfidenceValue",
@@ -88,17 +95,20 @@ __all__ = [
     "manual_ruling_estimate",
     "manual_ruling_geometry",
     "manual_line_region",
+    "manual_region",
     "calibration_from_ruling_pitch",
     "grid_relative_to_pixel",
     "order_page_corners",
     "persist_correction",
     "persist_ink_mask",
     "persist_line_regions",
+    "persist_regions",
     "persist_ruling_estimate",
     "persist_physical_scale_calibration",
     "pixel_to_metric",
     "ruling_pixel_to_metric",
     "ruling_pixel_to_relative",
+    "reading_order_for_regions",
     "select_ink_mask_variant",
     "serialize_photo",
     "validate_corners_in_frame",

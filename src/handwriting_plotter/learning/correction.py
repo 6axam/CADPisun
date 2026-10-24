@@ -224,6 +224,7 @@ def persist_correction(
         frames=(*source.photo.frames, corrected_frame),
         transforms=(*source.photo.transforms, transform),
         regions=(*source.photo.regions, page_region),
+        reading_order=source.photo.reading_order,
     )
     updated = NotebookPhoto.model_validate(payload, strict=True)
     updated_record = repository.store(updated, repository.read_original(source.photo))

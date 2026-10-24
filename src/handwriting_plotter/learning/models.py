@@ -149,7 +149,7 @@ class ImageTransform(StrictModel):
 
 class PhotoRegion(StrictModel):
     region_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-    kind: Literal["page", "text", "header", "paragraph", "line", "word", "grapheme", "ligature", "other"]
+    kind: Literal["page", "text", "header", "marginalia", "paragraph", "line", "word", "grapheme", "ligature", "other"]
     frame_id: str = Field(min_length=1, max_length=128)
     polygon: tuple[PixelPoint, ...] = Field(min_length=3, max_length=4096)
     parent_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -339,6 +339,7 @@ class NotebookPhoto(StrictModel):
     frames: tuple[PixelFrame, ...]
     transforms: tuple[ImageTransform, ...] = ()
     regions: tuple[PhotoRegion, ...] = ()
+    reading_order: tuple[str, ...] = ()
     ruling: RulingEstimate
     calibration: PhysicalScaleCalibration | None = None
     ink_mask: InkMask | None = None
@@ -387,6 +388,10 @@ class NotebookPhoto(StrictModel):
         if len(region_ids) != len(set(region_ids)):
             raise ValueError("DUPLICATE_PHOTO_REGION")
         region_set = set(region_ids)
+        if len(self.reading_order) != len(set(self.reading_order)) or any(
+            region_id not in region_set for region_id in self.reading_order
+        ):
+            raise ValueError("INVALID_READING_ORDER")
         parents: dict[str, str] = {}
         for item in self.regions:
             frame = frames.get(item.frame_id)
