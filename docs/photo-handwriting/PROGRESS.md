@@ -65,10 +65,29 @@ QT_QPA_PLATFORM=offscreen uv run pytest -q \
 
 Result: `21 passed`. They cover protocol privacy, Unicode, missing weights,
 timeout, cancellation, crash recovery, result persistence and non-blocking Qt
-result display. `compileall` and `git diff --check` also pass. The full local
-suite reached `307 passed`; one unrelated existing offscreen Qt shell assertion
-about the Properties scrollbar fails (`tests/gui/test_shell.py`), so a fully
-green whole-suite claim is deliberately not made. Windows was not run.
+result display. `compileall` and `git diff --check` also pass.
+
+### Post-TASK 10 verification checkpoint
+
+- The former `test_properties_scroll_and_output_dock_use_non_overlapping_corner`
+  failure was a real layout defect, not a flaky assertion: the dense, hidden
+  Studio/HTR page propagated its `1361 × 936` minimum through `QStackedWidget`.
+  A requested 900 × 620 document window was expanded by Qt to 1893 × 1201, so
+  the Properties panel had no reason to scroll. `HandwritingStudio` now has an
+  ignored size policy while hidden in the workspace stack; it no longer sets the
+  document window minimum. The regression test now also asserts the requested
+  900 × 620 geometry before asserting a nonzero Properties scrollbar.
+- A single permitted private line crop completed in the new TrOCR subprocess.
+  The worker emitted progress/complete, verified the pinned revision and weight
+  hash, and did not receive or emit ground truth in the public report. This was
+  a functional smoke check only, not a second benchmark.
+- Linux `RLIMIT_AS` was independently read back as soft/hard `4,294,967,296`
+  bytes in the provider environment. The same 4 GiB address-space limit allowed
+  the TrOCR CPU smoke inference to complete. RSS was not used as a substitute
+  for the virtual-memory limit.
+- Final local Linux result: `QT_QPA_PLATFORM=offscreen uv run pytest -q` passed
+  `308`; `python -m compileall -q src tests`, `uv lock --check`, and
+  `git diff --check` passed. Windows was not run.
 
 ## TASK 09 — HTR model benchmark
 
