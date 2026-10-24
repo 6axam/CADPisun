@@ -8,9 +8,9 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 9 / 25 tasks |
-| Last completed | TASK 08 — Regions and handwriting lines |
-| Next | TASK 09 — HTR model benchmark |
+| Completed | 8 / 25 tasks |
+| Last completed | TASK 07 — Paper/ink separation |
+| Next | TASK 08 — Regions and handwriting lines (in progress) |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
