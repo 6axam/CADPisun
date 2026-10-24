@@ -154,6 +154,7 @@ class PhotoRegion(StrictModel):
     polygon: tuple[PixelPoint, ...] = Field(min_length=3, max_length=4096)
     parent_id: str | None = Field(default=None, min_length=1, max_length=128)
     confidence: ConfidenceValue | None = None
+    baseline: tuple[PixelPoint, ...] | None = Field(default=None, min_length=2, max_length=4096)
 
     @model_validator(mode="after")
     def polygon_has_area(self) -> PhotoRegion:
@@ -166,6 +167,8 @@ class PhotoRegion(StrictModel):
         )
         if abs(area_twice) <= 1e-9:
             raise ValueError("REGION_POLYGON_HAS_NO_AREA")
+        if self.baseline is not None and self.kind != "line":
+            raise ValueError("BASELINE_REQUIRES_LINE_REGION")
         return self
 
 
@@ -395,6 +398,11 @@ class NotebookPhoto(StrictModel):
                 parents[item.region_id] = item.parent_id
             if any(point.x > frame.width_px or point.y > frame.height_px for point in item.polygon):
                 raise ValueError("REGION_OUTSIDE_PIXEL_FRAME")
+            if item.baseline is not None and any(
+                point.x > frame.width_px or point.y > frame.height_px
+                for point in item.baseline
+            ):
+                raise ValueError("BASELINE_OUTSIDE_PIXEL_FRAME")
         for region_id in region_ids:
             seen: set[str] = set()
             cursor = region_id

@@ -338,10 +338,15 @@ def test_ink_mask_review_and_raw_override_are_persisted(qtbot, tmp_path: Path) -
     assert workspace.current_record.photo.ink_mask is not None
     assert workspace.current_record.photo.ink_mask.selected_variant == "raw"
     assert workspace.current_record.photo.ink_mask.status == "overridden"
+    workspace.detect_lines_button.click()
+    lines = tuple(region for region in workspace.current_record.photo.regions if region.kind == "line")
+    assert lines
+    assert "handwriting line proposal" in workspace.status_label.text()
     reopened = PhotoImportWorkspace(root)
     qtbot.addWidget(reopened)
     assert reopened.current_record is not None
     assert reopened.current_record.photo.ink_mask == workspace.current_record.photo.ink_mask
+    assert tuple(region for region in reopened.current_record.photo.regions if region.kind == "line") == lines
 
     workspace.pitch_y_spin.setValue(31.0)
     workspace.apply_geometry_button.click()

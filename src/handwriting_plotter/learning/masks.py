@@ -36,6 +36,12 @@ def persist_ink_mask(
     raw_digest, raw_path = repository.store_derivative(raster.raw_png, suffix="png")
     cleaned_digest, cleaned_path = repository.store_derivative(raster.cleaned_png, suffix="png")
     payload = source.photo.model_dump(mode="python")
+    # A new mask can change connected components and projection bands; old line
+    # proposals must not masquerade as proposals for the new selected mask.
+    payload["regions"] = tuple(
+        region for region in source.photo.regions
+        if not (region.kind == "line" and region.frame_id == raster.frame_id)
+    )
     payload["ink_mask"] = InkMask(
         frame_id=raster.frame_id,
         method=raster.method,

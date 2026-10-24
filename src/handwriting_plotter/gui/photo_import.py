@@ -35,6 +35,7 @@ from handwriting_plotter.adapters.images.qt import QtImageDecoder
 from handwriting_plotter.adapters.images.opencv import (
     OpenCvPageCorrector,
     OpenCvInkSeparator,
+    OpenCvLineSegmenter,
     OpenCvRulingGeometryEstimator,
     OpenCvRulingClassifier,
     opencv_available,
@@ -50,6 +51,7 @@ from handwriting_plotter.learning import (
     manual_ruling_geometry,
     persist_correction,
     persist_ink_mask,
+    persist_line_regions,
     persist_physical_scale_calibration,
     persist_ruling_estimate,
     select_ink_mask_variant,
@@ -409,6 +411,15 @@ class PhotoImportWorkspace(QWidget):
         mask_tools.addWidget(self.mask_summary_label, 1)
         layout.addLayout(mask_tools)
 
+        region_tools = QHBoxLayout()
+        self.detect_lines_button = QPushButton()
+        self.lines_summary_label = QLabel()
+        self.lines_summary_label.setObjectName("photo-lines-summary")
+        self.detect_lines_button.setEnabled(False)
+        region_tools.addWidget(self.detect_lines_button)
+        region_tools.addWidget(self.lines_summary_label, 1)
+        layout.addLayout(region_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -466,6 +477,7 @@ class PhotoImportWorkspace(QWidget):
         self.apply_5mm_preset_button.clicked.connect(self.apply_5mm_preset)
         self.separate_ink_button.clicked.connect(self.separate_ink)
         self.use_raw_mask_button.clicked.connect(self.use_raw_mask)
+        self.detect_lines_button.clicked.connect(self.detect_lines)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -537,6 +549,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
@@ -576,6 +589,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -603,6 +617,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -629,6 +644,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
@@ -670,6 +686,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status("photo.geometry.override_complete")
@@ -718,6 +735,7 @@ class PhotoImportWorkspace(QWidget):
             self._set_status("photo.mask.failed", error=str(exc))
             return
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_diagnostics()
         self._set_status("photo.mask.complete")
 
@@ -732,8 +750,29 @@ class PhotoImportWorkspace(QWidget):
             self._set_status("photo.mask.failed", error=str(exc))
             return
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_diagnostics()
         self._set_status("photo.mask.raw_selected")
+
+    def detect_lines(self) -> None:
+        if self.current_record is None or self.current_record.photo.ink_mask is None:
+            return
+        try:
+            mask = self.current_record.photo.ink_mask
+            relative = (
+                mask.raw_relative_path if mask.selected_variant == "raw"
+                else mask.cleaned_relative_path
+            )
+            regions = OpenCvLineSegmenter().segment(
+                (self.repository.root / relative).read_bytes(), frame_id=mask.frame_id
+            )
+            self.current_record = persist_line_regions(self.repository, self.current_record, regions)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.lines.failed", error=str(exc))
+            return
+        self._refresh_line_controls()
+        self._refresh_diagnostics()
+        self._set_status("photo.lines.complete", count=len(regions))
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -914,6 +953,7 @@ class PhotoImportWorkspace(QWidget):
         self.apply_5mm_preset_button.setEnabled(False)
         self.separate_ink_button.setEnabled(False)
         self.use_raw_mask_button.setEnabled(False)
+        self.detect_lines_button.setEnabled(False)
         for widget in (
             self.pitch_x_spin,
             self.pitch_y_spin,
@@ -1046,6 +1086,18 @@ class PhotoImportWorkspace(QWidget):
             )
         )
 
+    def _refresh_line_controls(self) -> None:
+        if self.current_record is None:
+            self.lines_summary_label.clear()
+            return
+        mask = self.current_record.photo.ink_mask
+        self.detect_lines_button.setEnabled(mask is not None and opencv_available())
+        lines = tuple(region for region in self.current_record.photo.regions if region.kind == "line")
+        self.lines_summary_label.setText(
+            tr(self.language, "photo.lines.summary").format(count=len(lines))
+            if lines else tr(self.language, "photo.lines.empty")
+        )
+
     def _refresh_ruling_overlay(self) -> None:
         self.original_view.clear_ruling_overlay()
         self.corrected_view.clear_ruling_overlay()
@@ -1096,6 +1148,7 @@ class PhotoImportWorkspace(QWidget):
             ("photo.diagnostics.geometry", self._geometry_summary(photo.ruling)),
             ("photo.diagnostics.scale", self.scale_summary_label.text()),
             ("photo.diagnostics.mask", self.mask_summary_label.text()),
+            ("photo.diagnostics.lines", self.lines_summary_label.text()),
             ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
@@ -1128,6 +1181,7 @@ class PhotoImportWorkspace(QWidget):
         self.apply_5mm_preset_button.setText(tr(language, "photo.scale.preset"))
         self.separate_ink_button.setText(tr(language, "photo.mask.separate"))
         self.use_raw_mask_button.setText(tr(language, "photo.mask.use_raw"))
+        self.detect_lines_button.setText(tr(language, "photo.lines.detect"))
         for index in range(self.paper_classification_combo.count()):
             classification = self.paper_classification_combo.itemData(index)
             self.paper_classification_combo.setItemText(
@@ -1147,5 +1201,6 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
         self._refresh_mask_controls()
+        self._refresh_line_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()

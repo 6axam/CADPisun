@@ -12,6 +12,7 @@ from handwriting_plotter.learning import (
     PixelPoint,
     RulingEstimate,
     InkMaskRaster,
+    PhotoRegion,
     map_point,
     order_page_corners,
     validate_corners_in_frame,
@@ -571,3 +572,46 @@ class OpenCvInkSeparator:
         horizontal = add_family(ruling.ruling_pitch_px or ruling.cell_pitch_y_px, ruling.origin_y_px, ruling.horizontal_angle_deg, vertical=False)
         vertical = add_family(ruling.cell_pitch_x_px, ruling.origin_x_px, ruling.vertical_angle_deg, vertical=True)
         return result if horizontal or vertical else None
+
+
+class OpenCvLineSegmenter:
+    """Conservative horizontal-projection line proposals from a binary mask."""
+
+    def segment(self, mask_png: bytes, *, frame_id: str) -> tuple[PhotoRegion, ...]:
+        cv2, np = _cv_modules()
+        mask = cv2.imdecode(np.frombuffer(mask_png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if mask is None or mask.size == 0:
+            raise ValueError("INVALID_INK_MASK")
+        active = np.count_nonzero(mask, axis=1) >= max(3, mask.shape[1] * 0.01)
+        groups: list[tuple[int, int]] = []
+        start = 0
+        while start < len(active):
+            if not active[start]:
+                start += 1
+                continue
+            end = start + 1
+            while end < len(active) and active[end]:
+                end += 1
+            groups.append((start, end - 1))
+            start = end
+        if not groups:
+            raise ValueError("HANDWRITING_LINES_NOT_FOUND")
+        regions: list[PhotoRegion] = []
+        for index, (top, bottom) in enumerate(groups):
+            ys, xs = np.nonzero(mask[top : bottom + 1])
+            if len(xs) == 0:
+                continue
+            left = max(0.0, float(xs.min() - 2))
+            right = min(float(mask.shape[1] - 1), float(xs.max() + 2))
+            upper = max(0.0, float(top - 2))
+            lower = min(float(mask.shape[0] - 1), float(bottom + 2))
+            baseline = min(lower, max(upper, float(bottom)))
+            regions.append(PhotoRegion(
+                region_id=f"line-{index + 1:04d}", kind="line", frame_id=frame_id,
+                polygon=(PixelPoint(x=left, y=upper), PixelPoint(x=right, y=upper), PixelPoint(x=right, y=lower), PixelPoint(x=left, y=lower)),
+                baseline=(PixelPoint(x=left, y=baseline), PixelPoint(x=right, y=baseline)),
+                confidence=ConfidenceValue(value=0.5, origin="heuristic", meaning="binary-mask horizontal projection line proposal"),
+            ))
+        if not regions:
+            raise ValueError("HANDWRITING_LINES_NOT_FOUND")
+        return tuple(regions)
