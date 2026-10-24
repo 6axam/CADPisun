@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .document import ArtworkObject, GridObject, TEXT_COLOR_GROUPS, TextObject
+from .notebook_templates import NotebookPageTemplate, background_lines
 from .theme import COLORS
 
 OBJECT_ID_ROLE = 0
@@ -79,6 +80,26 @@ class GridPageItem(QGraphicsItem):
         while y <= bottom + 1e-9:
             painter.drawLine(QPointF(self._rect.left(), y), QPointF(right, y))
             y += self.grid.cell_height_mm
+
+
+class NotebookPageItem(QGraphicsItem):
+    """Visual A4 paper artwork; it is never a selectable or plottable item."""
+
+    def __init__(self, template: NotebookPageTemplate) -> None:
+        super().__init__()
+        self.template = template
+        width, height = template.page_size_mm
+        self._rect = QRectF(0.0, 0.0, width, height)
+
+    def boundingRect(self) -> QRectF:  # noqa: N802
+        return QRectF(self._rect)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: ANN001
+        for line in background_lines(self.template):
+            pen = QPen(QColor(line.color), line.width_mm)
+            pen.setCosmetic(False)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(line.x1_mm, line.y1_mm), QPointF(line.x2_mm, line.y2_mm))
 
 
 class ArtworkPageItem(QGraphicsItem):
@@ -149,6 +170,7 @@ class PageCanvas(QGraphicsView):
         self._object_models: dict[str, object] = {}
         self._grid_items: dict[str, GridPageItem] = {}
         self._artwork_items: dict[str, ArtworkPageItem] = {}
+        self._notebook_item: NotebookPageItem | None = None
         self._selected_object_ids: set[str] = set()
         self._hovered_object_id: str | None = None
         self._resize_handles: dict[str, QGraphicsRectItem] = {}
@@ -224,8 +246,34 @@ class PageCanvas(QGraphicsView):
         self._stale_banner_text.hide()
         self.scene().addItem(self._stale_banner_text)
 
+    def set_page_size(self, width_mm: float, height_mm: float) -> None:
+        """Resize the page scene for an A4 portrait or landscape template."""
+
+        if width_mm <= 0 or height_mm <= 0:
+            raise ValueError("page dimensions must be positive")
+        if abs(width_mm - self._page_rect.width()) < 1e-9 and abs(height_mm - self._page_rect.height()) < 1e-9:
+            return
+        self._page_rect = QRectF(0.0, 0.0, width_mm, height_mm)
+        self.scene().setSceneRect(-25.0, -25.0, width_mm + 50.0, height_mm + 50.0)
+        self._paper_item.setRect(self._page_rect)
+        self._stale_banner_item.setRect(12.0, 8.0, max(20.0, width_mm - 24.0), 13.0)
+        self._margin_item.setRect(QRectF())
+        self.zoom_to_fit()
+
+    def set_notebook_template(self, template: NotebookPageTemplate | None) -> None:
+        if self._notebook_item is not None and self._notebook_item.scene() is self.scene():
+            self.scene().removeItem(self._notebook_item)
+        self._notebook_item = None
+        if template is None:
+            return
+        width, height = template.page_size_mm
+        self.set_page_size(width, height)
+        self._notebook_item = NotebookPageItem(template)
+        self._notebook_item.setZValue(1.1)
+        self.scene().addItem(self._notebook_item)
+
     def set_margins(self, left: float, top: float, right: float, bottom: float) -> None:
-        rect = QRectF(left, top, self.PAGE_WIDTH_MM - left - right, self.PAGE_HEIGHT_MM - top - bottom)
+        rect = QRectF(left, top, self._page_rect.width() - left - right, self._page_rect.height() - top - bottom)
         if hasattr(self, "_margin_item"):
             self._margin_item.setRect(rect)
             return
@@ -483,15 +531,15 @@ class PageCanvas(QGraphicsView):
         models = [self._object_models[object_id] for object_id in object_ids]
         rects = [self._object_rect(model) for model in models]
         minimum_dx = max(-rect.left() for rect in rects)
-        maximum_dx = min(self.PAGE_WIDTH_MM - rect.right() for rect in rects)
+        maximum_dx = min(self._page_rect.width() - rect.right() for rect in rects)
         minimum_dy = max(-rect.top() for rect in rects)
-        maximum_dy = min(self.PAGE_HEIGHT_MM - rect.bottom() for rect in rects)
+        maximum_dy = min(self._page_rect.height() - rect.bottom() for rect in rects)
         for model in models:
             if isinstance(model, TextObject):
                 minimum_dx = max(minimum_dx, -model.x_mm)
-                maximum_dx = min(maximum_dx, self.PAGE_WIDTH_MM - model.x_mm - 0.01)
+                maximum_dx = min(maximum_dx, self._page_rect.width() - model.x_mm - 0.01)
                 minimum_dy = max(minimum_dy, -model.y_mm)
-                maximum_dy = min(maximum_dy, self.PAGE_HEIGHT_MM - model.y_mm - 0.01)
+                maximum_dy = min(maximum_dy, self._page_rect.height() - model.y_mm - 0.01)
         return QPointF(max(minimum_dx, min(maximum_dx, dx)), max(minimum_dy, min(maximum_dy, dy)))
 
     @staticmethod
@@ -541,9 +589,9 @@ class PageCanvas(QGraphicsView):
         left, top, right, bottom = initial.left(), initial.top(), initial.right(), initial.bottom()
         if len(handle) == 1:
             if handle == "w": left = max(0.0, min(point.x(), right - 5.0))
-            elif handle == "e": right = min(self.PAGE_WIDTH_MM, max(point.x(), left + 5.0))
+            elif handle == "e": right = min(self._page_rect.width(), max(point.x(), left + 5.0))
             elif handle == "n": top = max(0.0, min(point.y(), bottom - 5.0))
-            elif handle == "s": bottom = min(self.PAGE_HEIGHT_MM, max(point.y(), top + 5.0))
+            elif handle == "s": bottom = min(self._page_rect.height(), max(point.y(), top + 5.0))
         else:
             anchor_x = right if "w" in handle else left
             anchor_y = bottom if "n" in handle else top
@@ -551,8 +599,8 @@ class PageCanvas(QGraphicsView):
             raw_height = abs(point.y() - anchor_y)
             scale = max(raw_width / initial.width(), raw_height / initial.height())
             scale = max(scale, 5.0 / initial.width(), 5.0 / initial.height())
-            max_width = anchor_x if "w" in handle else self.PAGE_WIDTH_MM - anchor_x
-            max_height = anchor_y if "n" in handle else self.PAGE_HEIGHT_MM - anchor_y
+            max_width = anchor_x if "w" in handle else self._page_rect.width() - anchor_x
+            max_height = anchor_y if "n" in handle else self._page_rect.height() - anchor_y
             scale = min(scale, max_width / initial.width(), max_height / initial.height())
             width, height = initial.width() * scale, initial.height() * scale
             left, right = (anchor_x - width, anchor_x) if "w" in handle else (anchor_x, anchor_x + width)

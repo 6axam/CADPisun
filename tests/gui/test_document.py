@@ -76,7 +76,7 @@ def test_legacy_project_is_loaded_with_text_frames(tmp_path, schema_version) -> 
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.5"
+    assert loaded.schema_version == "1.6"
     assert loaded.project_id == sample_project().project_id
     assert loaded.objects[0].frame_x_mm == 42.0
     assert loaded.objects[0].frame_y_mm == 53.0
@@ -95,7 +95,7 @@ def test_schema_13_project_gets_new_text_layout_defaults(tmp_path) -> None:
 
     loaded = load_project(path)
 
-    assert loaded.schema_version == "1.5"
+    assert loaded.schema_version == "1.6"
     item = loaded.objects[0]
     assert item.character_spacing_mm == 0
     assert item.rotation_deg == 0

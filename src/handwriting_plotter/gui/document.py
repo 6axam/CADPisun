@@ -16,6 +16,8 @@ from pydantic import Field, field_validator, model_validator
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QUndoCommand, QUndoStack
 
+from .notebook_templates import NotebookPageTemplate
+
 from handwriting_plotter.application.service import GenerationResult
 from handwriting_plotter.domain.models import (
     StrictModel,
@@ -99,11 +101,11 @@ class GridObject(StrictModel):
     object_id: str = Field(min_length=1)
     name: str = Field(default="Grid", min_length=1, max_length=120)
     visible: bool = True
-    x_mm: float = Field(default=15.0, ge=0, lt=210)
+    x_mm: float = Field(default=15.0, ge=0, lt=297)
     y_mm: float = Field(default=15.0, ge=0, lt=297)
-    width_mm: float = Field(default=180.0, gt=0, le=210)
+    width_mm: float = Field(default=180.0, gt=0, le=297)
     height_mm: float = Field(default=267.0, gt=0, le=297)
-    cell_width_mm: float = Field(default=5.0, ge=1.0, le=210)
+    cell_width_mm: float = Field(default=5.0, ge=1.0, le=297)
     cell_height_mm: float = Field(default=5.0, ge=1.0, le=297)
     line_style: Literal["solid", "dashed", "dash_dot"] = "solid"
     color: str = Field(default="#8BA1BD", pattern=r"^#[0-9A-Fa-f]{6}$")
@@ -130,9 +132,9 @@ class ArtworkObject(StrictModel):
     ]
     data_base64: str = Field(min_length=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    x_mm: float = Field(default=15.0, ge=0, lt=210)
+    x_mm: float = Field(default=15.0, ge=0, lt=297)
     y_mm: float = Field(default=15.0, ge=0, lt=297)
-    width_mm: float = Field(default=80.0, gt=0, le=210)
+    width_mm: float = Field(default=80.0, gt=0, le=297)
     height_mm: float = Field(default=80.0, gt=0, le=297)
     opacity: float = Field(default=0.7, ge=0.05, le=1.0)
 
@@ -164,10 +166,11 @@ class DisplaySettings(StrictModel):
 
 class ProjectSnapshot(StrictModel):
     format: Literal["hp-desktop-project"] = "hp-desktop-project"
-    schema_version: Literal["1.5"] = "1.5"
+    schema_version: Literal["1.6"] = "1.6"
     project_id: str = Field(min_length=1)
     name: str = Field(default="Untitled", min_length=1, max_length=120)
     page: PageSettings = PageSettings()
+    notebook_template: NotebookPageTemplate | None = None
     objects: tuple[ProjectObject, ...] = ()
     display: DisplaySettings = DisplaySettings()
 
@@ -178,6 +181,17 @@ class ProjectSnapshot(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate object id")
         return value
+
+    @model_validator(mode="after")
+    def objects_fit_current_page(self) -> "ProjectSnapshot":
+        for item in self.objects:
+            if isinstance(item, TextObject):
+                right, bottom = item.frame_x_mm + item.frame_width_mm, item.frame_y_mm + item.frame_height_mm
+            else:
+                right, bottom = item.x_mm + item.width_mm, item.y_mm + item.height_mm
+            if right > self.page.width_mm + 1e-9 or bottom > self.page.height_mm + 1e-9:
+                raise ValueError("object exceeds current page dimensions")
+        return self
 
 
 class CachedArtifact(StrictModel):
@@ -283,10 +297,10 @@ def load_project_file(path: Path) -> LoadedProject:
     if not isinstance(data, dict) or data.get("format") != "hp-desktop-project":
         raise ValueError("NOT_A_DESKTOP_PROJECT")
     version = data.get("schema_version")
-    if version not in {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"}:
+    if version not in {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"}:
         raise ValueError("UNSUPPORTED_PROJECT_SCHEMA")
     cache_data = data.pop("generation_cache", None)
-    if version in {"1.0", "1.1", "1.2", "1.3", "1.4"}:
+    if version in {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"}:
         migrated_objects = []
         for item in data.get("objects", []):
             migrated = dict(item)
@@ -303,7 +317,7 @@ def load_project_file(path: Path) -> LoadedProject:
                 migrated.setdefault("color_group", 0)
             migrated_objects.append(migrated)
         data["objects"] = migrated_objects
-        data["schema_version"] = "1.5"
+        data["schema_version"] = "1.6"
     snapshot = ProjectSnapshot.model_validate_json(canonical_json_bytes(data), strict=True)
     if cache_data is None:
         return LoadedProject(snapshot)
@@ -545,3 +559,22 @@ class DocumentController(QObject):
     def update_page(self, **changes) -> None:  # noqa: ANN003
         page = PageSettings.model_validate(self.snapshot.page.model_copy(update=changes).model_dump(), strict=True)
         self.apply(self.snapshot.model_copy(update={"page": page}), "Edit page")
+
+    def set_notebook_template(self, template: NotebookPageTemplate | None) -> None:
+        """Set visual paper and synchronise the A4 page geometry with its orientation."""
+
+        if template is None:
+            self.apply(self.snapshot.model_copy(update={"notebook_template": None}), "Clear notebook template")
+            return
+        width, height = template.page_size_mm
+        page = PageSettings.model_validate(
+            self.snapshot.page.model_copy(update={
+                "width_mm": width, "height_mm": height,
+                "margin_left_mm": template.margin_left_mm, "margin_right_mm": template.margin_right_mm,
+                "margin_top_mm": template.margin_top_mm, "margin_bottom_mm": template.margin_bottom_mm,
+            }).model_dump(), strict=True
+        )
+        self.apply(
+            self.snapshot.model_copy(update={"page": page, "notebook_template": template}),
+            "Set notebook template",
+        )

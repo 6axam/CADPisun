@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QLabel,
@@ -42,6 +43,8 @@ from .document import (
     save_project,
 )
 from .dialogs import ControlsDialog, ProgramSettingsDialog, ShortcutBinding
+from .notebook_dialog import NotebookTemplateDialog
+from .notebook_templates import notebook_background_svg
 from .exporting import export_artifact, export_page_png
 from .i18n import Language, normalize_language, tr
 from .mode_workspaces import ArtifactModeWorkspace
@@ -88,6 +91,7 @@ class MainWindow(QMainWindow):
         self._tree_signature: tuple | None = None
         self._canvas_objects_signature: tuple | None = None
         self._margin_signature: tuple[float, float, float, float] | None = None
+        self._notebook_template_signature: tuple | None = None
         self._document_dock_visibility: dict[str, bool] = {}
         self._workspace = "document"
         self._build_canvas()
@@ -99,6 +103,7 @@ class MainWindow(QMainWindow):
         self._connect_model()
         self._refresh_tree(self.controller.snapshot)
         self._refresh_canvas_objects(self.controller.snapshot)
+        self._refresh_canvas_template(self.controller.snapshot)
         self._refresh_canvas_margins(self.controller.snapshot)
         self.properties.show_page(self.controller.snapshot.page)
         self._restore_window_state()
@@ -204,6 +209,9 @@ class MainWindow(QMainWindow):
         self.import_artwork_action = self._action(
             self._t("action.import_artwork"), self.import_artwork_file, QKeySequence("Ctrl+Shift+I")
         )
+        self.notebook_template_action = self._action(
+            self._t("action.notebook_template"), self.edit_notebook_template
+        )
         self.save_action = self._action(self._t("action.save"), self.save_project, QKeySequence.StandardKey.Save)
         self.save_as_action = self._action(self._t("action.save_as"), self.save_project_as, QKeySequence.StandardKey.SaveAs)
         self.exit_action = self._action(self._t("action.exit"), self.close, QKeySequence.StandardKey.Quit)
@@ -220,6 +228,9 @@ class MainWindow(QMainWindow):
         self.travel_action.setCheckable(True)
         self.markers_action = self._action(self._t("action.markers"), self.canvas.set_show_markers)
         self.markers_action.setCheckable(True)
+        self.export_background_action = self._action(
+            self._t("action.export_background"), self.export_notebook_background
+        )
         self.export_svg_action = self._action(self._t("action.export_svg"), lambda: self._export("page-0001.svg"))
         self.export_preview_action = self._action(self._t("action.export_preview"), lambda: self._export("page-0001.preview.svg"))
         self.export_png_action = self._action(self._t("action.export_png"), lambda: self._export("page-0001.png"))
@@ -297,10 +308,12 @@ class MainWindow(QMainWindow):
     def _build_menus(self) -> None:
         self.file_menu = self.menuBar().addMenu(self._t("menu.file"))
         self.file_menu.addActions([
-            self.new_action, self.open_action, self.import_artwork_action,
+            self.new_action, self.open_action, self.import_artwork_action, self.notebook_template_action,
             self.save_action, self.save_as_action,
         ])
         self.export_menu = self.file_menu.addMenu(self._t("menu.export"))
+        self.export_menu.addAction(self.export_background_action)
+        self.export_menu.addSeparator()
         self.export_menu.addActions(self.export_actions)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.exit_action)
@@ -478,6 +491,7 @@ class MainWindow(QMainWindow):
             self.new_action: "action.new",
             self.open_action: "action.open",
             self.import_artwork_action: "action.import_artwork",
+            self.notebook_template_action: "action.notebook_template",
             self.save_action: "action.save",
             self.save_as_action: "action.save_as",
             self.exit_action: "action.exit",
@@ -487,6 +501,7 @@ class MainWindow(QMainWindow):
             self.add_grid_action: "action.add_grid",
             self.delete_action: "action.delete",
             self.generate_action: "action.generate",
+            self.export_background_action: "action.export_background",
             self.export_svg_action: "action.export_svg",
             self.export_preview_action: "action.export_preview",
             self.export_png_action: "action.export_png",
@@ -718,6 +733,17 @@ class MainWindow(QMainWindow):
         self.canvas.set_object_frames(snapshot.objects, self._selected_object_ids_copy())
         self._canvas_objects_signature = self._canvas_signature(snapshot)
 
+    @staticmethod
+    def _template_signature(snapshot: ProjectSnapshot) -> tuple:
+        template = snapshot.notebook_template
+        return () if template is None else tuple(sorted(template.model_dump(mode="json").items()))
+
+    def _refresh_canvas_template(self, snapshot: ProjectSnapshot) -> None:
+        self.canvas.set_notebook_template(snapshot.notebook_template)
+        if snapshot.notebook_template is None:
+            self.canvas.set_page_size(snapshot.page.width_mm, snapshot.page.height_mm)
+        self._notebook_template_signature = self._template_signature(snapshot)
+
     def _refresh_canvas_margins(self, snapshot: ProjectSnapshot) -> None:
         page = snapshot.page
         self.canvas.set_margins(
@@ -760,6 +786,8 @@ class MainWindow(QMainWindow):
             page.margin_right_mm,
             page.margin_bottom_mm,
         )
+        if self._template_signature(snapshot) != self._notebook_template_signature:
+            self._refresh_canvas_template(snapshot)
         if margins != self._margin_signature:
             self._refresh_canvas_margins(snapshot)
         if self._canvas_signature(snapshot) != self._canvas_objects_signature:
@@ -1030,6 +1058,35 @@ class MainWindow(QMainWindow):
             self._show_status(str(exc), "error", 5000)
             return
         self._preserve_generation_revision(had_current_generation)
+
+    def edit_notebook_template(self) -> None:
+        dialog = NotebookTemplateDialog(self.controller.snapshot.notebook_template, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.controller.set_notebook_template(dialog.value())
+            self._show_status("Notebook template applied · paper background stays outside plotting exports", "success", 5000)
+        except ValueError as exc:
+            self._show_status(str(exc), "error", 5000)
+            QMessageBox.critical(self, "Invalid notebook template", str(exc))
+
+    def export_notebook_background(self) -> None:
+        template = self.controller.snapshot.notebook_template
+        if template is None:
+            QMessageBox.information(self, "Choose a template first", "Choose a notebook page template before exporting its background.")
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export notebook background SVG", "notebook-background.svg", "SVG (*.svg)"
+        )
+        if not filename:
+            return
+        try:
+            Path(filename).write_bytes(notebook_background_svg(template))
+            self._show_status(f"Exported notebook background {filename}", "success", 5000)
+            self.console.appendPlainText(f"Exported notebook background SVG to {filename}")
+        except OSError as exc:
+            self._show_status(str(exc), "error", 7000)
+            QMessageBox.critical(self, "Background export failed", str(exc))
 
     def import_artwork_file(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
