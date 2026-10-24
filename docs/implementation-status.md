@@ -1,13 +1,16 @@
 # Состояние реализации
 
-## PHOTO-09 — HTR benchmark accounting, blocked, 2026-10-24
+## PHOTO-10 — optional local HTR integration, 2026-10-24
 
-- Added Qt-free benchmark accounting for NFC CER/WER, mean latency and peak RSS
-  from one pinned provider/model over an exact sample set. It rejects a result
-  with only synthetic samples, mismatched IDs or mixed model revisions.
-- Full TASK 09 remains blocked: the repository has no verified authorised line
-  corpus and no explicitly installed/checksummed CRNN or TrOCR weights. No model
-  was downloaded and no synthetic result is presented as Ukrainian HTR quality.
+- Handwriting Studio now sends only immutable PNG line crops and technical IDs to
+  a versioned external CPU worker. CRNN and TrOCR are selected one at a time;
+  Torch/Transformers remain absent from the default package.
+- Local content-addressed run records retain source/crop/model/protocol
+  provenance, explicit no-confidence output, cancellation/timeout/error state
+  and reopenable per-line predictions. Ground truth cannot be encoded in the
+  worker request.
+- TASK 09’s private, user-authorized benchmark is complete. Its data and weights
+  remain outside Git; no quality claim is introduced by this integration.
 
 ## PHOTO-08 — регионы строк почерка, 2026-10-24
 

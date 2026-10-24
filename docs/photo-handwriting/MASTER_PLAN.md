@@ -66,7 +66,7 @@ feature brief. Token bands are planning estimates, not billing or quota claims.
 | TASK 07 | Paper/ink separation | TASK 05–06 | Raw and cleaned masks preserve handwriting across rules while suppressing ruling, texture, shadows, compression, and common blue/black/purple ink backgrounds; manual override exists | Representative synthetic/approved fixtures, overlap preservation, critical dot retention, mask round trip | [x] DONE | HIGH | 11/12; 15k–30k tokens; high; split by color/ruling modes | `cc4585919de5b6983b90509f64d2cc2068571ecc` |
 | TASK 08 | Regions and handwriting lines | TASK 03, TASK 07 | Regions, baselines, line polygons/crops, reading order, headers/marginalia, and source transforms persist and display correctly | Provider contract, manual fallback, polygon/source mapping, reading order, cancellation | [x] DONE | HIGH | 10/12; 12k–24k tokens; high | `6ee3f5617ea41212b1d28518ae0f26197b3fb996` |
 | TASK 09 | HTR model benchmark | TASK 08 plus verified samples | One Ukrainian TrOCR and one lighter CPU candidate were compared on the same private, manually reviewed line crops for CER, WER, latency, RAM, and failures; TrOCR was selected on tuning and run once unchanged on control. The 19-line one-page pilot does not claim page/session independence or reach 5% CER | Reproducible benchmark harness, metric unit tests, fixed private manifest, model checksum validation | [x] DONE | HIGH | 10/12; 12k–25k tokens plus downloads/runtime; very high uncertainty | `b9a894bbe76f0751af5544a6e0928c733c899720` |
-| TASK 10 | HTR integration | TASK 09 | Optional lazy provider processes line batches on CPU with progress, cancellation, limits, explicit unknowns, offline reuse, and editable predictions without breaking default install | Provider/subprocess contract, missing/corrupt model, cancellation, batching, Unicode, default-install isolation | [ ] TODO | MEDIUM/HIGH | 8/12; 10k–20k tokens; high | — |
+| TASK 10 | HTR integration | TASK 09 | Optional local CRNN/TrOCR CPU providers process immutable line crops in one versioned subprocess at a time. UI has selection, progress/cancel/error/result state; runs preserve source/crop/model provenance and default install stays ML-free. Text is shown but not edited until TASK 11 | Protocol/privacy, missing/corrupt weight, timeout/cancel/crash recovery, Unicode, persistence/reopen, headless Qt result state | [x] DONE | MEDIUM/HIGH | 8/12; 10k–20k tokens; high | `ecb41e593cb6ab57fccb67ae6c5565f9d595903b` |
 | TASK 11 | Transcription review UI | TASK 08, TASK 10 | Original prediction and corrected Ukrainian text, confidence, discrepancies, symbols, reading order, save/reopen are available; unknowns are never invented | Headless Qt edit/reopen, NFC, unknown token, reading-order edits, stale revision | [ ] TODO | MEDIUM | 7/12; 8k–16k tokens; medium | — |
 | TASK 12 | Grapheme and word alignment | TASK 08, TASK 11 | Corrected spans align to word/grapheme/ligature geometry with alternatives and uncertainty; inseparable cursive clusters remain grouped | Constrained alignment, ligature/diacritic ambiguity, alternative retention, mismatch handling | [ ] TODO | HIGH | 12/12; 18k–35k tokens; very high; split word then grapheme alignment | — |
 | TASK 13 | Stroke skeleton extraction | TASK 07, TASK 12 optional | Masks produce reproducible centerline graphs with endpoints, collapsed junction regions, edges, cycles, components, and bounded spur filtering while preserving marks | Lines, T/X crossings, loops, diagonals, dots, connected groups, raster overlay | [ ] TODO | HIGH | 12/12; 18k–35k tokens; very high; split graph extraction/cleanup | — |
@@ -101,8 +101,9 @@ At the start of every session:
 4. Run the task tests plus justified regressions, make one meaningful task commit,
    record its SHA, push without force, and stop at a clean checkpoint.
 
-TASK 09 is complete as a bounded private pilot. TASK 10 is now dependency-ready,
-but is intentionally not started at this checkpoint. A second independently
-written and photographed page is required before making page/session-independent
-quality claims. TASK 18 was completed independently and does not unblock TASK
-19, which also requires TASK 17.
+TASK 09 is complete as a bounded private pilot and TASK 10 as an optional local
+provider integration. TASK 11 is now dependency-ready, but is intentionally not
+started at this checkpoint. A second independently written and photographed page
+is required before making page/session-independent quality claims. TASK 18 was
+completed independently and does not unblock TASK 19, which also requires TASK
+17.

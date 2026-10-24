@@ -8,11 +8,67 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 11 / 25 tasks |
-| Last completed | TASK 09 — HTR model benchmark |
-| Next | TASK 10 — optional HTR integration; intentionally not started at the TASK 09 checkpoint |
+| Completed | 12 / 25 tasks |
+| Last completed | TASK 10 — HTR integration |
+| Next | TASK 11 — Transcription review UI; intentionally not started at the TASK 10 checkpoint |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 10 — HTR integration
+
+Status: `[x]` DONE — optional local provider integration; no model is included
+in the application or added to the default environment.
+
+Completion commit: `ecb41e593cb6ab57fccb67ae6c5565f9d595903b`
+
+### Implemented behavior
+
+- Added the versioned `hp-htr-worker/1` JSON subprocess protocol. Its strict
+  request can represent only PNG line crops, crop SHA-256 and technical line
+  IDs; it has no transcript/ground-truth field and rejects unknown fields.
+- The default package uses only standard-library/Pydantic code. The external
+  worker imports Torch/OpenCV/Pillow/Transformers lazily, validates the locally
+  installed expected model SHA-256, and loads CRNN only through
+  `torch.load(weights_only=True)` or TrOCR only through local `safetensors` with
+  `trust_remote_code=False`. It never loads both providers in one process.
+- Handwriting Studio’s **Import from photo** workflow now has a provider picker,
+  provider-Python/model-root fields, timeout, progress, cancellation and a
+  per-line result view. CRNN has a 1 GiB limit; TrOCR has 4 GiB. On Unix the
+  worker applies that bound with `RLIMIT_AS`; the parent also owns timeout and
+  terminate/kill cancellation.
+- The selected frame is cropped only at persisted `line` regions. Immutable PNG
+  crops are stored as photo derivatives; original photo bytes are never changed.
+  Results are separate local content-addressed `hp-htr-run/1.0` records with
+  source/crop/model/protocol provenance and reopen correctly for that manifest.
+- Neither UI nor persistence invents confidence. Provider text is displayed line
+  by line with a clear “not provided” confidence state. Worker failure/cancel
+  records remain local and a subsequent fresh job is allowed to run.
+
+### Configuration and verification
+
+The user chooses the already-installed isolated provider Python and the directory
+containing the two verified model folders in the UI. `HP_HTR_PYTHON` and
+`HP_HTR_MODEL_ROOT` can prefill those fields; no download occurs. A one-line
+CRNN local-worker smoke path completed after safe hash/weight verification.
+The prior TASK 09 measured TrOCR runtime; no second benchmark or fine-tuning was
+run here. A system interruption occurred during an additional TrOCR integration
+smoke attempt, so TASK 10 does not claim a new TrOCR performance measurement.
+
+Focused Linux checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_htr_integration.py \
+  tests/learning/test_htr_benchmark.py \
+  tests/gui/test_photo_import_gui.py
+```
+
+Result: `21 passed`. They cover protocol privacy, Unicode, missing weights,
+timeout, cancellation, crash recovery, result persistence and non-blocking Qt
+result display. `compileall` and `git diff --check` also pass. The full local
+suite reached `307 passed`; one unrelated existing offscreen Qt shell assertion
+about the Properties scrollbar fails (`tests/gui/test_shell.py`), so a fully
+green whole-suite claim is deliberately not made. Windows was not run.
 
 ## TASK 09 — HTR model benchmark
 
