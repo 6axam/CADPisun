@@ -10,7 +10,7 @@ Last updated: 2026-10-24
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
 | Completed | 9 / 25 tasks |
 | Last completed | TASK 08 — Regions and handwriting lines |
-| Next | TASK 09 — HTR model benchmark (benchmark accounting ready; real corpus and weights blocked) |
+| Next | TASK 09 — HTR model benchmark (BLOCKED: real corpus and weights required) |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit

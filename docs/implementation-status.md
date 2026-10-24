@@ -1,6 +1,6 @@
 # Состояние реализации
 
-## PHOTO-09 — HTR benchmark accounting, in progress, 2026-10-24
+## PHOTO-09 — HTR benchmark accounting, blocked, 2026-10-24
 
 - Added Qt-free benchmark accounting for NFC CER/WER, mean latency and peak RSS
   from one pinned provider/model over an exact sample set. It rejects a result
