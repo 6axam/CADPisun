@@ -1,5 +1,17 @@
 # Состояние реализации
 
+## PHOTO-08 — регионы строк почерка, 2026-10-24
+
+- `OpenCvLineSegmenter` строит упорядоченные line proposals из выбранной mask
+  по горизонтальной проекции; каждый `PhotoRegion(kind=line)` сохраняет polygon
+  и baseline в исходном pixel frame.
+- Предложения публикуются в новом immutable manifest, сохраняются/восстанавливаются
+  в Studio. Есть Qt-free `manual_line_region()` с human provenance для ручного
+  fallback. Новая mask invalidates предыдущие line proposals.
+- Synthetic and headless-Qt tests проверяют ordering, baseline, persistence,
+  reopen и выбор raw mask перед сегментацией. Реальная page-layout accuracy,
+  headers/marginalia и cancellation остаются следующими улучшениями.
+
 ## PHOTO-07 — консервативные маски бумаги и чернил, 2026-10-24
 
 - `OpenCvInkSeparator` создаёт raw и cleaned binary PNG masks для measured
