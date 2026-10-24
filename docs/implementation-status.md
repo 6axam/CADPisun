@@ -1,5 +1,14 @@
 # Состояние реализации
 
+## PHOTO-09 — HTR benchmark accounting, in progress, 2026-10-24
+
+- Added Qt-free benchmark accounting for NFC CER/WER, mean latency and peak RSS
+  from one pinned provider/model over an exact sample set. It rejects a result
+  with only synthetic samples, mismatched IDs or mixed model revisions.
+- Full TASK 09 remains blocked: the repository has no verified authorised line
+  corpus and no explicitly installed/checksummed CRNN or TrOCR weights. No model
+  was downloaded and no synthetic result is presented as Ukrainian HTR quality.
+
 ## PHOTO-08 — регионы строк почерка, 2026-10-24
 
 - `OpenCvLineSegmenter` строит упорядоченные line proposals из выбранной mask
