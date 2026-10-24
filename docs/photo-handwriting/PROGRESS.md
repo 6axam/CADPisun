@@ -46,8 +46,11 @@ QT_QPA_PLATFORM=offscreen uv run pytest -q \
 Focused result: `49 passed in 8.55s`. These tests cover 5 mm/offset geometry,
 portrait and landscape A4 SVG dimensions, ruled/blank modes, strict margins,
 persistence/migration, undo, canvas preview, UI background export and exclusion
-from production SVG/diagnostic SVG/G-code. Full-suite result is recorded at the
-final checkpoint. Windows was not executed locally.
+from production SVG/diagnostic SVG/G-code.
+
+Final local Linux checkpoint: `QT_QPA_PLATFORM=offscreen uv run pytest -q` passed
+`301`; `uv lock --check`, `python -m compileall -q src tests` and `git diff --check`
+also passed. Windows was not executed locally.
 
 ## TASK 00 — Repository and research audit
 
