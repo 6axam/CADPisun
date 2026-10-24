@@ -236,6 +236,16 @@ direction и residual. Sparse table borders не становятся geometry. 
 перерисовывает линии из этих values. Шаг и origin не имеют единиц millimetres и
 не используются для ink removal или OCR.
 
+`calibration_from_ruling_pitch(ruling, pitch_mm, source) ->
+PhysicalScaleCalibration` в TASK 06 остаётся Qt-free и вызывается только после
+явного действия пользователя. Он создаёт axis-wise scale лишь для измеренной
+geometry: squared даёт X/Y, ruled — только Y. `ruling_pixel_to_relative()` и
+`ruling_pixel_to_metric()` работают в нормальных осях ruling, поддерживают
+skew и возвращают `None` для неизвестной оси. `persist_physical_scale_calibration()`
+публикует новый immutable manifest, не меняя original bytes; новая
+`persist_ruling_estimate()` намеренно очищает calibration до повторного
+подтверждения масштаба.
+
 | Port | Вход → выход | Инварианты и отказ |
 |---|---|---|
 | ImagePreprocessor | SourceAsset + config + optional corners → ProcessedAsset + transforms | original immutable; неизвестный physical scale остаётся unknown; DEWARP_REQUIRED при кривизне |

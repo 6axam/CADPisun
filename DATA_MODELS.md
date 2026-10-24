@@ -216,7 +216,7 @@ SHA-256. Точные исходные bytes хранятся отдельно �
 
 Корень содержит `source_id`, `original_sha256`, `original_relative_path`,
 `metadata`, `page_dimensions`, `frames[]`, `transforms[]`, `regions[]` и
-`ruling`. `metadata` фиксирует только basename исходного файла, UTC import time,
+`ruling`, а также nullable `calibration`. `metadata` фиксирует только basename исходного файла, UTC import time,
 application/decoder versions, обнаруженный raster format/media type, embedded
 orientation и явный rights status. Полный внешний путь в manifest не попадает.
 
@@ -276,8 +276,25 @@ directions и residual. Origin и pitch всегда относятся к пи�
 frame, не к миллиметрам. Overlay заново строится из этой периодической
 геометрии, поэтому массив линий в manifest не дублируется. Residual — локальный
 fit indicator, а не калиброванная оценка качества. Пользователь может сохранить
-ручные pixel values как `status=overridden`; физический scale остаётся `null` до
-TASK 06.
+ручные pixel values как `status=overridden`.
+
+### 8.4 Physical-scale calibration v1
+
+TASK 06 вводит nullable `PhysicalScaleCalibration` в immutable manifest. Она
+содержит `frame_id`, origin (`user_entered`, `verified_reference` или
+`notebook_cell_preset`), versioned method, nullable `mm_per_px_x/y`, nullable
+uncertainty по каждой оси и optional `reference_pitch_mm`. Хотя тип поддерживает
+`verified_reference`, текущий GUI предоставляет только явно введённый размер
+клетки/линии и отдельную кнопку preset 5 mm. Preset не запускается детектором и
+валидируется ровно как 5 mm; pixel pitch сам по себе физический размер не
+доказывает.
+
+Преобразование в cell/rule-relative coordinates использует origin и нормали
+измеренной geometry. Преобразование в millimetres использует только оси с
+явным scale и тот же ruling coordinate system: для ruled листа X остаётся
+`null`, пока вертикальная семья линий не измерена. Неизвестная uncertainty не
+заменяется выдуманным числом. Любая новая ruling revision очищает calibration,
+поэтому scale не переживает изменение pitch или frame без нового явного выбора.
 
 ## 9. Persistent storage и журнал задания
 

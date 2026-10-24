@@ -8,9 +8,9 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 6 / 25 tasks |
-| Last completed | TASK 05 — Grid and ruled-line detection |
-| Next | TASK 06 — Physical-scale calibration |
+| Completed | 7 / 25 tasks |
+| Last completed | TASK 06 — Physical-scale calibration |
+| Next | TASK 07 — Paper/ink separation |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -408,19 +408,68 @@ matched the blue source grid, and all measurement/manual controls, summary,
 preview panes, status and diagnostics were visible with no overlap. Windows was
 not executed locally.
 
+## TASK 06 — Physical-scale calibration
+
+Status: `[x]` DONE
+
+Completion commit: `0347fe7d52e9645b0671d6b29865eb692e5cf11b`
+
+### Implemented behavior
+
+- Added a Qt-free, frame-bound `PhysicalScaleCalibration` that preserves source,
+  method, optional axis uncertainties and a declared reference pitch. Detection
+  never creates this record: it is saved only through an entered reference or
+  the explicit 5 mm notebook preset.
+- Added ruling-relative and metric conversions that use the measured normal
+  axes, including skewed grids. Ruled pages deliberately leave X physical
+  position unknown because only the horizontal rule family was measured.
+- Studio now exposes the reference size and two explicit save actions after
+  geometry exists. The saved calibration survives reopen and appears in
+  diagnostics. Any ruling estimate replacement clears calibration to prevent a
+  stale scale from silently using changed geometry.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_physical_scale_calibration.py \
+  tests/learning/test_ruling_geometry.py \
+  tests/learning/test_ruling_classification.py \
+  tests/gui/test_photo_import_gui.py
+```
+
+Result: `27 passed in 1.98s` during the focused run (one later conversion test
+was added before the full run). It covers explicit 5 mm and manual references,
+axis availability, rotated axes, strict frame matching, immutable persistence,
+GUI persistence/reopen and geometry-change invalidation.
+
+```bash
+uv lock --check
+git diff --check
+uv run python -m compileall -q src tests
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+uv build --out-dir /tmp/cadpisun-task06-build-2
+```
+
+Result: lock, whitespace, bytecode compilation, sdist and wheel passed; the
+full local Linux suite was `283 passed in 28.34s`. Visual QA used an offscreen
+1326×900 workspace and confirmed the disabled-until-geometry calibration row
+fits alongside the existing photo controls. Windows was not executed locally.
+
 ## Next task estimate
 
-**TASK 06 — Physical-scale calibration**
+**TASK 07 — Paper/ink separation**
 
-- Recommended tier: MEDIUM.
-- Complexity: 6/12 (pixel/reference conversion, provenance, GUI, persistence,
-  tests and compatibility).
-- Estimated implementation: 6k–12k tokens, roughly 6–10 files.
-- Relative quota pressure: MEDIUM.
-- Main uncertainty: retaining explicit uncertainty and never assuming that a
-  detected pixel cell equals 5 mm without a verified reference or human preset.
+- Recommended tier: HIGH.
+- Complexity: 11/12 (raw/cleaned masks, colored ruling, shadows, intersections,
+  provenance, GUI review and synthetic/private fixture boundaries).
+- Estimated implementation: 15k–30k tokens and should split algorithm and UI
+  if verification becomes too broad.
+- Relative quota pressure: HIGH.
+- Main uncertainty: preserving every handwriting pixel at rule intersections,
+  dots and diacritics without turning synthetic success into a real-photo claim.
 
 Recommended message at the next boundary:
 
-> Рекомендую MEDIUM: следующая задача должна добавить physical-scale provenance
-> и explicit 5 mm preset без молчаливой калибровки или OCR.
+> Рекомендую HIGH: следующая задача должна добавить paper/ink masks с ручной
+> проверкой и строгими fixtures, не начиная OCR или выдумывая real-photo quality.

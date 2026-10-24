@@ -1,5 +1,17 @@
 # Состояние реализации
 
+## PHOTO-06 — явная физическая калибровка, 2026-10-24
+
+- `PhysicalScaleCalibration` хранит frame-bound X/Y `mm_per_px`, origin,
+  method, optional uncertainty и reference pitch в новом immutable manifest.
+  Pixel geometry не получает физический размер автоматически.
+- Studio предлагает сохранение введённого размера и отдельный 5 mm preset
+  только после измерения ruling geometry. Для ruled листа калибруется лишь Y;
+  diagnostics честно показывает неизвестную X-ось. Изменение geometry очищает
+  старую калибровку.
+- Qt-free conversion проверена для cell/rule-relative и skewed metric axes;
+  GUI tests проверяют preset, manual scale, persistence/reopen и invalidation.
+
 ## PHOTO-05 — геометрия клеток и линеек, 2026-10-24
 
 - `photo-cv` измеряет periodic pixel geometry для ruled/squared листов:

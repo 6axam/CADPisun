@@ -75,7 +75,7 @@ with explicitly heuristic confidence. A user may store a human override. Pitch,
 phase, physical size, overlays, and any learned classifier remain deferred, so
 the first implementation cannot present a page-type guess as measured geometry.
 
-## PH-ADR-007 — Store periodic pixel geometry, defer physical calibration
+## PH-ADR-007 — Store periodic pixel geometry before physical calibration
 
 **Status:** Accepted.
 
@@ -85,7 +85,21 @@ estimate. The overlay is reconstructed from this compact model. Four repeated
 long lines are required; sparse table borders fail rather than being promoted to
 paper geometry. A user can replace values explicitly. Physical millimetres,
 paper-removal masks, learned deformation and general real-photo accuracy remain
-outside this decision and are deferred to TASK 06–07 and the private corpus.
+outside the TASK 05 detector and require the subsequent explicit calibration
+decision.
+
+## PH-ADR-013 — Physical scale is opt-in and axis-specific
+
+**Status:** Accepted for TASK 06.
+
+Measured pixel pitch maps to relative cell/rule units without a physical claim.
+Millimetres enter a manifest only after a user-entered reference or an explicit
+5 mm notebook preset. The preset is provenance, not a detector result. Scale is
+frame-bound and follows ruling normals, so a skewed photograph is not silently
+treated as image-aligned millimetres. Ruled paper calibrates its measured Y
+axis only. Geometry revisions erase calibration because a changed pitch makes
+the old conversion invalid. Fit residuals are not promoted to physical
+uncertainty without a validated reference-error model.
 
 ## PH-ADR-008 — Isolate HTR providers
 

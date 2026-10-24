@@ -12,6 +12,7 @@ correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
 | Rectification accuracy | SYNTHETIC CORRECTNESS ONLY — TASK 03 | Corner RMSE 0 px; max 0 px; inverse RMSE 1.24e-13 px; max 2.43e-13 px on one clean generated quad |
 | Paper classification | SYNTHETIC CORRECTNESS ONLY — TASK 04 | 5/5 classes correct; 4.760 ms/classification mean across 500 runs on local Linux |
 | Grid/ruling geometry | SYNTHETIC CORRECTNESS ONLY — TASK 05 | ±1 px pitch; ±0.5° direction; residual <2 px on occluded/skewed fixtures; 158.245 ms/estimate local mean |
+| Physical-scale calibration | SYNTHETIC CORRECTNESS ONLY — TASK 06 | Exact 5 mm / user-entered conversion, skewed-axis round trip, persistence and geometry-change invalidation |
 | Ink separation | NOT RUN — TASK 07 | — |
 | Line segmentation | NOT RUN — TASK 08 | — |
 | Ukrainian HTR comparison | NOT RUN — TASK 09 | — |
@@ -105,6 +106,17 @@ minimum instead of producing notebook geometry. A warm 10×4 loop took
 generated 40 px grid visually. These are synthetic correctness and latency
 figures only; they do not validate real photos, shadows, JPEG compression,
 curved pages, mm calibration, or universal table rejection.
+
+### Physical-scale calibration
+
+TASK 06 tests deterministic 40 px grid/rule geometry only. An explicit 5 mm
+preset yields `0.125 mm/px`, and a grid point at 2.5 × 3.5 cells maps to
+12.5 × 17.5 mm. A 30° skewed grid checks the same conversion in ruling normals;
+ruled geometry leaves X unavailable. The test set also checks manifest reopen
+and mandatory scale invalidation after changing geometry. This establishes
+coordinate-contract correctness, not physical accuracy: no ruler reference,
+camera calibration, print tolerance, uncertainty model, real notebook, or
+Windows measurement has been benchmarked.
 
 ### Ink separation
 
