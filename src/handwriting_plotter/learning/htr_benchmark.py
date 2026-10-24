@@ -17,6 +17,15 @@ class HtrBenchmarkSample:
     transcript: str
     source_kind: Literal["real", "synthetic"]
     rights_status: Literal["private_user_material", "authorized"]
+    partition: Literal["tuning", "control"] = "tuning"
+
+
+@dataclass(frozen=True, slots=True)
+class HtrBenchmarkSplit:
+    """Explicit text-level split; callers must not select on ``control``."""
+
+    tuning: tuple[HtrBenchmarkSample, ...]
+    control: tuple[HtrBenchmarkSample, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +83,37 @@ def load_benchmark_summary(data: bytes) -> HtrBenchmarkSummary:
         mean_elapsed_ms=float(payload["mean_elapsed_ms"]),
         peak_rss_bytes=None if payload["peak_rss_bytes"] is None else int(payload["peak_rss_bytes"]),
     )
+
+
+def split_htr_benchmark_samples(samples: tuple[HtrBenchmarkSample, ...]) -> HtrBenchmarkSplit:
+    """Separate real benchmark rows before provider selection or final scoring."""
+
+    if not samples:
+        raise ValueError("HTR_BENCHMARK_REQUIRES_SAMPLES")
+    identifiers = [item.sample_id for item in samples]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("HTR_BENCHMARK_DUPLICATE_SAMPLE_ID")
+    tuning = tuple(item for item in samples if item.partition == "tuning")
+    control = tuple(item for item in samples if item.partition == "control")
+    if not tuning or not control:
+        raise ValueError("HTR_BENCHMARK_REQUIRES_TUNING_AND_CONTROL")
+    return HtrBenchmarkSplit(tuning=tuning, control=control)
+
+
+def summarize_htr_partition(
+    samples: tuple[HtrBenchmarkSample, ...],
+    predictions: tuple[HtrPrediction, ...],
+    *,
+    partition: Literal["tuning", "control"],
+) -> HtrBenchmarkSummary:
+    """Score exactly one frozen partition and reject accidental cross-partition rows."""
+
+    selected = tuple(item for item in samples if item.partition == partition)
+    if not selected:
+        raise ValueError("HTR_BENCHMARK_EMPTY_PARTITION")
+    if any(item.sample_id not in {sample.sample_id for sample in selected} for item in predictions):
+        raise ValueError("HTR_BENCHMARK_CROSS_PARTITION_PREDICTION")
+    return summarize_htr_benchmark(selected, predictions)
 
 
 def summarize_htr_benchmark(

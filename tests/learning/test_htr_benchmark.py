@@ -4,7 +4,8 @@ import pytest
 
 from handwriting_plotter.learning.htr_benchmark import (
     HtrBenchmarkSample, HtrPrediction, load_benchmark_summary,
-    serialize_benchmark_summary, summarize_htr_benchmark,
+    serialize_benchmark_summary, split_htr_benchmark_samples, summarize_htr_benchmark,
+    summarize_htr_partition,
 )
 
 
@@ -32,3 +33,28 @@ def test_summary_report_is_canonical_and_tamper_evident() -> None:
     assert load_benchmark_summary(encoded) == summary
     with pytest.raises(ValueError, match="HASH_MISMATCH"):
         load_benchmark_summary(encoded.replace(b'"cer":0.0', b'"cer":0.1'))
+
+
+def test_partitioned_benchmark_rejects_cross_partition_prediction() -> None:
+    samples = (
+        HtrBenchmarkSample("tuning", "0" * 64, "мама", "real", "authorized", "tuning"),
+        HtrBenchmarkSample("control", "1" * 64, "мимо", "real", "authorized", "control"),
+    )
+
+    split = split_htr_benchmark_samples(samples)
+
+    assert [item.sample_id for item in split.tuning] == ["tuning"]
+    assert [item.sample_id for item in split.control] == ["control"]
+    with pytest.raises(ValueError, match="CROSS_PARTITION"):
+        summarize_htr_partition(
+            samples,
+            (HtrPrediction("control", "crnn", "pin", "мимо", 1.0, 1),),
+            partition="tuning",
+        )
+
+
+def test_partitioned_benchmark_requires_both_partitions() -> None:
+    samples = (HtrBenchmarkSample("only", "0" * 64, "мама", "real", "authorized"),)
+
+    with pytest.raises(ValueError, match="TUNING_AND_CONTROL"):
+        split_htr_benchmark_samples(samples)
