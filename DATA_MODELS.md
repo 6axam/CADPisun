@@ -262,6 +262,20 @@ artifact path и `planar_only=true`. Embedded orientation входит в общ
 страницы; отсутствие надёжного quadrilateral или видимая кривизна остаются
 явной диагностикой и не маскируются crop прямоугольником.
 
+### 8.3 Notebook paper classification v1
+
+TASK 04 записывает новый immutable manifest с `RulingEstimate` для выбранного
+pixel frame. `classification` ограничен `blank`, `squared`, `ruled`, `mixed` и
+`unknown`; `status=proposed` означает локальный эвристический результат,
+`status=overridden` — явный выбор пользователя с `ConfidenceValue` origin
+`human`. Ручной выбор не меняет source/derivative bytes, transform или region.
+
+Первая классификация намеренно не заполняет `cell_pitch_x_px`,
+`cell_pitch_y_px`, `ruling_pitch_px` или origin: эти значения остаются `null`
+до TASK 05. Метод и heuristic confidence описывают только наличие повторяющихся
+длинных горизонтальных/вертикальных линий; confidence не является калиброванной
+вероятностью правильной классификации.
+
 ## 9. Persistent storage и журнал задания
 
 ### 9.1 Desktop project v1

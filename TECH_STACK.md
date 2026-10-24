@@ -42,6 +42,10 @@ Planar correction TASK 03 использует optional extra `photo-cv` с
 результат через Qt и не использует OpenCV HighGUI. Более тяжёлые segmentation,
 skeleton и HTR environments по-прежнему изолируются отдельно.
 
+TASK 04 использует тот же optional adapter для локальной morphology-based
+классификации бумаги. Он не загружает модель, не делает сетевых запросов и не
+добавляет новую зависимость: OpenCV/NumPy остаются только в `photo-cv`.
+
 ## 2. Тестовые зависимости
 
 | Pin | Роль | Лицензия / граница |

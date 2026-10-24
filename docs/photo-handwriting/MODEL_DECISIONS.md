@@ -69,6 +69,12 @@ TASK 03 resolves the first adapter pin as optional
 page proposal, orientation composition, homography, and fine deskew. This pin
 does not select the later segmentation/skeleton stack or HTR environment.
 
+TASK 04 adds only a bounded local classifier on that adapter: repeated long
+horizontal/vertical evidence maps to proposed blank/squared/ruled/mixed/unknown
+with explicitly heuristic confidence. A user may store a human override. Pitch,
+phase, physical size, overlays, and any learned classifier remain deferred, so
+the first implementation cannot present a page-type guess as measured geometry.
+
 ## PH-ADR-007 — Isolate HTR providers
 
 **Status:** Accepted.

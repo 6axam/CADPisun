@@ -1,6 +1,6 @@
 # Photo-to-Handwriting progress
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Current checkpoint
 
@@ -8,9 +8,9 @@ Last updated: 2026-10-23
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 4 / 25 tasks |
-| Last completed | TASK 03 — Perspective and page correction |
-| Next | TASK 04 — Notebook paper classification |
+| Completed | 5 / 25 tasks |
+| Last completed | TASK 04 — Notebook paper classification |
+| Next | TASK 05 — Grid and ruled-line detection |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 ## TASK 00 — Repository and research audit
@@ -302,26 +302,76 @@ configured to install `photo-cv` on Linux and Windows when a pull request runs.
 | PH-BLK-004 | HandwritingDatasetGen code reuse | BLOCKED | Upstream adds a compatible explicit license; until then use papers/behavior as references only |
 | PH-BLK-005 | Windows CV/ML behavior | UNVERIFIED | Windows CI/runtime tasks execute the implemented provider and image fixtures |
 
-None of these blocks TASK 04.
+None of these blocks TASK 05.
+
+## TASK 04 — Notebook paper classification
+
+Status: `[x]` DONE
+
+Completion commit: `fd22492b33d826558254accfd861d4813b3abed1`
+
+### Implemented behavior
+
+- Added the Qt-free `RulingClassifier` boundary and immutable persistence for a
+  `RulingEstimate`. A proposed result and a manual override create new canonical
+  manifests while retaining exact original bytes and existing derivatives.
+- Optional `OpenCvRulingClassifier` finds repeated long horizontal and vertical
+  line evidence with threshold/morphology operations. It returns only
+  blank/squared/ruled/mixed/unknown, a method ID, and heuristic confidence;
+  values are not presented as calibrated accuracy.
+- Paper analysis in Handwriting Studio uses the latest corrected frame when it
+  exists. The workspace exposes the proposal and confidence, localized manual
+  selection, diagnostics, saved human override, and restoration of the latest
+  override revision.
+- No grid/ruling pitch, phase, origin, overlay, physical scale, paper removal,
+  OCR, or learning model was added. Geometry fields remain empty by design until
+  TASK 05–06.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_ruling_classification.py \
+  tests/learning/test_page_correction.py \
+  tests/gui/test_photo_import_gui.py
+```
+
+Result: `29 passed in 1.51s`. The suite covers all five synthetic classes,
+short handwriting over ruled paper, sparse table/dense-mark interference,
+unknown content, invalid frame rejection, immutable proposal/override save and
+reopen, and classification after rectification.
+
+```bash
+uv lock --check
+git diff --check
+uv run python -m compileall -q src tests
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+uv build --out-dir /tmp/cadpisun-task04-build
+```
+
+Result: lock, whitespace, bytecode compilation, sdist, and wheel passed;
+the full local Linux suite was `272 passed in 32.15s`.
+
+Visual QA used an offscreen 1440×960 workspace with a generated ruled page.
+Analyze paper, selector, override button, 95% heuristic summary, preview panes,
+status, and diagnostics were visible with no overlap. The temporary screenshot
+was not committed. Windows was not executed locally.
 
 ## Next task estimate
 
-**TASK 04 — Notebook paper classification**
+**TASK 05 — Grid and ruled-line detection**
 
-- Recommended tier: MEDIUM.
-- Complexity: 6/12 (architecture 1, modules 1, algorithms 1, examples 1,
-  testing 1, regression risk 1, expected iteration 0).
-- Estimated implementation: 6k–12k tokens, roughly 16–32 tool calls, 6–10 files.
-- Relative quota pressure: MEDIUM.
-- Main uncertainty: separating genuine squared/ruled periodic evidence from
-  handwriting strokes, table borders, shadows, and mixed/unknown pages without
-  overstating heuristic confidence.
-- Natural split if needed: deterministic feature extraction/classification
-  first, then overlay/manual override and persistence. Both are required before
-  TASK 04 can be DONE.
+- Recommended tier: HIGH.
+- Complexity: 11/12 (robust estimation, geometry contracts, visualization,
+  manual correction, tests, and interaction risk).
+- Estimated implementation: 15k–30k tokens; split deterministic estimator and
+  overlay/manual correction only if each has its own verified checkpoint.
+- Relative quota pressure: HIGH.
+- Main uncertainty: recovering pitch/phase/origins under skew, handwriting,
+  table borders, partial pages, and local distortion without treating a noisy
+  classifier result as precise geometry.
 
 Recommended message at the next boundary:
 
-> Рекомендую оставить Codex на MEDIUM: следующая задача — ограниченная
-> классификация blank/squared/ruled/mixed с синтетическими fixtures и ручным
-> override, без HTR или обучения модели.
+> Рекомендую HIGH: следующая задача должна измерять и отображать pitch, phase,
+> origins и overlay с ручной коррекцией, не начиная OCR или обучение.

@@ -220,6 +220,15 @@ import `handwriting_plotter.learning` не загружает cv2/numpy. Есл�
 отсутствует или auto proposal не найден, исходник продолжает открываться, а UI
 явно предлагает manual fallback после установки extra.
 
+`RulingClassifier.classify(bytes, frame_id) -> RulingEstimate` в TASK 04 также
+остается Qt-free. Optional `OpenCvRulingClassifier` выделяет повторяющиеся
+длинные горизонтальные и вертикальные линии morphology-проходом и возвращает
+только `blank|squared|ruled|mixed|unknown`, method и heuristic confidence.
+`persist_ruling_estimate()` принимает лишь существующий frame, публикует новый
+immutable manifest и повторно проверяет exact original bytes. `manual_ruling_estimate()`
+создает explicit human override. Ни один из этих контрактов не выводит шаг,
+фазу или физические миллиметры: это отдельные контракты TASK 05–06.
+
 | Port | Вход → выход | Инварианты и отказ |
 |---|---|---|
 | ImagePreprocessor | SourceAsset + config + optional corners → ProcessedAsset + transforms | original immutable; неизвестный physical scale остаётся unknown; DEWARP_REQUIRED при кривизне |

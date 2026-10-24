@@ -1,5 +1,18 @@
 # Состояние реализации
 
+## PHOTO-04 — классификация бумаги тетради, 2026-10-24
+
+- `photo-cv` теперь локально классифицирует blank, squared, ruled, mixed или
+  unknown по повторяющимся длинным линиям; результат содержит честную
+  heuristic confidence, метод и frame ID.
+- Workspace показывает proposal, confidence и ручной выбор. И proposal, и
+  human override создают отдельный immutable manifest; при наличии rectified
+  PNG анализируется его frame. Оригинальные bytes и geometry не меняются.
+- Synthetic tests покрывают все классы, короткий handwriting поверх линейки,
+  table/mark interference, invalid frame, save/reopen override и исправленный
+  frame. Шаг, фаза, origin и физические миллиметры намеренно остаются пустыми
+  до следующих задач.
+
 ## PHOTO-03 — исправление перспективы страницы, 2026-10-23
 
 - Optional `photo-cv` фиксирует OpenCV headless 4.13.0.92. Base/CLI и обычный

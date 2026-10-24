@@ -10,7 +10,7 @@ correctness has run; no real-photo, HTR, or reconstruction benchmark has run.
 |---|---|---|
 | Photo import throughput and memory | DEFERRED — TASK 23; TASK 01 covers correctness/resource rejection | — |
 | Rectification accuracy | SYNTHETIC CORRECTNESS ONLY — TASK 03 | Corner RMSE 0 px; max 0 px; inverse RMSE 1.24e-13 px; max 2.43e-13 px on one clean generated quad |
-| Paper classification | NOT RUN — TASK 04 | — |
+| Paper classification | SYNTHETIC CORRECTNESS ONLY — TASK 04 | 5/5 classes correct; 4.760 ms/classification mean across 500 runs on local Linux |
 | Grid/ruling geometry | NOT RUN — TASK 05 | — |
 | Ink separation | NOT RUN — TASK 07 | — |
 | Line segmentation | NOT RUN — TASK 08 | — |
@@ -79,6 +79,15 @@ partial/curved pages, compression, or genuine notebook photographs; those gates
 remain open for the private corpus and TASK 22.
 
 ### Ruling classification and geometry
+
+TASK 04 ran the deterministic 520×360 PNG fixtures in
+`tests/learning/test_ruling_classification.py`: blank, ruled with short
+handwriting strokes, squared, sparse table plus dense marks (`mixed`), and a
+single non-periodic stroke (`unknown`). The confusion matrix was diagonal
+(`5/5`), and a warm 100×5-run local loop measured `4.760 ms` per classification
+on this development machine. This checks code-path determinism and interference
+handling only. It is not a measurement of accuracy, calibration, shadow,
+compression, skew, or genuine notebook photo performance.
 
 - Classification confusion matrix for blank/squared/ruled/unknown.
 - Pitch absolute and relative error, phase error, line/intersection precision and
