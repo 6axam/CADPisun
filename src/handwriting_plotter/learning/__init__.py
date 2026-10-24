@@ -75,6 +75,16 @@ from .htr import (
     make_htr_request,
     new_htr_run,
 )
+from .transcription_review import (
+    ReadingOrderEntry,
+    ReadingOrderRecord,
+    ReadingOrderRevision,
+    ReviewConflict,
+    ReviewStatus,
+    TranscriptionReviewRecord,
+    TranscriptionReviewRepository,
+    TranscriptionReviewRevision,
+)
 
 __all__ = [
     "ConfidenceValue",
@@ -140,4 +150,12 @@ __all__ = [
     "select_ink_mask_variant",
     "serialize_photo",
     "validate_corners_in_frame",
+    "ReadingOrderEntry",
+    "ReadingOrderRecord",
+    "ReadingOrderRevision",
+    "ReviewConflict",
+    "ReviewStatus",
+    "TranscriptionReviewRecord",
+    "TranscriptionReviewRepository",
+    "TranscriptionReviewRevision",
 ]

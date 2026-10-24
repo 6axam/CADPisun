@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QThreadPool, Qt
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QSignalBlocker, QThreadPool, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap, QResizeEvent, QTransform
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -34,6 +37,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QSpinBox,
+    QSplitter,
 )
 
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
@@ -55,6 +59,10 @@ from handwriting_plotter.learning import (
     PhotoRepository,
     PixelPoint,
     RulingEstimate,
+    ReadingOrderEntry,
+    ReviewConflict,
+    TranscriptionReviewRecord,
+    TranscriptionReviewRepository,
     calibration_from_ruling_pitch,
     make_htr_request,
     manual_ruling_estimate,
@@ -72,6 +80,19 @@ from .i18n import Language, tr
 from .workers import HtrRecognitionWorker
 
 PHOTO_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewLine:
+    """Current immutable crop plus optional source HTR result for one line."""
+
+    line_id: str
+    crop_sha256: str
+    png: bytes
+    original_prediction: str | None
+    htr_run_sha256: str | None
+    provider_summary: str
+    confidence_summary: str
 
 
 class PhotoPreviewView(QGraphicsView):
@@ -236,6 +257,7 @@ class PhotoImportWorkspace(QWidget):
         self.language = language
         self.repository = PhotoRepository(root)
         self.htr_results = HtrResultRepository(root)
+        self.transcription_reviews = TranscriptionReviewRepository(root)
         self.current_record: PhotoRecord | None = None
         self._source_pixmap = QPixmap()
         self._corrected_pixmap = QPixmap()
@@ -245,6 +267,13 @@ class PhotoImportWorkspace(QWidget):
         self._status_key = "photo.status.empty"
         self._status_values: dict[str, object] = {}
         self._htr_worker: HtrRecognitionWorker | None = None
+        self._review_lines: list[_ReviewLine] = []
+        self._review_current_index: int | None = None
+        self._review_current_record: TranscriptionReviewRecord | None = None
+        self._review_order_sha256: str | None = None
+        self._review_source_manifest_sha256: str | None = None
+        self._review_dirty = False
+        self._review_selection_guard = False
         self._thread_pool = QThreadPool.globalInstance()
         self._htr_worker_script = htr_worker_script
         self._build_ui()
@@ -486,6 +515,79 @@ class PhotoImportWorkspace(QWidget):
         htr_layout.addWidget(self.htr_results_view)
         layout.addWidget(self.htr_group)
 
+        # Review is intentionally a compact splitter rather than another page in
+        # the workspace stack.  It can shrink on laptop-sized windows and never
+        # contributes a hidden workflow minimum to the document workspace.
+        self.review_group = QGroupBox("Review transcription")
+        self.review_group.setObjectName("photo-transcription-review")
+        self.review_group.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.review_group.setMinimumSize(0, 0)
+        self.review_group.setMaximumHeight(390)
+        review_layout = QVBoxLayout(self.review_group)
+        self.review_summary_label = QLabel()
+        self.review_summary_label.setObjectName("photo-review-summary")
+        self.review_summary_label.setWordWrap(True)
+        review_layout.addWidget(self.review_summary_label)
+        self.review_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.review_splitter.setObjectName("photo-review-splitter")
+        self.review_splitter.setChildrenCollapsible(False)
+        self.review_line_list = QListWidget()
+        self.review_line_list.setObjectName("photo-review-lines")
+        self.review_line_list.setMinimumWidth(120)
+        self.review_line_list.setMaximumWidth(240)
+        self.review_splitter.addWidget(self.review_line_list)
+        review_detail = QWidget()
+        review_detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        detail_layout = QVBoxLayout(review_detail)
+        detail_layout.setContentsMargins(4, 0, 0, 0)
+        self.review_crop_label = QLabel()
+        self.review_crop_label.setObjectName("photo-review-crop")
+        self.review_crop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.review_crop_label.setMinimumHeight(74)
+        self.review_crop_label.setMaximumHeight(112)
+        self.review_crop_label.setStyleSheet("background: #303030; border: 1px solid #606060;")
+        detail_layout.addWidget(self.review_crop_label)
+        self.review_prediction_label = QLabel()
+        self.review_prediction_label.setObjectName("photo-review-original-prediction")
+        self.review_prediction_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.review_prediction_label.setWordWrap(True)
+        detail_layout.addWidget(self.review_prediction_label)
+        self.review_provenance_label = QLabel()
+        self.review_provenance_label.setObjectName("photo-review-provenance")
+        self.review_provenance_label.setWordWrap(True)
+        detail_layout.addWidget(self.review_provenance_label)
+        self.review_editor = QPlainTextEdit()
+        self.review_editor.setObjectName("photo-review-editor")
+        self.review_editor.setPlaceholderText("Enter a transcription when no prediction is available.")
+        self.review_editor.setMaximumBlockCount(128)
+        self.review_editor.setMinimumHeight(62)
+        detail_layout.addWidget(self.review_editor, 1)
+        review_actions = QHBoxLayout()
+        self.review_status_combo = QComboBox()
+        self.review_status_combo.setObjectName("photo-review-status")
+        for status in ("unreviewed", "edited", "accepted", "unresolved"):
+            self.review_status_combo.addItem(status, status)
+        self.review_previous_button = QPushButton("←")
+        self.review_next_button = QPushButton("→")
+        self.review_move_up_button = QPushButton("Move up")
+        self.review_move_down_button = QPushButton("Move down")
+        self.review_save_button = QPushButton("Save revision")
+        self.review_save_button.setObjectName("photo-review-save")
+        review_actions.addWidget(self.review_status_combo)
+        review_actions.addWidget(self.review_previous_button)
+        review_actions.addWidget(self.review_next_button)
+        review_actions.addWidget(self.review_move_up_button)
+        review_actions.addWidget(self.review_move_down_button)
+        review_actions.addWidget(self.review_save_button)
+        detail_layout.addLayout(review_actions)
+        self.review_splitter.addWidget(review_detail)
+        self.review_splitter.setStretchFactor(0, 0)
+        self.review_splitter.setStretchFactor(1, 1)
+        self.review_splitter.setSizes([180, 640])
+        review_layout.addWidget(self.review_splitter, 1)
+        layout.addWidget(self.review_group)
+        self.review_group.setVisible(False)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -546,6 +648,14 @@ class PhotoImportWorkspace(QWidget):
         self.detect_lines_button.clicked.connect(self.detect_lines)
         self.htr_run_button.clicked.connect(self.run_htr)
         self.htr_cancel_button.clicked.connect(self.cancel_htr)
+        self.review_line_list.currentRowChanged.connect(self._review_select_row)
+        self.review_editor.textChanged.connect(self._review_text_changed)
+        self.review_status_combo.currentIndexChanged.connect(self._review_status_changed)
+        self.review_previous_button.clicked.connect(lambda: self._review_navigate(-1))
+        self.review_next_button.clicked.connect(lambda: self._review_navigate(1))
+        self.review_move_up_button.clicked.connect(lambda: self._move_review_line(-1))
+        self.review_move_down_button.clicked.connect(lambda: self._move_review_line(1))
+        self.review_save_button.clicked.connect(self.save_review_revision)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -559,6 +669,9 @@ class PhotoImportWorkspace(QWidget):
             self.import_path(Path(filename))
 
     def import_path(self, path: Path) -> PhotoRecord | None:
+        if self._review_dirty:
+            self._set_status("photo.htr.failed", error="SAVE_REVIEW_BEFORE_CHANGING_PHOTO")
+            return None
         try:
             record = self.repository.import_file(
                 path,
@@ -620,6 +733,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_line_controls()
         self._refresh_htr_controls()
         self._restore_htr_results(record)
+        self._refresh_transcription_review()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
@@ -971,6 +1085,259 @@ class PhotoImportWorkspace(QWidget):
         rows = [header, tr(self.language, "photo.htr.no_confidence")]
         rows.extend(f"{item.line_id}: {item.text}" for item in run.lines)
         self.htr_results_view.setPlainText("\n".join(rows))
+        self._refresh_transcription_review()
+
+    def _latest_successful_htr(self) -> HtrRunRecord | None:
+        if self.current_record is None:
+            return None
+        return next(
+            (record for record in self.htr_results.list_for_source(self.current_record.sha256)
+             if record.run.status == "succeeded"),
+            None,
+        )
+
+    def _refresh_transcription_review(self) -> None:
+        """Rebuild only from current immutable crops and local HTR provenance.
+
+        A review revision is selected only when its manifest, line ID and crop
+        hash all match.  Thus a later segmentation can never receive text from
+        an earlier crop just because it reused a visual line position.
+        """
+        if (
+            self._review_dirty
+            and self.current_record is not None
+            and self._review_source_manifest_sha256 == self.current_record.sha256
+        ):
+            self.review_summary_label.setText("Save this revision before accepting a newer HTR result.")
+            return
+        selected_line_id = (
+            self._review_lines[self._review_current_index].line_id
+            if self._review_current_index is not None and self._review_current_index < len(self._review_lines)
+            else None
+        )
+        self._review_lines = []
+        self._review_current_index = None
+        self._review_current_record = None
+        self._review_dirty = False
+        self._review_order_sha256 = None
+        if self.current_record is None:
+            self._review_source_manifest_sha256 = None
+            self.review_group.setVisible(False)
+            return
+        self._review_source_manifest_sha256 = self.current_record.sha256
+        try:
+            _frame_id, crops = self._htr_crops()
+        except (OSError, ValueError):
+            self.review_group.setVisible(False)
+            return
+        successful_run = self._latest_successful_htr()
+        result_by_line = (
+            {result.line_id: result for result in successful_run.run.lines}
+            if successful_run is not None else {}
+        )
+        lines = [
+            _ReviewLine(
+                line_id=line_id,
+                crop_sha256=crop_sha256,
+                png=png,
+                original_prediction=(
+                    result_by_line[line_id].text
+                    if line_id in result_by_line and result_by_line[line_id].crop_sha256 == crop_sha256
+                    else None
+                ),
+                htr_run_sha256=successful_run.sha256 if line_id in result_by_line else None,
+                provider_summary=(
+                    f"{successful_run.run.provider_id} · {successful_run.run.model_revision or 'unknown revision'}"
+                    if line_id in result_by_line else "No successful HTR result"
+                ),
+                confidence_summary=(
+                    "Confidence: not provided by this provider."
+                    if line_id in result_by_line else "Confidence: unavailable (no HTR result)."
+                ),
+            )
+            for line_id, crop_sha256, png in crops
+        ]
+        latest_order = self.transcription_reviews.latest_order(self.current_record.sha256)
+        current_keys = {(line.line_id, line.crop_sha256) for line in lines}
+        if latest_order is not None:
+            stored_keys = {(entry.line_id, entry.crop_sha256) for entry in latest_order.revision.entries}
+            if stored_keys == current_keys and len(stored_keys) == len(lines):
+                positions = {
+                    (entry.line_id, entry.crop_sha256): index
+                    for index, entry in enumerate(latest_order.revision.entries)
+                }
+                lines.sort(key=lambda line: positions[(line.line_id, line.crop_sha256)])
+                self._review_order_sha256 = latest_order.sha256
+        self._review_lines = lines
+        self.review_group.setVisible(bool(lines))
+        with QSignalBlocker(self.review_line_list):
+            self.review_line_list.clear()
+            for index, line in enumerate(lines, start=1):
+                record = self.transcription_reviews.latest_for_line(
+                    self.current_record.sha256, line.line_id, line.crop_sha256
+                )
+                status = record.revision.status if record is not None else "unreviewed"
+                item = QListWidgetItem(f"{index}. {line.line_id} · {status}")
+                item.setData(Qt.ItemDataRole.UserRole, line.line_id)
+                self.review_line_list.addItem(item)
+        self.review_summary_label.setText(
+            f"{len(lines)} line(s). Reviews are local, append-only revisions; source pixels and HTR runs stay unchanged."
+        )
+        if not lines:
+            return
+        target_index = next(
+            (index for index, line in enumerate(lines) if line.line_id == selected_line_id), 0
+        )
+        self._load_review_row(target_index)
+        with QSignalBlocker(self.review_line_list):
+            self.review_line_list.setCurrentRow(target_index)
+
+    def _review_select_row(self, row: int) -> None:
+        if self._review_selection_guard or row < 0 or row >= len(self._review_lines):
+            return
+        if self._review_dirty and row != self._review_current_index:
+            self._review_selection_guard = True
+            self.review_line_list.setCurrentRow(self._review_current_index or 0)
+            self._review_selection_guard = False
+            self.review_summary_label.setText("Save this revision before changing lines; unsaved text was kept in the editor.")
+            return
+        self._load_review_row(row)
+
+    def _load_review_row(self, row: int) -> None:
+        if self.current_record is None or row < 0 or row >= len(self._review_lines):
+            return
+        line = self._review_lines[row]
+        latest = self.transcription_reviews.latest_for_line(
+            self.current_record.sha256, line.line_id, line.crop_sha256
+        )
+        self._review_current_index = row
+        self._review_current_record = latest
+        original_prediction = latest.revision.original_prediction if latest is not None else line.original_prediction
+        reviewed_text = latest.revision.reviewed_text if latest is not None else (original_prediction or "")
+        status = latest.revision.status if latest is not None else "unreviewed"
+        pixmap = QPixmap()
+        pixmap.loadFromData(line.png, "PNG")
+        if not pixmap.isNull():
+            self.review_crop_label.setPixmap(pixmap.scaledToHeight(100, Qt.TransformationMode.SmoothTransformation))
+        else:
+            self.review_crop_label.setText("Crop preview unavailable")
+        self.review_prediction_label.setText(
+            f"Original HTR prediction: {original_prediction if original_prediction is not None else '— (none)'}"
+        )
+        run_sha = latest.revision.htr_run_sha256 if latest is not None else line.htr_run_sha256
+        self.review_provenance_label.setText(
+            f"Line: {line.line_id} · {line.provider_summary}\n{line.confidence_summary}\n"
+            f"Crop SHA-256: {line.crop_sha256}\nHTR run: {run_sha or '—'}"
+        )
+        with QSignalBlocker(self.review_editor), QSignalBlocker(self.review_status_combo):
+            self.review_editor.setPlainText(reviewed_text)
+            self.review_status_combo.setCurrentIndex(self.review_status_combo.findData(status))
+        self._review_dirty = False
+        self._refresh_review_actions()
+
+    def _refresh_review_actions(self) -> None:
+        current = self._review_current_index
+        has_current = current is not None
+        self.review_editor.setEnabled(has_current)
+        self.review_status_combo.setEnabled(has_current)
+        self.review_save_button.setEnabled(has_current)
+        self.review_previous_button.setEnabled(bool(has_current and current > 0))
+        self.review_next_button.setEnabled(bool(has_current and current < len(self._review_lines) - 1))
+        self.review_move_up_button.setEnabled(bool(has_current and current > 0 and not self._review_dirty))
+        self.review_move_down_button.setEnabled(bool(
+            has_current and current < len(self._review_lines) - 1 and not self._review_dirty
+        ))
+
+    def _review_text_changed(self) -> None:
+        if self._review_current_index is not None:
+            self._review_dirty = True
+            self._refresh_review_actions()
+
+    def _review_status_changed(self, _index: int) -> None:
+        if self._review_current_index is not None:
+            self._review_dirty = True
+            self._refresh_review_actions()
+
+    def _review_navigate(self, offset: int) -> None:
+        if self._review_current_index is None or self._review_dirty:
+            if self._review_dirty:
+                self.review_summary_label.setText("Save this revision before changing lines; unsaved text was kept in the editor.")
+            return
+        destination = self._review_current_index + offset
+        if 0 <= destination < len(self._review_lines):
+            self.review_line_list.setCurrentRow(destination)
+
+    def save_review_revision(self) -> None:
+        if self.current_record is None or self._review_current_index is None:
+            return
+        if self._review_source_manifest_sha256 != self.current_record.sha256:
+            self.review_summary_label.setText(
+                "The segmentation changed. This editor still shows the old crop; reload before saving."
+            )
+            return
+        line = self._review_lines[self._review_current_index]
+        previous = self._review_current_record
+        original_prediction = previous.revision.original_prediction if previous is not None else line.original_prediction
+        htr_run_sha256 = previous.revision.htr_run_sha256 if previous is not None else line.htr_run_sha256
+        status = str(self.review_status_combo.currentData())
+        if status == "unreviewed" and self.review_editor.toPlainText() != (original_prediction or ""):
+            status = "edited"
+        try:
+            saved = self.transcription_reviews.append(
+                source_manifest_sha256=self.current_record.sha256,
+                line_id=line.line_id,
+                crop_sha256=line.crop_sha256,
+                htr_run_sha256=htr_run_sha256,
+                original_prediction=original_prediction,
+                reviewed_text=self.review_editor.toPlainText(),
+                status=status,  # type: ignore[arg-type]  # populated from the closed combo set above
+                expected_parent_revision_sha256=previous.sha256 if previous is not None else None,
+            )
+        except ReviewConflict:
+            self.review_summary_label.setText("A newer review revision exists. Reload this line before saving.")
+            return
+        except (OSError, ValueError) as exc:
+            self.review_summary_label.setText(f"Could not save review revision: {exc}")
+            return
+        self._review_current_record = saved
+        self._review_dirty = False
+        self._load_review_row(self._review_current_index)
+        self.review_line_list.item(self._review_current_index).setText(
+            f"{self._review_current_index + 1}. {line.line_id} · {saved.revision.status}"
+        )
+        self.review_summary_label.setText("Review revision saved locally. The original HTR result remains unchanged.")
+
+    def _move_review_line(self, offset: int) -> None:
+        if self.current_record is None or self._review_current_index is None or self._review_dirty:
+            return
+        destination = self._review_current_index + offset
+        if not 0 <= destination < len(self._review_lines):
+            return
+        reordered = list(self._review_lines)
+        selected = reordered.pop(self._review_current_index)
+        reordered.insert(destination, selected)
+        try:
+            self.transcription_reviews.append_order(
+                source_manifest_sha256=self.current_record.sha256,
+                entries=tuple(
+                    ReadingOrderEntry(line_id=line.line_id, crop_sha256=line.crop_sha256)
+                    for line in reordered
+                ),
+                expected_parent_revision_sha256=self._review_order_sha256,
+            )
+        except ReviewConflict:
+            self.review_summary_label.setText("A newer reading order exists. Reload the photo before changing order.")
+            return
+        except (OSError, ValueError) as exc:
+            self.review_summary_label.setText(f"Could not save reading order: {exc}")
+            return
+        selected_line_id = selected.line_id
+        self._refresh_transcription_review()
+        selected_index = next(
+            index for index, line in enumerate(self._review_lines) if line.line_id == selected_line_id
+        )
+        self.review_line_list.setCurrentRow(selected_index)
+        self.review_summary_label.setText("Reading order saved as an immutable local revision.")
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -1336,6 +1703,8 @@ class PhotoImportWorkspace(QWidget):
         if self.current_record is None:
             self.diagnostics.setPlainText(tr(self.language, "photo.diagnostics.empty"))
             return
+        if self._review_source_manifest_sha256 != self.current_record.sha256 and not self._review_dirty:
+            self._refresh_transcription_review()
         photo = self.current_record.photo
         metadata = photo.metadata
         correction_status = tr(self.language, "photo.correction.pending")

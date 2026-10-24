@@ -16,7 +16,13 @@ import numpy as np
 
 from handwriting_plotter.gui.photo_import import PhotoImportWorkspace
 from handwriting_plotter.gui.studio import HandwritingStudio
-from handwriting_plotter.learning import manual_line_region, persist_line_regions
+from handwriting_plotter.learning import (
+    HtrLineResult,
+    make_htr_request,
+    manual_line_region,
+    new_htr_run,
+    persist_line_regions,
+)
 
 
 def _write_photo(path: Path, width: int = 180, height: int = 120) -> bytes:
@@ -202,6 +208,100 @@ print(json.dumps({'event': 'complete', 'model_revision': 'fake-v1', 'model_sha25
     assert "Confidence: not provided" in workspace.htr_results_view.toPlainText()
     assert "completed" in workspace.status_label.text().lower()
     assert workspace.htr_results.list_for_source(record.sha256)[0].run.lines[0].text == "Привіт, їжаче!"
+
+
+def test_transcription_review_edits_unicode_reopens_and_htr_rerun_cannot_overwrite_it(
+    qtbot, tmp_path: Path
+) -> None:
+    source = tmp_path / "page.png"
+    _write_photo(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    workspace.show()
+    assert workspace.import_path(source) is not None
+    assert workspace.current_record is not None
+    record = persist_line_regions(
+        workspace.repository, workspace.current_record,
+        (manual_line_region(
+            frame_id="source-pixels", region_id="line-001", left=10, top=35, right=170, bottom=85,
+        ),),
+    )
+    workspace._show_record(record, workspace._read_preview(record))
+    frame_id, crops = workspace._htr_crops()
+    request = make_htr_request("crnn-rukopys", crops, timeout_seconds=30, memory_limit_bytes=512 * 1024 * 1024)
+    first_run = workspace.htr_results.store(new_htr_run(
+        source_manifest_sha256=record.sha256, original_sha256=record.photo.original_sha256,
+        frame_id=frame_id, request=request, status="succeeded",
+        lines=(HtrLineResult(
+            line_id="line-001", crop_sha256=crops[0][1], text="помилка", elapsed_ms=1.0,
+        ),), model_revision="test-v1", model_sha256="f" * 64,
+    ))
+    workspace._show_htr_run(first_run)
+
+    assert workspace.review_group.isVisible()
+    assert "помилка" in workspace.review_prediction_label.text()
+    assert "not provided" in workspace.review_provenance_label.text()
+    workspace.review_editor.setPlainText("ґей, є ї, і й — апострофʼ!")
+    workspace.review_status_combo.setCurrentIndex(workspace.review_status_combo.findData("accepted"))
+    workspace.review_save_button.click()
+    assert "accepted" in workspace.review_line_list.item(0).text()
+
+    # A later run becomes the latest HTR record, but it cannot overwrite an
+    # existing human revision attached to this immutable crop.
+    rerun = workspace.htr_results.store(new_htr_run(
+        source_manifest_sha256=record.sha256, original_sha256=record.photo.original_sha256,
+        frame_id=frame_id, request=request, status="succeeded",
+        lines=(HtrLineResult(
+            line_id="line-001", crop_sha256=crops[0][1], text="інше передбачення", elapsed_ms=1.0,
+        ),), model_revision="test-v2", model_sha256="e" * 64,
+    ))
+    workspace._show_htr_run(rerun)
+    assert workspace.review_editor.toPlainText() == "ґей, є ї, і й — апострофʼ!"
+    assert "помилка" in workspace.review_prediction_label.text()
+
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert reopened.review_editor.toPlainText() == "ґей, є ї, і й — апострофʼ!"
+    assert "accepted" in reopened.review_line_list.item(0).text()
+
+
+def test_review_allows_manual_unknown_and_persists_reading_order(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "page.png"
+    _write_photo(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    workspace.show()
+    assert workspace.import_path(source) is not None
+    assert workspace.current_record is not None
+    record = persist_line_regions(
+        workspace.repository, workspace.current_record,
+        (
+            manual_line_region(frame_id="source-pixels", region_id="line-001", left=10, top=20, right=170, bottom=48),
+            manual_line_region(frame_id="source-pixels", region_id="line-002", left=10, top=60, right=170, bottom=95),
+        ),
+    )
+    workspace._show_record(record, workspace._read_preview(record))
+
+    assert workspace.review_group.isVisible()
+    assert workspace.review_line_list.count() == 2
+    assert "— (none)" in workspace.review_prediction_label.text()
+    workspace.review_editor.setPlainText("Ручний текст без HTR")
+    workspace.review_line_list.setCurrentRow(1)
+    assert workspace.review_line_list.currentRow() == 0
+    assert workspace.review_editor.toPlainText() == "Ручний текст без HTR"
+    workspace.review_status_combo.setCurrentIndex(workspace.review_status_combo.findData("edited"))
+    workspace.review_save_button.click()
+    assert "edited" in workspace.review_line_list.item(0).text()
+    workspace.review_move_down_button.click()
+
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert "line-002" in reopened.review_line_list.item(0).text()
+    assert "line-001" in reopened.review_line_list.item(1).text()
+    reopened.review_line_list.setCurrentRow(1)
+    assert reopened.review_editor.toPlainText() == "Ручний текст без HTR"
 
 
 def test_automatic_page_proposal_correction_and_restore(qtbot, tmp_path: Path) -> None:
