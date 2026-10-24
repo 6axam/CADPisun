@@ -314,3 +314,35 @@ def test_physical_scale_is_explicit_persisted_and_invalidated_by_geometry_edit(
     assert preset.source == "notebook_cell_preset"
     assert preset.reference_pitch_mm == 5.0
     assert preset.mm_per_px_y == pytest.approx(5.0 / 31.0)
+
+
+def test_ink_mask_review_and_raw_override_are_persisted(qtbot, tmp_path: Path) -> None:
+    source = tmp_path / "ruled.png"
+    _write_ruled_page(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+    workspace.analyze_paper_button.click()
+    workspace.detect_geometry_button.click()
+
+    workspace.separate_ink_button.click()
+    assert workspace.current_record is not None
+    mask = workspace.current_record.photo.ink_mask
+    assert mask is not None
+    assert mask.selected_variant == "cleaned"
+    assert "masks saved" in workspace.status_label.text()
+    assert workspace.use_raw_mask_button.isEnabled()
+
+    workspace.use_raw_mask_button.click()
+    assert workspace.current_record.photo.ink_mask is not None
+    assert workspace.current_record.photo.ink_mask.selected_variant == "raw"
+    assert workspace.current_record.photo.ink_mask.status == "overridden"
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert reopened.current_record is not None
+    assert reopened.current_record.photo.ink_mask == workspace.current_record.photo.ink_mask
+
+    workspace.pitch_y_spin.setValue(31.0)
+    workspace.apply_geometry_button.click()
+    assert workspace.current_record.photo.ink_mask is None

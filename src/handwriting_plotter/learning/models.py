@@ -263,6 +263,32 @@ class PhysicalScaleCalibration(StrictModel):
         return self
 
 
+class InkMask(StrictModel):
+    """Two immutable binary-mask artifacts for one photographed pixel frame."""
+
+    frame_id: str = Field(min_length=1, max_length=128)
+    status: Literal["proposed", "overridden"] = "proposed"
+    method: str = Field(min_length=1, max_length=256)
+    raw_sha256: str
+    raw_relative_path: str
+    cleaned_sha256: str
+    cleaned_relative_path: str
+    selected_variant: Literal["raw", "cleaned"] = "cleaned"
+    diagnostics: tuple[str, ...] = Field(default=(), max_length=32)
+
+    @field_validator("raw_sha256", "cleaned_sha256")
+    @classmethod
+    def valid_mask_hash(cls, value: str) -> str:
+        if not _SHA256.fullmatch(value):
+            raise ValueError("INVALID_MASK_HASH")
+        return value
+
+    @field_validator("raw_relative_path", "cleaned_relative_path")
+    @classmethod
+    def safe_mask_path(cls, value: str) -> str:
+        return _safe_relative(value)
+
+
 class PhotoImportMetadata(StrictModel):
     original_filename: str = Field(min_length=1, max_length=512)
     imported_at_utc: str
@@ -312,6 +338,7 @@ class NotebookPhoto(StrictModel):
     regions: tuple[PhotoRegion, ...] = ()
     ruling: RulingEstimate
     calibration: PhysicalScaleCalibration | None = None
+    ink_mask: InkMask | None = None
 
     @field_validator("source_id")
     @classmethod
@@ -380,4 +407,6 @@ class NotebookPhoto(StrictModel):
             raise ValueError("RULING_FRAME_NOT_FOUND")
         if self.calibration is not None and self.calibration.frame_id not in frames:
             raise ValueError("CALIBRATION_FRAME_NOT_FOUND")
+        if self.ink_mask is not None and self.ink_mask.frame_id not in frames:
+            raise ValueError("INK_MASK_FRAME_NOT_FOUND")
         return self

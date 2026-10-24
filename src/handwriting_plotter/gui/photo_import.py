@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
 from handwriting_plotter.adapters.images.opencv import (
     OpenCvPageCorrector,
+    OpenCvInkSeparator,
     OpenCvRulingGeometryEstimator,
     OpenCvRulingClassifier,
     opencv_available,
@@ -48,8 +49,10 @@ from handwriting_plotter.learning import (
     manual_ruling_estimate,
     manual_ruling_geometry,
     persist_correction,
+    persist_ink_mask,
     persist_physical_scale_calibration,
     persist_ruling_estimate,
+    select_ink_mask_variant,
 )
 from handwriting_plotter.version import __version__
 
@@ -394,6 +397,18 @@ class PhotoImportWorkspace(QWidget):
         calibration_tools.addWidget(self.scale_summary_label, 1)
         layout.addLayout(calibration_tools)
 
+        mask_tools = QHBoxLayout()
+        self.separate_ink_button = QPushButton()
+        self.use_raw_mask_button = QPushButton()
+        self.mask_summary_label = QLabel()
+        self.mask_summary_label.setObjectName("photo-mask-summary")
+        self.separate_ink_button.setEnabled(False)
+        self.use_raw_mask_button.setEnabled(False)
+        mask_tools.addWidget(self.separate_ink_button)
+        mask_tools.addWidget(self.use_raw_mask_button)
+        mask_tools.addWidget(self.mask_summary_label, 1)
+        layout.addLayout(mask_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -449,6 +464,8 @@ class PhotoImportWorkspace(QWidget):
         self.show_ruling_overlay_check.toggled.connect(self._refresh_ruling_overlay)
         self.apply_scale_button.clicked.connect(self.apply_user_scale)
         self.apply_5mm_preset_button.clicked.connect(self.apply_5mm_preset)
+        self.separate_ink_button.clicked.connect(self.separate_ink)
+        self.use_raw_mask_button.clicked.connect(self.use_raw_mask)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -519,6 +536,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
@@ -557,6 +575,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -583,6 +602,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -608,6 +628,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
@@ -648,6 +669,7 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status("photo.geometry.override_complete")
@@ -682,6 +704,36 @@ class PhotoImportWorkspace(QWidget):
             "photo.scale.complete",
             source=tr(self.language, f"photo.scale.source.{calibration.source}"),
         )
+
+    def separate_ink(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            content, frame_id = self._ruling_input()
+            raster = OpenCvInkSeparator().separate(
+                content, frame_id=frame_id, ruling=self.current_record.photo.ruling
+            )
+            self.current_record = persist_ink_mask(self.repository, self.current_record, raster)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.mask.failed", error=str(exc))
+            return
+        self._refresh_mask_controls()
+        self._refresh_diagnostics()
+        self._set_status("photo.mask.complete")
+
+    def use_raw_mask(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            self.current_record = select_ink_mask_variant(
+                self.repository, self.current_record, "raw"
+            )
+        except (OSError, ValueError) as exc:
+            self._set_status("photo.mask.failed", error=str(exc))
+            return
+        self._refresh_mask_controls()
+        self._refresh_diagnostics()
+        self._set_status("photo.mask.raw_selected")
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -860,6 +912,8 @@ class PhotoImportWorkspace(QWidget):
         self.scale_reference_spin.setEnabled(False)
         self.apply_scale_button.setEnabled(False)
         self.apply_5mm_preset_button.setEnabled(False)
+        self.separate_ink_button.setEnabled(False)
+        self.use_raw_mask_button.setEnabled(False)
         for widget in (
             self.pitch_x_spin,
             self.pitch_y_spin,
@@ -975,6 +1029,23 @@ class PhotoImportWorkspace(QWidget):
             )
         )
 
+    def _refresh_mask_controls(self) -> None:
+        if self.current_record is None:
+            self.mask_summary_label.clear()
+            return
+        self.separate_ink_button.setEnabled(opencv_available())
+        mask = self.current_record.photo.ink_mask
+        self.use_raw_mask_button.setEnabled(mask is not None and mask.selected_variant != "raw")
+        if mask is None:
+            self.mask_summary_label.setText(tr(self.language, "photo.mask.empty"))
+            return
+        self.mask_summary_label.setText(
+            tr(self.language, "photo.mask.summary").format(
+                variant=tr(self.language, f"photo.mask.variant.{mask.selected_variant}"),
+                status=tr(self.language, f"photo.mask.status.{mask.status}"),
+            )
+        )
+
     def _refresh_ruling_overlay(self) -> None:
         self.original_view.clear_ruling_overlay()
         self.corrected_view.clear_ruling_overlay()
@@ -1024,6 +1095,7 @@ class PhotoImportWorkspace(QWidget):
             ),
             ("photo.diagnostics.geometry", self._geometry_summary(photo.ruling)),
             ("photo.diagnostics.scale", self.scale_summary_label.text()),
+            ("photo.diagnostics.mask", self.mask_summary_label.text()),
             ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
@@ -1054,6 +1126,8 @@ class PhotoImportWorkspace(QWidget):
         self.scale_reference_label.setText(tr(language, "photo.scale.reference"))
         self.apply_scale_button.setText(tr(language, "photo.scale.apply"))
         self.apply_5mm_preset_button.setText(tr(language, "photo.scale.preset"))
+        self.separate_ink_button.setText(tr(language, "photo.mask.separate"))
+        self.use_raw_mask_button.setText(tr(language, "photo.mask.use_raw"))
         for index in range(self.paper_classification_combo.count()):
             classification = self.paper_classification_combo.itemData(index)
             self.paper_classification_combo.setItemText(
@@ -1072,5 +1146,6 @@ class PhotoImportWorkspace(QWidget):
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
         self._refresh_calibration_controls()
+        self._refresh_mask_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()

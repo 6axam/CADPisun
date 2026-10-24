@@ -3,6 +3,7 @@
 from .models import (
     ConfidenceValue,
     ImageTransform,
+    InkMask,
     NotebookPhoto,
     PageDimensions,
     PhysicalScaleCalibration,
@@ -50,6 +51,7 @@ from .calibration import (
     ruling_pixel_to_metric,
     ruling_pixel_to_relative,
 )
+from .masks import InkMaskRaster, persist_ink_mask, select_ink_mask_variant
 
 __all__ = [
     "ConfidenceValue",
@@ -58,6 +60,8 @@ __all__ = [
     "DecodedImageInfo",
     "ImageDecoder",
     "ImageTransform",
+    "InkMask",
+    "InkMaskRaster",
     "NotebookPhoto",
     "PageDimensions",
     "PhysicalScaleCalibration",
@@ -85,11 +89,13 @@ __all__ = [
     "grid_relative_to_pixel",
     "order_page_corners",
     "persist_correction",
+    "persist_ink_mask",
     "persist_ruling_estimate",
     "persist_physical_scale_calibration",
     "pixel_to_metric",
     "ruling_pixel_to_metric",
     "ruling_pixel_to_relative",
+    "select_ink_mask_variant",
     "serialize_photo",
     "validate_corners_in_frame",
 ]

@@ -11,6 +11,7 @@ from handwriting_plotter.learning import (
     PageCorners,
     PixelPoint,
     RulingEstimate,
+    InkMaskRaster,
     map_point,
     order_page_corners,
     validate_corners_in_frame,
@@ -503,3 +504,70 @@ class OpenCvRulingGeometryEstimator:
         support = min(1.0, count / 10.0)
         precision = max(0.0, 1.0 - residual / max(1.0, pitch * 0.15))
         return min(0.95, 0.45 + 0.3 * support + 0.2 * precision)
+
+
+class OpenCvInkSeparator:
+    """Create reviewable raw and conservative cleaned handwriting masks.
+
+    The cleaner removes only pixels near already measured ruling families. Dark
+    marks are deliberately protected at intersections; the raw mask remains a
+    persisted manual fallback for every colour/lighting condition.
+    """
+
+    def separate(self, content: bytes, *, frame_id: str, ruling: RulingEstimate) -> InkMaskRaster:
+        cv2, np = _cv_modules()
+        image = OpenCvPageCorrector._decode(content)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        background = cv2.GaussianBlur(gray, (0, 0), 19.0)
+        contrast = cv2.subtract(background, gray)
+        # Raw deliberately retains faint coloured rules for review.  The clean
+        # variant may remove them only when the measured periodic geometry says
+        # they are a ruling family.
+        raw = ((contrast > 10) | (gray < 225)).astype(np.uint8) * 255
+        ruling_mask = self._ruling_mask(raw.shape, ruling, np)
+        if ruling_mask is None:
+            cleaned = raw.copy()
+            diagnostics = ("NO_RULING_GEOMETRY_RAW_EQUALS_CLEANED",)
+        else:
+            # Blue/brown printed lines tend to remain brighter than ink.  Dark
+            # black/purple writing is retained even when it crosses a rule.
+            protected_ink = (gray < 145) | ((hsv[:, :, 1] > 70) & (hsv[:, :, 2] < 150))
+            cleaned = ((raw > 0) & ((ruling_mask == 0) | protected_ink)).astype(np.uint8) * 255
+            diagnostics = ("RULING_REMOVAL_CONSERVATIVE", "DARK_INTERSECTIONS_PROTECTED")
+        for mask in (raw, cleaned):
+            if int(np.count_nonzero(mask)) == 0:
+                raise ValueError("INK_MASK_EMPTY")
+        raw_ok, raw_png = cv2.imencode(".png", raw, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        clean_ok, clean_png = cv2.imencode(".png", cleaned, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+        if not raw_ok or not clean_ok:
+            raise ValueError("INK_MASK_ENCODE_FAILED")
+        return InkMaskRaster(
+            frame_id=frame_id,
+            raw_png=raw_png.tobytes(),
+            cleaned_png=clean_png.tobytes(),
+            method=f"opencv-conservative-ink-mask/{cv2.__version__}",
+            diagnostics=diagnostics,
+        )
+
+    @staticmethod
+    def _ruling_mask(shape, ruling: RulingEstimate, np):
+        if ruling.frame_id == "" or ruling.classification not in {"ruled", "squared"}:
+            return None
+        height, width = shape
+        yy, xx = np.indices((height, width), dtype=np.float64)
+        result = np.zeros((height, width), dtype=np.uint8)
+
+        def add_family(pitch, origin, angle, *, vertical: bool) -> bool:
+            if pitch is None or origin is None or angle is None:
+                return False
+            radians = math.radians(angle)
+            normal = (math.sin(radians), -math.cos(radians)) if vertical else (-math.sin(radians), math.cos(radians))
+            coordinate = normal[0] * xx + normal[1] * yy
+            distance = np.abs(((coordinate - origin + pitch / 2.0) % pitch) - pitch / 2.0)
+            result[distance <= max(1.0, min(2.0, pitch * 0.08))] = 255
+            return True
+
+        horizontal = add_family(ruling.ruling_pitch_px or ruling.cell_pitch_y_px, ruling.origin_y_px, ruling.horizontal_angle_deg, vertical=False)
+        vertical = add_family(ruling.cell_pitch_x_px, ruling.origin_x_px, ruling.vertical_angle_deg, vertical=True)
+        return result if horizontal or vertical else None

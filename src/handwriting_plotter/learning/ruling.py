@@ -115,5 +115,8 @@ def persist_ruling_estimate(
     # Geometry revisions change the denominator of any pitch-based scale.  A
     # calibration must be deliberately reapplied instead of silently surviving.
     payload["calibration"] = None
+    # Rule removal is geometry-dependent, so retain neither a stale clean mask
+    # nor its selected manual variant after a new ruling revision.
+    payload["ink_mask"] = None
     updated = NotebookPhoto.model_validate(payload, strict=True)
     return repository.store(updated, repository.read_original(source.photo))
