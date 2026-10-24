@@ -1,5 +1,18 @@
 # Состояние реализации
 
+## PHOTO-07 — консервативные маски бумаги и чернил, 2026-10-24
+
+- `OpenCvInkSeparator` создаёт raw и cleaned binary PNG masks для measured
+  frame. Raw всегда сохраняет слабые цветные линии для review; cleaned удаляет
+  только pixels около измеренных periodic ruling families и защищает тёмные
+  пересечения с handwriting.
+- Оба артефакта content-addressed и сохраняются в новом immutable manifest.
+  **Use raw mask** записывает явный manual override, а изменение ruling geometry
+  очищает маску, чтобы не оставить cleanup от старого pitch.
+- Synthetic fixtures проверяют removal линейки, crossing ink, dot, no-geometry
+  fallback, artifact persistence/reopen и GUI manual override. Реальная
+  photo-quality validation остаётся открытой.
+
 ## PHOTO-06 — явная физическая калибровка, 2026-10-24
 
 - `PhysicalScaleCalibration` хранит frame-bound X/Y `mm_per_px`, origin,
