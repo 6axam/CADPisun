@@ -112,5 +112,8 @@ def persist_ruling_estimate(
     # rejects JSON lists so malformed manifests cannot enter the repository.
     payload = source.photo.model_dump(mode="python")
     payload["ruling"] = estimate
+    # Geometry revisions change the denominator of any pitch-based scale.  A
+    # calibration must be deliberately reapplied instead of silently surviving.
+    payload["calibration"] = None
     updated = NotebookPhoto.model_validate(payload, strict=True)
     return repository.store(updated, repository.read_original(source.photo))

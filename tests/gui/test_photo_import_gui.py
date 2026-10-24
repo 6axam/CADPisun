@@ -269,3 +269,48 @@ def test_paper_analysis_and_manual_override_are_persisted(qtbot, tmp_path: Path)
     assert reopened.current_record is not None
     assert reopened.current_record.photo.ruling.classification == "squared"
     assert reopened.current_record.photo.ruling.status == "overridden"
+
+
+def test_physical_scale_is_explicit_persisted_and_invalidated_by_geometry_edit(
+    qtbot, tmp_path: Path
+) -> None:
+    source = tmp_path / "ruled.png"
+    _write_ruled_page(source)
+    root = tmp_path / "store"
+    workspace = PhotoImportWorkspace(root)
+    qtbot.addWidget(workspace)
+    assert workspace.import_path(source) is not None
+
+    workspace.analyze_paper_button.click()
+    workspace.detect_geometry_button.click()
+    assert workspace.current_record is not None
+    assert workspace.current_record.photo.calibration is None
+    assert workspace.apply_scale_button.isEnabled()
+
+    workspace.scale_reference_spin.setValue(4.0)
+    workspace.apply_scale_button.click()
+    calibration = workspace.current_record.photo.calibration
+    assert calibration is not None
+    assert calibration.source == "user_entered"
+    assert calibration.reference_pitch_mm == 4.0
+    assert calibration.mm_per_px_x is None
+    assert calibration.mm_per_px_y == pytest.approx(4.0 / 30.0, abs=0.01)
+    assert "Physical scale saved" in workspace.status_label.text()
+
+    reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(reopened)
+    assert reopened.current_record is not None
+    assert reopened.current_record.photo.calibration == calibration
+    assert "user-entered reference" in reopened.scale_summary_label.text()
+
+    workspace.pitch_y_spin.setValue(31.0)
+    workspace.apply_geometry_button.click()
+    assert workspace.current_record.photo.calibration is None
+    assert "Physical scale unknown" in workspace.scale_summary_label.text()
+
+    workspace.apply_5mm_preset_button.click()
+    preset = workspace.current_record.photo.calibration
+    assert preset is not None
+    assert preset.source == "notebook_cell_preset"
+    assert preset.reference_pitch_mm == 5.0
+    assert preset.mm_per_px_y == pytest.approx(5.0 / 31.0)

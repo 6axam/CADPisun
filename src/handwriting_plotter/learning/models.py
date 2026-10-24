@@ -227,6 +227,42 @@ class RulingEstimate(StrictModel):
         return self
 
 
+class PhysicalScaleCalibration(StrictModel):
+    """Explicit pixel-to-millimetre scale for one immutable photo frame."""
+
+    frame_id: str = Field(min_length=1, max_length=128)
+    source: Literal["user_entered", "verified_reference", "notebook_cell_preset"]
+    method: str = Field(min_length=1, max_length=256)
+    mm_per_px_x: float | None = Field(default=None, gt=0.0)
+    mm_per_px_y: float | None = Field(default=None, gt=0.0)
+    uncertainty_mm_per_px_x: float | None = Field(default=None, ge=0.0)
+    uncertainty_mm_per_px_y: float | None = Field(default=None, ge=0.0)
+    reference_pitch_mm: float | None = Field(default=None, gt=0.0)
+
+    @field_validator(
+        "mm_per_px_x",
+        "mm_per_px_y",
+        "uncertainty_mm_per_px_x",
+        "uncertainty_mm_per_px_y",
+        "reference_pitch_mm",
+    )
+    @classmethod
+    def finite_optional_scale(cls, value: float | None) -> float | None:
+        return None if value is None else _finite(value, "physical scale")
+
+    @model_validator(mode="after")
+    def scale_is_explicit(self) -> PhysicalScaleCalibration:
+        if self.mm_per_px_x is None and self.mm_per_px_y is None:
+            raise ValueError("PHYSICAL_SCALE_REQUIRES_AXIS")
+        if self.uncertainty_mm_per_px_x is not None and self.mm_per_px_x is None:
+            raise ValueError("SCALE_UNCERTAINTY_REQUIRES_X_SCALE")
+        if self.uncertainty_mm_per_px_y is not None and self.mm_per_px_y is None:
+            raise ValueError("SCALE_UNCERTAINTY_REQUIRES_Y_SCALE")
+        if self.source == "notebook_cell_preset" and self.reference_pitch_mm != 5.0:
+            raise ValueError("NOTEBOOK_CELL_PRESET_REQUIRES_5_MM")
+        return self
+
+
 class PhotoImportMetadata(StrictModel):
     original_filename: str = Field(min_length=1, max_length=512)
     imported_at_utc: str
@@ -275,6 +311,7 @@ class NotebookPhoto(StrictModel):
     transforms: tuple[ImageTransform, ...] = ()
     regions: tuple[PhotoRegion, ...] = ()
     ruling: RulingEstimate
+    calibration: PhysicalScaleCalibration | None = None
 
     @field_validator("source_id")
     @classmethod
@@ -341,4 +378,6 @@ class NotebookPhoto(StrictModel):
                 cursor = parents[cursor]
         if self.ruling.frame_id not in frames:
             raise ValueError("RULING_FRAME_NOT_FOUND")
+        if self.calibration is not None and self.calibration.frame_id not in frames:
+            raise ValueError("CALIBRATION_FRAME_NOT_FOUND")
         return self

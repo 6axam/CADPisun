@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from pathlib import Path
+from typing import Literal
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap, QResizeEvent, QTransform
@@ -43,9 +44,11 @@ from handwriting_plotter.learning import (
     PhotoRepository,
     PixelPoint,
     RulingEstimate,
+    calibration_from_ruling_pitch,
     manual_ruling_estimate,
     manual_ruling_geometry,
     persist_correction,
+    persist_physical_scale_calibration,
     persist_ruling_estimate,
 )
 from handwriting_plotter.version import __version__
@@ -369,6 +372,28 @@ class PhotoImportWorkspace(QWidget):
         geometry_tools.addWidget(self.geometry_summary_label, 1)
         layout.addLayout(geometry_tools)
 
+        calibration_tools = QHBoxLayout()
+        self.scale_reference_label = QLabel()
+        self.scale_reference_spin = QDoubleSpinBox()
+        self.scale_reference_spin.setRange(0.1, 100.0)
+        self.scale_reference_spin.setDecimals(2)
+        self.scale_reference_spin.setSingleStep(0.5)
+        self.scale_reference_spin.setSuffix(" mm")
+        self.scale_reference_spin.setValue(5.0)
+        self.apply_scale_button = QPushButton()
+        self.apply_5mm_preset_button = QPushButton()
+        self.scale_summary_label = QLabel()
+        self.scale_summary_label.setObjectName("photo-scale-summary")
+        self.scale_reference_spin.setEnabled(False)
+        self.apply_scale_button.setEnabled(False)
+        self.apply_5mm_preset_button.setEnabled(False)
+        calibration_tools.addWidget(self.scale_reference_label)
+        calibration_tools.addWidget(self.scale_reference_spin)
+        calibration_tools.addWidget(self.apply_scale_button)
+        calibration_tools.addWidget(self.apply_5mm_preset_button)
+        calibration_tools.addWidget(self.scale_summary_label, 1)
+        layout.addLayout(calibration_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -422,6 +447,8 @@ class PhotoImportWorkspace(QWidget):
         self.detect_geometry_button.clicked.connect(self.detect_ruling_geometry)
         self.apply_geometry_button.clicked.connect(self.apply_ruling_geometry)
         self.show_ruling_overlay_check.toggled.connect(self._refresh_ruling_overlay)
+        self.apply_scale_button.clicked.connect(self.apply_user_scale)
+        self.apply_5mm_preset_button.clicked.connect(self.apply_5mm_preset)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -491,6 +518,7 @@ class PhotoImportWorkspace(QWidget):
         self.apply_correction_button.setEnabled(False)
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
@@ -528,6 +556,7 @@ class PhotoImportWorkspace(QWidget):
         confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -553,6 +582,7 @@ class PhotoImportWorkspace(QWidget):
             return
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
@@ -577,6 +607,7 @@ class PhotoImportWorkspace(QWidget):
             return
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
@@ -616,9 +647,41 @@ class PhotoImportWorkspace(QWidget):
             return
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status("photo.geometry.override_complete")
+
+    def apply_user_scale(self) -> None:
+        self._apply_physical_scale("user_entered")
+
+    def apply_5mm_preset(self) -> None:
+        self.scale_reference_spin.setValue(5.0)
+        self._apply_physical_scale("notebook_cell_preset")
+
+    def _apply_physical_scale(
+        self, source: Literal["user_entered", "notebook_cell_preset"]
+    ) -> None:
+        if self.current_record is None:
+            return
+        try:
+            calibration = calibration_from_ruling_pitch(
+                self.current_record.photo.ruling,
+                pitch_mm=self.scale_reference_spin.value(),
+                source=source,
+            )
+            self.current_record = persist_physical_scale_calibration(
+                self.repository, self.current_record, calibration
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.scale.failed", error=str(exc))
+            return
+        self._refresh_calibration_controls()
+        self._refresh_diagnostics()
+        self._set_status(
+            "photo.scale.complete",
+            source=tr(self.language, f"photo.scale.source.{calibration.source}"),
+        )
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -794,6 +857,9 @@ class PhotoImportWorkspace(QWidget):
         self.detect_geometry_button.setEnabled(False)
         self.show_ruling_overlay_check.setEnabled(False)
         self.apply_geometry_button.setEnabled(False)
+        self.scale_reference_spin.setEnabled(False)
+        self.apply_scale_button.setEnabled(False)
+        self.apply_5mm_preset_button.setEnabled(False)
         for widget in (
             self.pitch_x_spin,
             self.pitch_y_spin,
@@ -872,6 +938,43 @@ class PhotoImportWorkspace(QWidget):
             residual=ruling.horizontal_residual_px or 0.0,
         )
 
+    def _refresh_calibration_controls(self) -> None:
+        if self.current_record is None:
+            self.scale_summary_label.clear()
+            return
+        photo = self.current_record.photo
+        available = self._has_ruling_geometry(photo.ruling)
+        self.scale_reference_spin.setEnabled(available)
+        self.apply_scale_button.setEnabled(available)
+        self.apply_5mm_preset_button.setEnabled(available)
+        calibration = photo.calibration
+        if calibration is None:
+            self.scale_summary_label.setText(tr(self.language, "photo.scale.unknown"))
+            return
+        if calibration.reference_pitch_mm is not None:
+            self.scale_reference_spin.setValue(calibration.reference_pitch_mm)
+        x_value = (
+            tr(self.language, "photo.scale.axis_unknown")
+            if calibration.mm_per_px_x is None
+            else tr(self.language, "photo.scale.axis_value").format(
+                value=calibration.mm_per_px_x
+            )
+        )
+        y_value = (
+            tr(self.language, "photo.scale.axis_unknown")
+            if calibration.mm_per_px_y is None
+            else tr(self.language, "photo.scale.axis_value").format(
+                value=calibration.mm_per_px_y
+            )
+        )
+        self.scale_summary_label.setText(
+            tr(self.language, "photo.scale.summary").format(
+                source=tr(self.language, f"photo.scale.source.{calibration.source}"),
+                x=x_value,
+                y=y_value,
+            )
+        )
+
     def _refresh_ruling_overlay(self) -> None:
         self.original_view.clear_ruling_overlay()
         self.corrected_view.clear_ruling_overlay()
@@ -920,6 +1023,7 @@ class PhotoImportWorkspace(QWidget):
                 + (f" · {photo.ruling.confidence.value:.0%}" if photo.ruling.confidence else ""),
             ),
             ("photo.diagnostics.geometry", self._geometry_summary(photo.ruling)),
+            ("photo.diagnostics.scale", self.scale_summary_label.text()),
             ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
@@ -947,6 +1051,9 @@ class PhotoImportWorkspace(QWidget):
         self.origin_y_label.setText(tr(language, "photo.geometry.origin_y"))
         self.ruling_angle_label.setText(tr(language, "photo.geometry.angle"))
         self.apply_geometry_button.setText(tr(language, "photo.geometry.apply"))
+        self.scale_reference_label.setText(tr(language, "photo.scale.reference"))
+        self.apply_scale_button.setText(tr(language, "photo.scale.apply"))
+        self.apply_5mm_preset_button.setText(tr(language, "photo.scale.preset"))
         for index in range(self.paper_classification_combo.count()):
             classification = self.paper_classification_combo.itemData(index)
             self.paper_classification_combo.setItemText(
@@ -964,5 +1071,6 @@ class PhotoImportWorkspace(QWidget):
         self._set_status(self._status_key, **self._status_values)
         self._refresh_ruling_controls()
         self._refresh_geometry_controls()
+        self._refresh_calibration_controls()
         self._refresh_ruling_overlay()
         self._refresh_diagnostics()
