@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Literal
+
+from handwriting_plotter.domain.models import canonical_json_bytes, strict_json_loads
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +38,42 @@ class HtrBenchmarkSummary:
     wer: float
     mean_elapsed_ms: float
     peak_rss_bytes: int | None
+
+
+def serialize_benchmark_summary(summary: HtrBenchmarkSummary) -> bytes:
+    """Return a canonical, checksummed report fragment safe for later comparison."""
+
+    payload = {
+        "format": "hp-htr-benchmark-summary",
+        "schema_version": "1.0",
+        "provider_id": summary.provider_id,
+        "model_revision": summary.model_revision,
+        "sample_count": summary.sample_count,
+        "cer": summary.cer,
+        "wer": summary.wer,
+        "mean_elapsed_ms": summary.mean_elapsed_ms,
+        "peak_rss_bytes": summary.peak_rss_bytes,
+    }
+    return canonical_json_bytes({"payload": payload, "sha256": sha256(canonical_json_bytes(payload)).hexdigest()})
+
+
+def load_benchmark_summary(data: bytes) -> HtrBenchmarkSummary:
+    """Verify and load a canonical report fragment without executing providers."""
+
+    decoded = strict_json_loads(data)
+    if not isinstance(decoded, dict) or not isinstance(decoded.get("payload"), dict):
+        raise ValueError("INVALID_HTR_BENCHMARK_REPORT")
+    payload = decoded["payload"]
+    if decoded.get("sha256") != sha256(canonical_json_bytes(payload)).hexdigest():
+        raise ValueError("HTR_BENCHMARK_REPORT_HASH_MISMATCH")
+    if payload.get("format") != "hp-htr-benchmark-summary" or payload.get("schema_version") != "1.0":
+        raise ValueError("UNSUPPORTED_HTR_BENCHMARK_REPORT")
+    return HtrBenchmarkSummary(
+        provider_id=str(payload["provider_id"]), model_revision=str(payload["model_revision"]),
+        sample_count=int(payload["sample_count"]), cer=float(payload["cer"]), wer=float(payload["wer"]),
+        mean_elapsed_ms=float(payload["mean_elapsed_ms"]),
+        peak_rss_bytes=None if payload["peak_rss_bytes"] is None else int(payload["peak_rss_bytes"]),
+    )
 
 
 def summarize_htr_benchmark(

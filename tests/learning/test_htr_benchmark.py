@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from handwriting_plotter.learning.htr_benchmark import HtrBenchmarkSample, HtrPrediction, summarize_htr_benchmark
+from handwriting_plotter.learning.htr_benchmark import (
+    HtrBenchmarkSample, HtrPrediction, load_benchmark_summary,
+    serialize_benchmark_summary, summarize_htr_benchmark,
+)
 
 
 def test_summary_uses_nfc_cer_wer_and_reports_resources() -> None:
@@ -18,3 +21,14 @@ def test_synthetic_samples_cannot_claim_an_htr_benchmark() -> None:
     predictions = (HtrPrediction("a", "crnn", "pin", "мама", 1.0, None),)
     with pytest.raises(ValueError, match="HTR_BENCHMARK_REQUIRES_REAL_SAMPLES"):
         summarize_htr_benchmark(samples, predictions)
+
+
+def test_summary_report_is_canonical_and_tamper_evident() -> None:
+    summary = summarize_htr_benchmark(
+        (HtrBenchmarkSample("a", "0" * 64, "мама", "real", "authorized"),),
+        (HtrPrediction("a", "crnn", "pin", "мама", 2.0, None),),
+    )
+    encoded = serialize_benchmark_summary(summary)
+    assert load_benchmark_summary(encoded) == summary
+    with pytest.raises(ValueError, match="HASH_MISMATCH"):
+        load_benchmark_summary(encoded.replace(b'"cer":0.0', b'"cer":0.1'))
