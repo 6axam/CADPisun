@@ -301,12 +301,20 @@ uncertainty по каждой оси и optional `reference_pitch_mm`. Хотя 
 ### 9.1 Desktop project v1
 
 Переносимый GUI-документ имеет `format=hp-desktop-project` и
-`schema_version=1.5`. Корень содержит `project_id`, пользовательское `name`,
-`page`, ordered `objects[]`, `display` и необязательный `generation_cache`.
-Версии 1.0–1.4 читаются и мигрируют в памяти в 1.5; неизвестная версия или
-лишнее поле — ошибка.
+`schema_version=1.6`. Корень содержит `project_id`, пользовательское `name`,
+`page`, nullable `notebook_template`, ordered `objects[]`, `display` и необязательный
+`generation_cache`. Версии 1.0–1.5 читаются и мигрируют в памяти в 1.6; неизвестная
+версия или лишнее поле — ошибка.
 
 `page`: width/height mm, четыре margin mm, paragraph_gap_mm и pen_width_mm.
+`notebook_template` — nullable визуальная бумага A4: `kind` (`blank|squared|ruled`),
+`orientation` (`portrait|landscape`), четыре поля, `pitch_x_mm/pitch_y_mm`,
+`offset_x_mm/offset_y_mm`, цвета и толщины обычной/major-линии и `major_every`.
+Все числа измеряются в mm; portrait = 210×297, landscape = 297×210. При применении
+шаблона его поля и ориентация синхронизируют `page`, а линии обрезаются printable
+rectangle. Фон экспортируется отдельным SVG с physical width/height в mm; он не
+является `GridObject`, не имеет PenPlan/MotionPlan-семантики и не входит в
+production/diagnostic SVG либо virtual G-code.
 `TextObject`: object_id, name, Unicode text, visible, абсолютная точка начала
 x_mm/y_mm, x_height_mm, line_pitch_mm, character_spacing_mm, rotation_deg,
 pinned style_id/style_revision, seed и realism, а также рабочее поле

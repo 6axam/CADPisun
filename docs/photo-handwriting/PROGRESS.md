@@ -8,10 +8,46 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 9 / 25 tasks |
-| Last completed | TASK 08 — Regions and handwriting lines |
-| Next | TASK 09 — HTR model benchmark (BLOCKED: real corpus and weights required) |
+| Completed | 10 / 25 tasks |
+| Last completed | TASK 18 — Notebook page templates |
+| Next | No dependency-ready task: TASK 09 is blocked; TASK 10–17 and TASK 19–24 depend on it or TASK 17 |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
+
+
+## TASK 18 — Notebook page templates
+
+Status: `[x]` DONE
+
+Completion commit: `5646044a3dc88ad6966f09ae87a3ff6a6bc6b2e9`
+
+### Implemented behavior
+
+- Added portable `hp-desktop-project/1.6` `notebook_template` data with strict
+  A4 portrait/landscape geometry, blank/squared/ruled modes, four margins,
+  independent pitch and phase offsets in mm, normal/major colors and thicknesses.
+  Projects from schema 1.0–1.5 migrate in memory with no template selected.
+- Applying a template is undoable, persists with the project and synchronizes
+  page orientation and margins. The canvas previews its paper lines in physical
+  mm beneath artwork and handwriting, including a landscape A4 scene.
+- **File → Notebook Page Template…** edits the settings. **File → Export →
+  Notebook Background SVG…** writes a standalone physical A4 background. It is
+  deliberately separate from Production/Diagnostic SVG, PenPlan and virtual
+  G-code; changing only ink/paper styling does not add plotter operations.
+
+### Verification
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/gui/test_notebook_templates.py \
+  tests/gui/test_document.py \
+  tests/gui/test_generation.py
+```
+
+Focused result: `49 passed in 8.55s`. These tests cover 5 mm/offset geometry,
+portrait and landscape A4 SVG dimensions, ruled/blank modes, strict margins,
+persistence/migration, undo, canvas preview, UI background export and exclusion
+from production SVG/diagnostic SVG/G-code. Full-suite result is recorded at the
+final checkpoint. Windows was not executed locally.
 
 ## TASK 00 — Repository and research audit
 
