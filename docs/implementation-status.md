@@ -1,5 +1,17 @@
 # Состояние реализации
 
+## PHOTO-11 — local transcription review, 2026-10-24
+
+- Handwriting Studio adds a compact per-line review editor: immutable crop and
+  original HTR prediction beside NFC-normalized human text, status and explicit
+  provenance/confidence availability. A line without HTR output is editable as
+  an intentional manual transcription, never a fabricated prediction.
+- Local content-addressed, append-only review and reading-order revisions carry
+  manifest/line/crop/run bindings, timestamps and parent hashes. Reopen,
+  revision conflicts, changed segmentation and later HTR runs cannot silently
+  overwrite a saved correction. Review text remains outside the HTR worker and
+  benchmark corpus.
+
 ## PHOTO-10 — optional local HTR integration, 2026-10-24
 
 - Handwriting Studio now sends only immutable PNG line crops and technical IDs to

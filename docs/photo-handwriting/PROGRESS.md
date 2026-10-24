@@ -8,11 +8,63 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 12 / 25 tasks |
-| Last completed | TASK 10 — HTR integration |
-| Next | TASK 11 — Transcription review UI; intentionally not started at the TASK 10 checkpoint |
+| Completed | 13 / 25 tasks |
+| Last completed | TASK 11 — Transcription review UI |
+| Next | TASK 12 — Grapheme and word alignment; intentionally not started at the TASK 11 checkpoint |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 11 — Transcription review UI
+
+Status: `[x]` DONE — local human transcription review; it neither trains nor
+invokes an HTR model, and it does not begin character segmentation or stroke
+reconstruction.
+
+Completion commit: `a93133dbff79df3095996b493ef01cfac7d3a0b2`
+
+### Implemented workflow
+
+- The Photo workspace shows an adjustable, laptop-safe split review panel for
+  each current line crop: the immutable PNG crop, immutable original HTR
+  prediction, model/run/crop provenance, explicit confidence availability, an
+  editable text field and `unreviewed` / `edited` / `accepted` / `unresolved`
+  status. The panel has an ignored size policy and zero minimum so it cannot
+  recreate the hidden-page `QStackedWidget` minimum-size failure fixed in the
+  TASK 10 checkpoint.
+- Empty or failed HTR results remain explicitly absent. A reviewer can enter
+  text manually; the UI never invents a replacement prediction. Ukrainian
+  letters, apostrophes, punctuation, whitespace and line breaks remain ordinary
+  Unicode text and are normalized to NFC on persistence.
+- Reviews are local content-addressed `hp-transcription-review/1.0` append-only
+  records. Every revision binds source manifest SHA-256, line ID, crop SHA-256,
+  original HTR prediction, optional HTR-run SHA-256, parent revision and UTC
+  time. HTR run records are never modified. A later HTR run therefore cannot
+  overwrite an existing human correction.
+- Reading-order changes are independent immutable
+  `hp-transcription-reading-order/1.0` revisions. They reorder only references
+  to the current line crops; source pixels, regions and HTR output are not
+  altered. Optimistic parent-hash checks reject stale review and order writers.
+- Reopen restores corrections and status only when manifest, line ID and crop
+  hash still match. New segmentation cannot silently receive a correction for a
+  previous crop. The editor refuses navigation with unsaved text and refuses a
+  save if its manifest has changed.
+- Review records are deliberately separate from benchmark ground truth and the
+  HTR worker protocol. Personal photos, crop pixels, predictions and weights
+  remain in local user data and are not tracked by Git.
+
+Focused Linux checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_transcription_review.py \
+  tests/gui/test_photo_import_gui.py \
+  tests/learning/test_htr_integration.py \
+  tests/gui/test_shell.py
+```
+
+Result: `35 passed`. The test set covers NFC, immutable/original prediction,
+manual unknown text, reopen, HTR-rerun protection, reading-order persistence,
+revision conflicts, unsaved-edit navigation, protocol privacy and GUI sizing.
 
 ## TASK 10 — HTR integration
 
