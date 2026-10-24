@@ -323,3 +323,183 @@ class OpenCvRulingClassifier:
             count += 1
             index = end
         return count, (sum(strengths) / len(strengths) if strengths else 0.0)
+
+
+class OpenCvRulingGeometryEstimator:
+    """Recover periodic line geometry from long Hough segments in one pixel frame."""
+
+    MIN_LINES = 4
+    MIN_PITCH_PX = 8.0
+
+    def estimate(
+        self,
+        content: bytes,
+        *,
+        frame_id: str,
+        classification: str,
+    ) -> RulingEstimate:
+        if classification not in {"squared", "ruled"}:
+            raise ValueError("RULING_GEOMETRY_NOT_APPLICABLE")
+        cv2, np = _cv_modules()
+        image = OpenCvPageCorrector._decode(content)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 30, 100)
+        height, width = gray.shape
+        lines = cv2.HoughLinesP(
+            edges,
+            rho=1,
+            theta=np.pi / 360.0,
+            threshold=max(35, min(width, height) // 10),
+            minLineLength=max(36, int(min(width, height) * 0.22)),
+            maxLineGap=max(8, min(width, height) // 45),
+        )
+        horizontal: list[tuple[float, float, float]] = []
+        vertical: list[tuple[float, float, float]] = []
+        if lines is not None:
+            for x1, y1, x2, y2 in lines.reshape(-1, 4):
+                dx, dy = float(x2 - x1), float(y2 - y1)
+                length = math.hypot(dx, dy)
+                if length <= 0.0:
+                    continue
+                angle = math.degrees(math.atan2(dy, dx))
+                horizontal_angle = ((angle + 90.0) % 180.0) - 90.0
+                midpoint_x, midpoint_y = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                if abs(horizontal_angle) <= 25.0 and length >= width * 0.25:
+                    horizontal.append((horizontal_angle, midpoint_x, midpoint_y))
+                vertical_angle = angle % 180.0
+                if 65.0 <= vertical_angle <= 115.0 and length >= height * 0.25:
+                    vertical.append((vertical_angle, midpoint_x, midpoint_y))
+        horizontal_geometry = self._axis_geometry(horizontal, axis="horizontal")
+        if horizontal_geometry is None:
+            raise ValueError("HORIZONTAL_RULING_NOT_FOUND")
+        vertical_geometry = self._axis_geometry(vertical, axis="vertical")
+        if classification == "squared" and vertical_geometry is None:
+            raise ValueError("VERTICAL_GRID_NOT_FOUND")
+
+        h_angle, h_pitch, h_origin, h_residual, h_count = horizontal_geometry
+        if classification == "ruled":
+            confidence = self._confidence(h_count, h_residual, h_pitch)
+            return RulingEstimate(
+                frame_id=frame_id,
+                classification="ruled",
+                status="proposed",
+                method="opencv-ruling-geometry/1",
+                confidence=ConfidenceValue(
+                    value=confidence,
+                    origin="heuristic",
+                    meaning=(
+                        "periodic horizontal Hough-line fit; "
+                        f"lines={h_count}, residual_px={h_residual:.3f}"
+                    ),
+                ),
+                ruling_pitch_px=h_pitch,
+                origin_y_px=h_origin,
+                horizontal_angle_deg=h_angle,
+                horizontal_residual_px=h_residual,
+            )
+        assert vertical_geometry is not None
+        v_angle, v_pitch, v_origin, v_residual, v_count = vertical_geometry
+        confidence = self._confidence(min(h_count, v_count), max(h_residual, v_residual), min(h_pitch, v_pitch))
+        return RulingEstimate(
+            frame_id=frame_id,
+            classification="squared",
+            status="proposed",
+            method="opencv-ruling-geometry/1",
+            confidence=ConfidenceValue(
+                value=confidence,
+                origin="heuristic",
+                meaning=(
+                    "periodic horizontal and vertical Hough-line fit; "
+                    f"horizontal_lines={h_count}, vertical_lines={v_count}, "
+                    f"residual_px={max(h_residual, v_residual):.3f}"
+                ),
+            ),
+            cell_pitch_x_px=v_pitch,
+            cell_pitch_y_px=h_pitch,
+            origin_x_px=v_origin,
+            origin_y_px=h_origin,
+            horizontal_angle_deg=h_angle,
+            vertical_angle_deg=v_angle,
+            horizontal_residual_px=h_residual,
+            vertical_residual_px=v_residual,
+        )
+
+    @classmethod
+    def _axis_geometry(
+        cls,
+        segments: list[tuple[float, float, float]],
+        *,
+        axis: str,
+    ) -> tuple[float, float, float, float, int] | None:
+        _, np = _cv_modules()
+        if len(segments) < cls.MIN_LINES:
+            return None
+        angles = np.asarray([item[0] for item in segments], dtype=np.float64)
+        angle = float(np.median(angles))
+        radians = math.radians(angle)
+        normal = (-math.sin(radians), math.cos(radians)) if axis == "horizontal" else (math.sin(radians), -math.cos(radians))
+        coordinates = sorted(
+            normal[0] * x + normal[1] * y for _, x, y in segments
+        )
+        merged: list[list[float]] = []
+        for coordinate in coordinates:
+            if not merged or coordinate - merged[-1][-1] > 3.0:
+                merged.append([coordinate])
+            else:
+                merged[-1].append(coordinate)
+        centers = [float(np.median(group)) for group in merged]
+        if len(centers) < cls.MIN_LINES:
+            return None
+        periodic = cls._periodic_fit(centers)
+        if periodic is None:
+            return None
+        pitch, origin, residual, count = periodic
+        return angle, pitch, origin, residual, count
+
+    @classmethod
+    def _periodic_fit(
+        cls, coordinates: list[float]
+    ) -> tuple[float, float, float, int] | None:
+        _, np = _cv_modules()
+        adjacent = [right - left for left, right in zip(coordinates, coordinates[1:])]
+        nominal_gap = float(np.median(adjacent))
+        candidates: set[float] = set()
+        for start, left in enumerate(coordinates):
+            for right in coordinates[start + 1 :]:
+                distance = right - left
+                for divisor in range(1, min(12, int(distance // cls.MIN_PITCH_PX)) + 1):
+                    pitch = distance / divisor
+                    if pitch >= cls.MIN_PITCH_PX:
+                        candidates.add(round(pitch, 3))
+        best: tuple[float, float, float, int] | None = None
+        for pitch in sorted(candidates):
+            # A harmonic of a true periodic gap fits every line too.  The robust
+            # median adjacent gap keeps a 10 px harmonic from replacing 40 px
+            # notebook rules while allowing modest occlusion/outliers.
+            if pitch < nominal_gap * 0.55 or pitch > nominal_gap * 1.6:
+                continue
+            for coordinate in coordinates:
+                origin = coordinate % pitch
+                errors = np.asarray(
+                    [abs(value - (origin + round((value - origin) / pitch) * pitch)) for value in coordinates],
+                    dtype=np.float64,
+                )
+                inliers = errors <= max(2.5, pitch * 0.12)
+                count = int(np.count_nonzero(inliers))
+                if count < cls.MIN_LINES:
+                    continue
+                residual = float(np.sqrt(np.mean(np.square(errors[inliers]))))
+                candidate = (pitch, origin, residual, count)
+                if best is None or (count, -residual / pitch, pitch) > (
+                    best[3],
+                    -best[2] / best[0],
+                    best[0],
+                ):
+                    best = candidate
+        return best
+
+    @staticmethod
+    def _confidence(count: int, residual: float, pitch: float) -> float:
+        support = min(1.0, count / 10.0)
+        precision = max(0.0, 1.0 - residual / max(1.0, pitch * 0.15))
+        return min(0.95, 0.45 + 0.3 * support + 0.2 * precision)

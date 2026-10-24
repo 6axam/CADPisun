@@ -34,6 +34,8 @@ from .correction import (
 from .ruling import (
     PaperClassification,
     RulingClassifier,
+    RulingGeometryEstimator,
+    manual_ruling_geometry,
     manual_ruling_estimate,
     persist_ruling_estimate,
 )
@@ -60,9 +62,11 @@ __all__ = [
     "PixelPoint",
     "RulingEstimate",
     "RulingClassifier",
+    "RulingGeometryEstimator",
     "load_photo_bytes",
     "map_point",
     "manual_ruling_estimate",
+    "manual_ruling_geometry",
     "order_page_corners",
     "persist_correction",
     "persist_ruling_estimate",

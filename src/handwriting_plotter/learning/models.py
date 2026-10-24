@@ -180,20 +180,50 @@ class RulingEstimate(StrictModel):
     ruling_pitch_px: float | None = Field(default=None, gt=0.0)
     origin_x_px: float | None = None
     origin_y_px: float | None = None
+    horizontal_angle_deg: float | None = Field(default=None, ge=-45.0, le=45.0)
+    vertical_angle_deg: float | None = Field(default=None, ge=45.0, le=135.0)
+    horizontal_residual_px: float | None = Field(default=None, ge=0.0)
+    vertical_residual_px: float | None = Field(default=None, ge=0.0)
 
-    @field_validator("cell_pitch_x_px", "cell_pitch_y_px", "ruling_pitch_px", "origin_x_px", "origin_y_px")
+    @field_validator(
+        "cell_pitch_x_px",
+        "cell_pitch_y_px",
+        "ruling_pitch_px",
+        "origin_x_px",
+        "origin_y_px",
+        "horizontal_angle_deg",
+        "vertical_angle_deg",
+        "horizontal_residual_px",
+        "vertical_residual_px",
+    )
     @classmethod
     def finite_optional(cls, value: float | None) -> float | None:
         return None if value is None else _finite(value, "ruling geometry")
 
     @model_validator(mode="after")
     def unevaluated_is_unknown(self) -> RulingEstimate:
-        geometry = (self.cell_pitch_x_px, self.cell_pitch_y_px, self.ruling_pitch_px,
-                    self.origin_x_px, self.origin_y_px)
+        geometry = (
+            self.cell_pitch_x_px,
+            self.cell_pitch_y_px,
+            self.ruling_pitch_px,
+            self.origin_x_px,
+            self.origin_y_px,
+            self.horizontal_angle_deg,
+            self.vertical_angle_deg,
+            self.horizontal_residual_px,
+            self.vertical_residual_px,
+        )
         if self.status == "not_evaluated" and (
             self.classification != "unknown" or self.confidence is not None or any(item is not None for item in geometry)
         ):
             raise ValueError("UNEVALUATED_RULING_MUST_BE_EMPTY")
+        if any(item is not None for item in geometry) and self.classification not in {"squared", "ruled"}:
+            raise ValueError("RULING_GEOMETRY_REQUIRES_RULED_OR_SQUARED_PAPER")
+        if self.classification == "ruled" and any(
+            item is not None
+            for item in (self.cell_pitch_x_px, self.cell_pitch_y_px, self.origin_x_px, self.vertical_angle_deg, self.vertical_residual_px)
+        ):
+            raise ValueError("RULED_PAPER_CANNOT_DECLARE_GRID_GEOMETRY")
         return self
 
 

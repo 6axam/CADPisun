@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsEllipseItem,
+    QGraphicsLineItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
 from handwriting_plotter.adapters.images.qt import QtImageDecoder
 from handwriting_plotter.adapters.images.opencv import (
     OpenCvPageCorrector,
+    OpenCvRulingGeometryEstimator,
     OpenCvRulingClassifier,
     opencv_available,
 )
@@ -39,7 +42,9 @@ from handwriting_plotter.learning import (
     PhotoRecord,
     PhotoRepository,
     PixelPoint,
+    RulingEstimate,
     manual_ruling_estimate,
+    manual_ruling_geometry,
     persist_correction,
     persist_ruling_estimate,
 )
@@ -63,6 +68,7 @@ class PhotoPreviewView(QGraphicsView):
         self._item = QGraphicsPixmapItem()
         self._scene.addItem(self._item)
         self._corner_handles: list[QGraphicsEllipseItem] = []
+        self._ruling_overlay: list[QGraphicsLineItem] = []
         self.setScene(self._scene)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -89,6 +95,55 @@ class PhotoPreviewView(QGraphicsView):
         for handle in self._corner_handles:
             self._scene.removeItem(handle)
         self._corner_handles.clear()
+
+    def clear_ruling_overlay(self) -> None:
+        for line in self._ruling_overlay:
+            self._scene.removeItem(line)
+        self._ruling_overlay.clear()
+
+    def set_ruling_overlay(self, estimate: RulingEstimate) -> None:
+        self.clear_ruling_overlay()
+        bounds = self._item.boundingRect()
+        if bounds.isEmpty():
+            return
+        diagonal = math.hypot(bounds.width(), bounds.height())
+        pen = QPen(QColor("#e91e63"), 1.6)
+        pen.setCosmetic(True)
+
+        def add_family(pitch: float | None, origin: float | None, angle_deg: float | None, *, vertical: bool) -> None:
+            if pitch is None or origin is None or angle_deg is None:
+                return
+            radians = math.radians(angle_deg)
+            normal = (math.sin(radians), -math.cos(radians)) if vertical else (-math.sin(radians), math.cos(radians))
+            direction = (math.cos(radians), math.sin(radians))
+            start = math.floor((-diagonal - origin) / pitch)
+            end = math.ceil((diagonal - origin) / pitch)
+            for index in range(max(start, -128), min(end, 128) + 1):
+                coordinate = origin + index * pitch
+                point_x, point_y = normal[0] * coordinate, normal[1] * coordinate
+                line = QGraphicsLineItem(
+                    point_x - direction[0] * diagonal,
+                    point_y - direction[1] * diagonal,
+                    point_x + direction[0] * diagonal,
+                    point_y + direction[1] * diagonal,
+                )
+                line.setPen(pen)
+                line.setZValue(5)
+                self._scene.addItem(line)
+                self._ruling_overlay.append(line)
+
+        add_family(
+            estimate.ruling_pitch_px or estimate.cell_pitch_y_px,
+            estimate.origin_y_px,
+            estimate.horizontal_angle_deg,
+            vertical=False,
+        )
+        add_family(
+            estimate.cell_pitch_x_px,
+            estimate.origin_x_px,
+            estimate.vertical_angle_deg,
+            vertical=True,
+        )
 
     def set_corners(self, corners: PageCorners) -> None:
         self.clear_corners()
@@ -169,6 +224,7 @@ class PhotoImportWorkspace(QWidget):
         self._status_key = "photo.status.empty"
         self._status_values: dict[str, object] = {}
         self._build_ui()
+        self._set_controls_enabled(False)
         self._connect()
         self.set_language(language)
         self._restore_latest()
@@ -265,6 +321,54 @@ class PhotoImportWorkspace(QWidget):
         ruling_tools.addWidget(self.paper_summary_label, 1)
         layout.addLayout(ruling_tools)
 
+        geometry_tools = QHBoxLayout()
+        self.detect_geometry_button = QPushButton()
+        self.show_ruling_overlay_check = QCheckBox()
+        self.pitch_x_label = QLabel()
+        self.pitch_x_spin = QDoubleSpinBox()
+        self.pitch_y_label = QLabel()
+        self.pitch_y_spin = QDoubleSpinBox()
+        self.origin_x_label = QLabel()
+        self.origin_x_spin = QDoubleSpinBox()
+        self.origin_y_label = QLabel()
+        self.origin_y_spin = QDoubleSpinBox()
+        self.ruling_angle_label = QLabel()
+        self.ruling_angle_spin = QDoubleSpinBox()
+        self.apply_geometry_button = QPushButton()
+        self.geometry_summary_label = QLabel()
+        self.geometry_summary_label.setObjectName("photo-geometry-summary")
+        for spin in (self.pitch_x_spin, self.pitch_y_spin, self.origin_x_spin, self.origin_y_spin):
+            spin.setRange(-20_000.0, 20_000.0)
+            spin.setDecimals(2)
+            spin.setSingleStep(1.0)
+            spin.setSuffix(" px")
+        self.pitch_x_spin.setMinimum(0.01)
+        self.pitch_y_spin.setMinimum(0.01)
+        self.ruling_angle_spin.setRange(-45.0, 45.0)
+        self.ruling_angle_spin.setDecimals(2)
+        self.ruling_angle_spin.setSuffix("°")
+        self.detect_geometry_button.setEnabled(False)
+        self.show_ruling_overlay_check.setEnabled(False)
+        self.apply_geometry_button.setEnabled(False)
+        for widget in (
+            self.detect_geometry_button,
+            self.show_ruling_overlay_check,
+            self.pitch_x_label,
+            self.pitch_x_spin,
+            self.pitch_y_label,
+            self.pitch_y_spin,
+            self.origin_x_label,
+            self.origin_x_spin,
+            self.origin_y_label,
+            self.origin_y_spin,
+            self.ruling_angle_label,
+            self.ruling_angle_spin,
+            self.apply_geometry_button,
+        ):
+            geometry_tools.addWidget(widget)
+        geometry_tools.addWidget(self.geometry_summary_label, 1)
+        layout.addLayout(geometry_tools)
+
         comparison = QGridLayout()
         comparison.setContentsMargins(0, 0, 0, 0)
         comparison.setSpacing(10)
@@ -315,6 +419,9 @@ class PhotoImportWorkspace(QWidget):
         self.apply_correction_button.clicked.connect(self.apply_correction)
         self.analyze_paper_button.clicked.connect(self.analyze_paper)
         self.override_ruling_button.clicked.connect(self.apply_ruling_override)
+        self.detect_geometry_button.clicked.connect(self.detect_ruling_geometry)
+        self.apply_geometry_button.clicked.connect(self.apply_ruling_geometry)
+        self.show_ruling_overlay_check.toggled.connect(self._refresh_ruling_overlay)
         self.deskew_check.toggled.connect(self.deskew_spin.setEnabled)
 
     def choose_photo(self) -> None:
@@ -357,6 +464,7 @@ class PhotoImportWorkspace(QWidget):
                     item.photo.metadata.imported_at_utc,
                     len(item.photo.transforms),
                     {"not_evaluated": 0, "proposed": 1, "confirmed": 2, "overridden": 3}[item.photo.ruling.status],
+                    item.path.stat().st_mtime_ns,
                 ),
             )
             self._show_record(record, self._read_preview(record))
@@ -382,6 +490,8 @@ class PhotoImportWorkspace(QWidget):
         self._set_controls_enabled(True)
         self.apply_correction_button.setEnabled(False)
         self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
         self._refresh_diagnostics()
 
     def rotate_preview(self, degrees: int) -> None:
@@ -417,6 +527,8 @@ class PhotoImportWorkspace(QWidget):
             return
         confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
         self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
             "photo.ruling.analysis_complete",
@@ -440,11 +552,73 @@ class PhotoImportWorkspace(QWidget):
             self._set_status("photo.ruling.failed", error=str(exc))
             return
         self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
         self._refresh_diagnostics()
         self._set_status(
             "photo.ruling.override_complete",
             classification=self._classification_label(estimate.classification),
         )
+
+    def detect_ruling_geometry(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            classification = self.current_record.photo.ruling.classification
+            content, frame_id = self._ruling_input()
+            estimate = OpenCvRulingGeometryEstimator().estimate(
+                content, frame_id=frame_id, classification=classification
+            )
+            self.current_record = persist_ruling_estimate(
+                self.repository, self.current_record, estimate
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.geometry.failed", error=str(exc))
+            return
+        self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
+        self._refresh_diagnostics()
+        confidence = f"{estimate.confidence.value:.0%}" if estimate.confidence else "—"
+        self._set_status("photo.geometry.complete", confidence=confidence)
+
+    def apply_ruling_geometry(self) -> None:
+        if self.current_record is None:
+            return
+        try:
+            classification = self.current_record.photo.ruling.classification
+            _, frame_id = self._ruling_input()
+            if classification == "squared":
+                estimate = manual_ruling_geometry(
+                    "squared",
+                    frame_id=frame_id,
+                    origin_x_px=self.origin_x_spin.value(),
+                    origin_y_px=self.origin_y_spin.value(),
+                    cell_pitch_x_px=self.pitch_x_spin.value(),
+                    cell_pitch_y_px=self.pitch_y_spin.value(),
+                    horizontal_angle_deg=self.ruling_angle_spin.value(),
+                )
+            elif classification == "ruled":
+                estimate = manual_ruling_geometry(
+                    "ruled",
+                    frame_id=frame_id,
+                    origin_y_px=self.origin_y_spin.value(),
+                    ruling_pitch_px=self.pitch_y_spin.value(),
+                    horizontal_angle_deg=self.ruling_angle_spin.value(),
+                )
+            else:
+                raise ValueError("RULING_GEOMETRY_NOT_APPLICABLE")
+            self.current_record = persist_ruling_estimate(
+                self.repository, self.current_record, estimate
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._set_status("photo.geometry.failed", error=str(exc))
+            return
+        self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
+        self._refresh_diagnostics()
+        self._set_status("photo.geometry.override_complete")
 
     def reset_view(self) -> None:
         if self.current_record is None:
@@ -459,6 +633,7 @@ class PhotoImportWorkspace(QWidget):
         base = self._corrected_pixmap if not self._corrected_pixmap.isNull() else self._source_pixmap
         display = base.transformed(transform, Qt.TransformationMode.SmoothTransformation)
         self.corrected_view.set_pixmap(display)
+        self._refresh_ruling_overlay()
 
     def detect_page(self) -> None:
         if self.current_record is None:
@@ -547,6 +722,8 @@ class PhotoImportWorkspace(QWidget):
             "photo.correction.complete", width=raster.width_px, height=raster.height_px
         )
         self._refresh_diagnostics()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
 
     def _restore_correction_preview(self, record: PhotoRecord) -> None:
         if not record.photo.transforms:
@@ -614,6 +791,17 @@ class PhotoImportWorkspace(QWidget):
         self.analyze_paper_button.setEnabled(cv_enabled)
         self.paper_classification_combo.setEnabled(enabled)
         self.override_ruling_button.setEnabled(enabled)
+        self.detect_geometry_button.setEnabled(False)
+        self.show_ruling_overlay_check.setEnabled(False)
+        self.apply_geometry_button.setEnabled(False)
+        for widget in (
+            self.pitch_x_spin,
+            self.pitch_y_spin,
+            self.origin_x_spin,
+            self.origin_y_spin,
+            self.ruling_angle_spin,
+        ):
+            widget.setEnabled(False)
 
     def _classification_label(self, classification: str) -> str:
         return tr(self.language, f"photo.ruling.classification.{classification}")
@@ -636,6 +824,70 @@ class PhotoImportWorkspace(QWidget):
                 confidence=confidence,
             )
         )
+
+    @staticmethod
+    def _has_ruling_geometry(ruling: RulingEstimate) -> bool:
+        return ruling.ruling_pitch_px is not None or (
+            ruling.cell_pitch_x_px is not None and ruling.cell_pitch_y_px is not None
+        )
+
+    def _refresh_geometry_controls(self) -> None:
+        if self.current_record is None:
+            self.geometry_summary_label.clear()
+            return
+        ruling = self.current_record.photo.ruling
+        applicable = ruling.classification in {"squared", "ruled"}
+        detected = self._has_ruling_geometry(ruling)
+        cv_enabled = opencv_available() and applicable
+        self.detect_geometry_button.setEnabled(cv_enabled)
+        self.show_ruling_overlay_check.setEnabled(detected)
+        self.apply_geometry_button.setEnabled(applicable)
+        for widget in (self.pitch_y_spin, self.origin_y_spin, self.ruling_angle_spin):
+            widget.setEnabled(applicable)
+        squared = ruling.classification == "squared"
+        self.pitch_x_spin.setEnabled(squared)
+        self.origin_x_spin.setEnabled(squared)
+        if detected:
+            self.pitch_x_spin.setValue(ruling.cell_pitch_x_px or 0.01)
+            self.pitch_y_spin.setValue(ruling.cell_pitch_y_px or ruling.ruling_pitch_px or 0.01)
+            self.origin_x_spin.setValue(ruling.origin_x_px or 0.0)
+            self.origin_y_spin.setValue(ruling.origin_y_px or 0.0)
+            self.ruling_angle_spin.setValue(ruling.horizontal_angle_deg or 0.0)
+        self.pitch_y_label.setText(
+            tr(self.language, "photo.geometry.pitch_y" if squared else "photo.geometry.ruling_pitch")
+        )
+        self.geometry_summary_label.setText(self._geometry_summary(ruling))
+
+    def _geometry_summary(self, ruling: RulingEstimate) -> str:
+        if not self._has_ruling_geometry(ruling):
+            return tr(self.language, "photo.geometry.empty")
+        if ruling.classification == "squared":
+            return tr(self.language, "photo.geometry.grid_summary").format(
+                x=ruling.cell_pitch_x_px,
+                y=ruling.cell_pitch_y_px,
+                residual=max(ruling.horizontal_residual_px or 0.0, ruling.vertical_residual_px or 0.0),
+            )
+        return tr(self.language, "photo.geometry.ruled_summary").format(
+            pitch=ruling.ruling_pitch_px,
+            residual=ruling.horizontal_residual_px or 0.0,
+        )
+
+    def _refresh_ruling_overlay(self) -> None:
+        self.original_view.clear_ruling_overlay()
+        self.corrected_view.clear_ruling_overlay()
+        if (
+            not self.show_ruling_overlay_check.isChecked()
+            or self.current_record is None
+            or self._display_rotation != 0
+        ):
+            return
+        ruling = self.current_record.photo.ruling
+        if not self._has_ruling_geometry(ruling):
+            return
+        if self.current_record.photo.transforms and ruling.frame_id == self.current_record.photo.transforms[-1].output_frame_id:
+            self.corrected_view.set_ruling_overlay(ruling)
+        elif ruling.frame_id == self.current_record.photo.frames[0].frame_id:
+            self.original_view.set_ruling_overlay(ruling)
 
     def _set_status(self, key: str, **values: object) -> None:
         self._status_key = key
@@ -667,6 +919,7 @@ class PhotoImportWorkspace(QWidget):
                 f"{tr(self.language, f'photo.ruling.status.{photo.ruling.status}')}"
                 + (f" · {photo.ruling.confidence.value:.0%}" if photo.ruling.confidence else ""),
             ),
+            ("photo.diagnostics.geometry", self._geometry_summary(photo.ruling)),
             ("photo.diagnostics.correction", correction_status),
         )
         self.diagnostics.setPlainText(
@@ -687,6 +940,13 @@ class PhotoImportWorkspace(QWidget):
         self.analyze_paper_button.setText(tr(language, "photo.ruling.analyze"))
         self.paper_classification_label.setText(tr(language, "photo.ruling.label"))
         self.override_ruling_button.setText(tr(language, "photo.ruling.override"))
+        self.detect_geometry_button.setText(tr(language, "photo.geometry.detect"))
+        self.show_ruling_overlay_check.setText(tr(language, "photo.geometry.overlay"))
+        self.pitch_x_label.setText(tr(language, "photo.geometry.pitch_x"))
+        self.origin_x_label.setText(tr(language, "photo.geometry.origin_x"))
+        self.origin_y_label.setText(tr(language, "photo.geometry.origin_y"))
+        self.ruling_angle_label.setText(tr(language, "photo.geometry.angle"))
+        self.apply_geometry_button.setText(tr(language, "photo.geometry.apply"))
         for index in range(self.paper_classification_combo.count()):
             classification = self.paper_classification_combo.itemData(index)
             self.paper_classification_combo.setItemText(
@@ -703,4 +963,6 @@ class PhotoImportWorkspace(QWidget):
         self.diagnostics_group.setTitle(tr(language, "photo.diagnostics"))
         self._set_status(self._status_key, **self._status_values)
         self._refresh_ruling_controls()
+        self._refresh_geometry_controls()
+        self._refresh_ruling_overlay()
         self._refresh_diagnostics()

@@ -240,6 +240,22 @@ def test_paper_analysis_and_manual_override_are_persisted(qtbot, tmp_path: Path)
     assert "Paper proposal: Ruled" in workspace.status_label.text()
     assert "Ruled · proposed" in workspace.diagnostics.toPlainText()
 
+    workspace.detect_geometry_button.click()
+
+    assert workspace.current_record.photo.ruling.ruling_pitch_px == pytest.approx(30.0, abs=1.0)
+    assert "Ruling geometry proposal saved" in workspace.status_label.text()
+    workspace.show_ruling_overlay_check.setChecked(True)
+    assert len(workspace.original_view._ruling_overlay) >= 10
+    workspace.pitch_y_spin.setValue(31.5)
+    workspace.apply_geometry_button.click()
+    assert workspace.current_record.photo.ruling.status == "overridden"
+    assert workspace.current_record.photo.ruling.ruling_pitch_px == 31.5
+    assert "manual override" in workspace.diagnostics.toPlainText()
+    geometry_reopened = PhotoImportWorkspace(root)
+    qtbot.addWidget(geometry_reopened)
+    assert geometry_reopened.current_record is not None
+    assert geometry_reopened.current_record.photo.ruling.ruling_pitch_px == 31.5
+
     workspace.paper_classification_combo.setCurrentIndex(
         workspace.paper_classification_combo.findData("squared")
     )
