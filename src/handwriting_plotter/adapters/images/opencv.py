@@ -12,6 +12,7 @@ from handwriting_plotter.learning import (
     PixelPoint,
     RulingEstimate,
     InkMaskRaster,
+    BinaryInkMask,
     PhotoRegion,
     map_point,
     order_page_corners,
@@ -572,6 +573,33 @@ class OpenCvInkSeparator:
         horizontal = add_family(ruling.ruling_pitch_px or ruling.cell_pitch_y_px, ruling.origin_y_px, ruling.horizontal_angle_deg, vertical=False)
         vertical = add_family(ruling.cell_pitch_x_px, ruling.origin_x_px, ruling.vertical_angle_deg, vertical=True)
         return result if horizontal or vertical else None
+
+
+class OpenCvLineMaskCropper:
+    """Decode the existing selected binary mask without morphology or cleanup.
+
+    The raw/cleaned choice was made earlier and is part of the immutable photo
+    manifest.  This adapter only crops the persisted line polygon's bounding
+    box, preserving single-pixel dots and punctuation for TASK 12A.
+    """
+
+    def crop(self, mask_png: bytes, *, line_region: PhotoRegion) -> BinaryInkMask:
+        cv2, np = _cv_modules()
+        if line_region.kind != "line":
+            raise ValueError("ALIGNMENT_REQUIRES_LINE_REGION")
+        mask = cv2.imdecode(np.frombuffer(mask_png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if mask is None or mask.size == 0:
+            raise ValueError("INVALID_INK_MASK")
+        left = max(0, int(math.floor(min(point.x for point in line_region.polygon))))
+        top = max(0, int(math.floor(min(point.y for point in line_region.polygon))))
+        right = min(mask.shape[1], int(math.ceil(max(point.x for point in line_region.polygon))))
+        bottom = min(mask.shape[0], int(math.ceil(max(point.y for point in line_region.polygon))))
+        if right <= left or bottom <= top:
+            raise ValueError("ALIGNMENT_LINE_CROP_OUTSIDE_MASK")
+        cropped = (mask[top:bottom, left:right] > 0).astype(np.uint8)
+        return BinaryInkMask(
+            width_px=int(cropped.shape[1]), height_px=int(cropped.shape[0]), foreground=cropped.tobytes(),
+        )
 
 
 class OpenCvLineSegmenter:
