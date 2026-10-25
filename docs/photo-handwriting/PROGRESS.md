@@ -1,6 +1,6 @@
 # Photo-to-Handwriting progress
 
-Last updated: 2026-10-24
+Last updated: 2026-10-25
 
 ## Current checkpoint
 
@@ -23,7 +23,7 @@ Completion commit: `5d8a29f9188506b7e91e60daa0ae18804bcc182f`
 
 ### Implemented behavior
 
-- `word-spans-components/1` partitions NFC text exactly into `word`,
+- `word-spans-components/2` partitions reviewed text exactly into `word`,
   `whitespace`, and `punctuation` spans, preserving offsets, repeated text,
   Ukrainian apostrophes, hyphens, punctuation, spaces and line breaks.
 - The existing selected raw/cleaned ink-mask artifact and existing persisted
@@ -50,16 +50,59 @@ Focused Linux checks:
 ```bash
 QT_QPA_PLATFORM=offscreen uv run pytest -q \
   tests/learning/test_word_alignment.py \
+  tests/learning/test_word_alignment_integrity.py \
   tests/learning/test_transcription_review.py \
   tests/learning/test_line_regions.py \
   tests/learning/test_ink_masks.py \
   tests/gui/test_photo_import_gui.py
 ```
 
-Result: `32 passed`. The suite covers span ranges, apostrophes/hyphens/newlines,
+Result after verification fixes: `46 passed`. The suite covers span ranges, apostrophes/hyphens/newlines,
 repeated/connected words, absent ink, tiny diacritics, false visual breaks,
 immutable persistence, stale review/crop rejection and reuse of the existing
 photo/mask/line pipeline.
+
+### TASK 12A verification and fixes
+
+Verification fix commit: `9bcd35e7466a01366322f0c7b6e1bcf24b403e67`.
+
+Three regression tests first reproduced defects in the initial implementation:
+normalizing in the tokenizer changed input offsets, partition truncation before
+ranking could omit the best geometric hypothesis, and equal word/component
+counts incorrectly declared a boundary `matched`. Version `/2` preserves exact
+input offsets (NFC remains the review store's responsibility), uses K-best
+monotone dynamic programming, and labels inferred word areas `ambiguous`.
+It always retains a shared whole-line hypothesis when alternatives are capped.
+The ranking cost uses relative width/text length and gap cues; it is a layout
+prior, never recognition or calibrated confidence.
+
+The photo adapter now verifies the persisted manifest and latest review, reads
+the actual content-addressed original PNG crop, verifies its SHA-256 and size,
+checks the full selected-mask frame size, and records the translation from crop
+pixels to the source frame. Corrupt, missing or stale inputs refuse alignment.
+The optional mask identity check at reopen also rejects a changed mask hash.
+Persistence reuses the photo repository's atomic no-overwrite/fsync writer.
+Record validators reject invalid component bounds, candidate references and
+text hashes. Existing `/1` algorithm records remain readable.
+
+Explicit limits are 4 million crop pixels, 256 components, 128 word spans,
+4 grouping variants, 50,000 DP transitions per grouping and 16 output
+alternatives. A search-budget refusal retains a coarse hypothesis with
+`SEARCH_BUDGET_EXHAUSTED`; excessive pixels/components/text produce an explicit
+error instead of dropping small marks. The synthetic PNG integration tests also
+verify that this path imports no Qt, OpenCV, Torch or Transformers until its
+optional adapter is explicitly selected.
+
+The callable API and its current limitations are documented in
+[WORD_ALIGNMENT.md](WORD_ALIGNMENT.md). TASK 12B and TASK 13 remain unstarted.
+
+Verification checkpoint: focused `46 passed`; full Linux/headless Qt
+`335 passed in 25.02s`. `uv run python -m compileall -q src tests`,
+`uv lock --check` (26 packages) and `git diff --check` passed. All new test
+assets and transcripts are synthetic. No private corpus/model download or
+inference was performed. Windows was not run. Packaging configuration did not
+change in this checkpoint; the preceding TASK 12A wheel/sdist build remains
+the last packaging check.
 
 ## TASK 11 — Transcription review UI
 
