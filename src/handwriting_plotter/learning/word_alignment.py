@@ -8,14 +8,12 @@ area for several text words until TASK 12B has enough evidence to refine it.
 from __future__ import annotations
 
 import math
-import os
-import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 import regex
 from pydantic import Field, field_validator, model_validator
@@ -23,20 +21,24 @@ from pydantic import Field, field_validator, model_validator
 from handwriting_plotter.domain.models import StrictModel, canonical_json_bytes, strict_json_loads
 
 from .models import PhotoRegion
-from .repository import PhotoRecord, PhotoRepository
+from .repository import PhotoRecord, PhotoRepository, serialize_photo
 from .transcription_review import TranscriptionReviewRecord, TranscriptionReviewRepository
 
 WORD_ALIGNMENT_FORMAT = "hp-word-alignment"
 WORD_ALIGNMENT_SCHEMA_VERSION = "1.0"
-WORD_ALIGNMENT_ALGORITHM = "word-spans-components/1"
+WORD_ALIGNMENT_ALGORITHM = "word-spans-components/2"
+MAX_ALIGNMENT_PIXELS = 4_000_000
+MAX_ALIGNMENT_COMPONENTS = 256
+MAX_ALIGNMENT_WORDS = 128
+MAX_PARTITION_TRANSITIONS = 50_000
 CoordinateSystem = Literal["line-crop-px-top-left"]
 SpanKind = Literal["word", "whitespace", "punctuation"]
 AlignmentState = Literal["matched", "ambiguous", "unresolved", "non_ink"]
 
-_WORD_PART = r"[\p{L}\p{M}\p{N}]"
+_WORD_PART = r"[[\p{L}\p{M}\p{N}]--[’ʼ]]"
 _APOSTROPHE = r"['’ʼ]"
 _TOKEN_RE = regex.compile(
-    rf"(?P<word>{_WORD_PART}+(?:{_APOSTROPHE}{_WORD_PART}+)*|{_APOSTROPHE}{_WORD_PART}+)|"
+    rf"(?P<word>{_WORD_PART}+(?:{_APOSTROPHE}{_WORD_PART}+)*)|"
     r"(?P<whitespace>\s+)|(?P<punctuation>.)",
     flags=regex.VERSION1,
 )
@@ -53,10 +55,20 @@ class LineAlignmentContext:
     line_region: PhotoRegion
     selected_mask_png: bytes
     mask_sha256: str
+    crop_png: bytes
+    frame_id: str
+    frame_width_px: int
+    frame_height_px: int
+    crop_left_px: int
+    crop_top_px: int
+    crop_width_px: int
+    crop_height_px: int
 
 
 class LineMaskCropper(Protocol):
     def crop(self, mask_png: bytes, *, line_region: PhotoRegion) -> BinaryInkMask: ...
+
+    def image_size(self, content: bytes) -> tuple[int, int]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +82,8 @@ class BinaryInkMask:
     def __post_init__(self) -> None:
         if self.width_px <= 0 or self.height_px <= 0:
             raise ValueError("INVALID_BINARY_MASK_DIMENSIONS")
+        if self.width_px * self.height_px > MAX_ALIGNMENT_PIXELS:
+            raise ValueError("ALIGNMENT_PIXEL_LIMIT")
         if len(self.foreground) != self.width_px * self.height_px:
             raise ValueError("INVALID_BINARY_MASK_LENGTH")
         if any(value not in (0, 1) for value in self.foreground):
@@ -99,6 +113,14 @@ def prepare_line_alignment_context(
 
     if review.revision.source_manifest_sha256 != source.sha256:
         raise AlignmentStaleError("ALIGNMENT_SOURCE_MANIFEST_STALE")
+    if sha256(serialize_photo(source.photo)).hexdigest() != source.sha256:
+        raise AlignmentStaleError("ALIGNMENT_SOURCE_MANIFEST_STALE")
+    if photos.load(source.sha256) != source.photo:
+        raise AlignmentStaleError("ALIGNMENT_SOURCE_MANIFEST_STALE")
+    reviews = TranscriptionReviewRepository(photos.root)
+    latest = reviews.latest_for_line(source.sha256, review.revision.line_id, review.revision.crop_sha256)
+    if latest is None or latest.sha256 != review.sha256 or reviews.load(review.sha256) != review:
+        raise AlignmentStaleError("ALIGNMENT_REVIEW_REVISION_STALE")
     mask = source.photo.ink_mask
     if mask is None:
         raise ValueError("ALIGNMENT_REQUIRES_INK_MASK")
@@ -110,10 +132,27 @@ def prepare_line_alignment_context(
         raise AlignmentStaleError("ALIGNMENT_LINE_SEGMENTATION_STALE")
     selected_sha256 = mask.raw_sha256 if mask.selected_variant == "raw" else mask.cleaned_sha256
     selected_relative = mask.raw_relative_path if mask.selected_variant == "raw" else mask.cleaned_relative_path
-    content = (photos.root / selected_relative).read_bytes()
+    if selected_relative != photos.derivative_relative_path(selected_sha256, "png"):
+        raise ValueError("ALIGNMENT_MASK_PATH_MISMATCH")
+    content = photos.derivative_path(selected_sha256, "png").read_bytes()
     if sha256(content).hexdigest() != selected_sha256:
         raise ValueError("ALIGNMENT_MASK_HASH_MISMATCH")
-    return LineAlignmentContext(line_region=line, selected_mask_png=content, mask_sha256=selected_sha256)
+    crop_png = photos.derivative_path(review.revision.crop_sha256, "png").read_bytes()
+    if sha256(crop_png).hexdigest() != review.revision.crop_sha256:
+        raise AlignmentStaleError("ALIGNMENT_CROP_HASH_MISMATCH")
+    frame = next(frame for frame in source.photo.frames if frame.frame_id == line.frame_id)
+    left = max(0, math.floor(min(point.x for point in line.polygon)))
+    top = max(0, math.floor(min(point.y for point in line.polygon)))
+    right = min(frame.width_px, math.ceil(max(point.x for point in line.polygon)))
+    bottom = min(frame.height_px, math.ceil(max(point.y for point in line.polygon)))
+    if right <= left or bottom <= top:
+        raise ValueError("ALIGNMENT_LINE_CROP_OUTSIDE_MASK")
+    return LineAlignmentContext(
+        line_region=line, selected_mask_png=content, mask_sha256=selected_sha256,
+        crop_png=crop_png, frame_id=frame.frame_id, frame_width_px=frame.width_px,
+        frame_height_px=frame.height_px, crop_left_px=left, crop_top_px=top,
+        crop_width_px=right - left, crop_height_px=bottom - top,
+    )
 
 
 class TextSpan(StrictModel):
@@ -191,6 +230,13 @@ class WordAlignmentAlternative(StrictModel):
     assignments: tuple[SpanGeometryAssignment, ...] = Field(min_length=1, max_length=4_096)
     diagnostics: tuple[str, ...] = Field(default=(), max_length=32)
 
+    @field_validator("optimization_cost")
+    @classmethod
+    def finite_cost(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("INVALID_ALIGNMENT_COST")
+        return value
+
     @field_validator("assignments")
     @classmethod
     def distinct_spans(cls, value: tuple[SpanGeometryAssignment, ...]) -> tuple[SpanGeometryAssignment, ...]:
@@ -204,7 +250,7 @@ class WordAlignment(StrictModel):
     schema_version: Literal["1.0"] = WORD_ALIGNMENT_SCHEMA_VERSION
     alignment_id: str = Field(pattern=r"^[a-f0-9-]{36}$")
     created_at_utc: str
-    algorithm_version: Literal["word-spans-components/1"] = WORD_ALIGNMENT_ALGORITHM
+    algorithm_version: Literal["word-spans-components/1", "word-spans-components/2"] = WORD_ALIGNMENT_ALGORITHM
     coordinate_system: CoordinateSystem = "line-crop-px-top-left"
     source_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     line_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -214,6 +260,11 @@ class WordAlignment(StrictModel):
     reviewed_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     mask_width_px: int = Field(gt=0)
     mask_height_px: int = Field(gt=0)
+    # Optional for loading legacy /1 records. New photo-backed /2 records carry
+    # this translation from crop pixels into the persisted source frame.
+    frame_id: str | None = Field(default=None, min_length=1, max_length=128)
+    crop_left_px: int | None = Field(default=None, ge=0)
+    crop_top_px: int | None = Field(default=None, ge=0)
     spans: tuple[TextSpan, ...] = Field(min_length=1, max_length=4_096)
     components: tuple[InkComponent, ...] = Field(default=(), max_length=4_096)
     geometry_candidates: tuple[WordGeometryCandidate, ...] = Field(default=(), max_length=4_096)
@@ -239,17 +290,40 @@ class WordAlignment(StrictModel):
 
     @model_validator(mode="after")
     def references_are_valid(self) -> WordAlignment:
+        text = "".join(span.text for span in self.spans)
+        if sha256(text.encode("utf-8")).hexdigest() != self.reviewed_text_sha256:
+            raise ValueError("ALIGNMENT_TEXT_HASH_MISMATCH")
+        if len({candidate.candidate_id for candidate in self.geometry_candidates}) != len(self.geometry_candidates):
+            raise ValueError("DUPLICATE_GEOMETRY_CANDIDATE")
+        if len({item.alternative_id for item in self.alternatives}) != len(self.alternatives):
+            raise ValueError("DUPLICATE_ALIGNMENT_ALTERNATIVE")
+        if (self.crop_left_px is None) != (self.crop_top_px is None) or (self.frame_id is None) != (self.crop_left_px is None):
+            raise ValueError("INCOMPLETE_ALIGNMENT_FRAME")
         span_ids = {span.span_id for span in self.spans}
         candidate_ids = {candidate.candidate_id for candidate in self.geometry_candidates}
         component_ids = {component.component_id for component in self.components}
+        component_by_id = {component.component_id: component for component in self.components}
+        candidate_by_id = {candidate.candidate_id: candidate for candidate in self.geometry_candidates}
+        for component in self.components:
+            if component.right_px > self.mask_width_px or component.bottom_px > self.mask_height_px:
+                raise ValueError("ALIGNMENT_COMPONENT_OUT_OF_BOUNDS")
         for candidate in self.geometry_candidates:
             if not set(candidate.component_ids) <= component_ids:
                 raise ValueError("UNKNOWN_CANDIDATE_COMPONENT")
+            members = [component_by_id[identity] for identity in candidate.component_ids]
+            bounds = (min(item.left_px for item in members), min(item.top_px for item in members),
+                      max(item.right_px for item in members), max(item.bottom_px for item in members))
+            if bounds != (candidate.left_px, candidate.top_px, candidate.right_px, candidate.bottom_px):
+                raise ValueError("ALIGNMENT_CANDIDATE_BOUNDS_MISMATCH")
         for alternative in self.alternatives:
             if {assignment.span_id for assignment in alternative.assignments} != span_ids:
                 raise ValueError("INCOMPLETE_ALTERNATIVE_ASSIGNMENTS")
             if not all(set(assignment.geometry_candidate_ids) <= candidate_ids for assignment in alternative.assignments):
                 raise ValueError("UNKNOWN_ASSIGNMENT_CANDIDATE")
+            for assignment in alternative.assignments:
+                if any(candidate_by_id[identity].grouping_variant != alternative.grouping_variant
+                       for identity in assignment.geometry_candidate_ids):
+                    raise ValueError("ALIGNMENT_MIXED_GROUPING_VARIANTS")
         return self
 
 
@@ -261,20 +335,23 @@ class WordAlignmentRecord:
 
 
 def split_text_spans(text: str) -> tuple[TextSpan, ...]:
-    """Partition exact NFC text without dropping whitespace or punctuation."""
+    """Partition exact input; review persistence already owns NFC normalization."""
 
-    normalized = unicodedata.normalize("NFC", text)
-    if not normalized:
+    if not text:
         raise ValueError("ALIGNMENT_TEXT_EMPTY")
+    if len(text) > 16_384:
+        raise ValueError("ALIGNMENT_TEXT_LIMIT")
     spans: list[TextSpan] = []
-    for match in _TOKEN_RE.finditer(normalized):
+    for match in _TOKEN_RE.finditer(text):
         kind = "word" if match.group("word") is not None else (
             "whitespace" if match.group("whitespace") is not None else "punctuation"
         )
         spans.append(TextSpan(
             span_id=f"span-{len(spans)}", kind=kind, start=match.start(), end=match.end(), text=match.group(),
         ))
-    if "".join(span.text for span in spans) != normalized:
+    if len(spans) > 4_096:
+        raise ValueError("ALIGNMENT_SPAN_LIMIT")
+    if "".join(span.text for span in spans) != text:
         raise ValueError("TEXT_SPAN_PARTITION_FAILED")
     return tuple(spans)
 
@@ -309,6 +386,8 @@ def extract_ink_components(mask: BinaryInkMask) -> tuple[InkComponent, ...]:
                 component_id=f"component-{len(components)}", left_px=left, top_px=top,
                 right_px=right + 1, bottom_px=bottom + 1, pixel_count=pixels,
             ))
+            if len(components) > MAX_ALIGNMENT_COMPONENTS:
+                raise ValueError("ALIGNMENT_COMPONENT_LIMIT")
     return tuple(components)
 
 
@@ -342,6 +421,8 @@ def geometry_grouping_candidates(
 ) -> tuple[tuple[WordGeometryCandidate, ...], ...]:
     """Bounded component partitions from horizontal gaps, not a word classifier."""
 
+    if not 1 <= max_variants <= 4:
+        raise ValueError("ALIGNMENT_VARIANT_LIMIT")
     if not components:
         return ((),)
     ordered = tuple(sorted(components, key=lambda component: (component.left_px, component.top_px, component.component_id)))
@@ -362,32 +443,34 @@ def geometry_grouping_candidates(
     return tuple(variants)
 
 
-def _bounded_partitions(item_count: int, bucket_count: int, *, limit: int = 16) -> tuple[tuple[tuple[int, ...], ...], ...]:
-    """All contiguous non-empty partitions, deliberately capped and ordered."""
+def _ranked_partitions(
+    item_count: int, bucket_count: int, cost: Callable[[int, int, int], float], *, limit: int = 16,
+) -> tuple[tuple[float, tuple[tuple[int, ...], ...]], ...]:
+    """K-best monotone DP, capped in work as well as output, without recursion.
 
-    if not 1 <= bucket_count <= item_count:
-        return ()
-    output: list[tuple[tuple[int, ...], ...]] = []
+    The additive cost lets each (bucket, end) retain its K cheapest prefixes.
+    A work-budget refusal falls back to a whole-line hypothesis in the caller.
+    """
 
-    def visit(start: int, buckets_left: int, built: list[tuple[int, ...]]) -> None:
-        if len(output) >= limit:
-            return
-        if buckets_left == 1:
-            output.append(tuple((*built, tuple(range(start, item_count)))))
-            return
-        last_start = item_count - buckets_left
-        for end in range(start + 1, last_start + 2):
-            visit(end, buckets_left - 1, [*built, tuple(range(start, end))])
-
-    visit(0, bucket_count, [])
-    return tuple(output)
-
-
-def _assignment_cost(word_text: str, candidates: tuple[WordGeometryCandidate, ...]) -> float:
-    width = sum(candidate.right_px - candidate.left_px for candidate in candidates)
-    character_count = max(1, len(word_text.replace("ʼ", "'")))
-    # This is a deterministic layout cost, explicitly not a probability or confidence.
-    return abs(math.log((width + 1.0) / character_count))
+    states: dict[int, list[tuple[float, tuple[tuple[int, ...], ...]]]] = {0: [(0.0, ())]}
+    transitions = 0
+    for bucket in range(bucket_count):
+        following: dict[int, list[tuple[float, tuple[tuple[int, ...], ...]]]] = {}
+        for start, prefixes in sorted(states.items()):
+            last_end = item_count - (bucket_count - bucket - 1)
+            ends = (item_count,) if bucket == bucket_count - 1 else range(start + 1, last_end + 1)
+            for end in ends:
+                transitions += len(prefixes)
+                if transitions > MAX_PARTITION_TRANSITIONS:
+                    return ()
+                edge_cost = cost(bucket, start, end)
+                choices = following.setdefault(end, [])
+                group = tuple(range(start, end))
+                choices.extend((score + edge_cost, (*partition, group)) for score, partition in prefixes)
+                choices.sort(key=lambda item: (item[0], item[1]))
+                del choices[limit:]
+        states = following
+    return tuple(states.get(item_count, ()))
 
 
 def _word_assignments(
@@ -399,27 +482,44 @@ def _word_assignments(
         return (({}, 0.0, ()),)
     if not candidates:
         return (({word.span_id: () for word in words}, float(len(words)), ("NO_INK_GEOMETRY",)),)
+    text_lengths = [len(word.text) for word in words]
+    total_text = sum(text_lengths)
+    total_width = max(1, candidates[-1].right_px - candidates[0].left_px)
     results: list[tuple[dict[str, tuple[str, ...]], float, tuple[str, ...]]] = []
     if len(candidates) <= len(words):
-        for partition in _bounded_partitions(len(words), len(candidates)):
+        def cost(bucket: int, start: int, end: int) -> float:
+            candidate = candidates[bucket]
+            return (
+                (sum(text_lengths[start:end]) / total_text - (candidate.right_px - candidate.left_px) / total_width) ** 2
+                + (end - start - 1) * 0.25
+            )
+
+        for score, partition in _ranked_partitions(len(words), len(candidates), cost):
             mapping: dict[str, tuple[str, ...]] = {}
-            cost = 0.0
             for candidate, word_indices in zip(candidates, partition, strict=True):
                 for word_index in word_indices:
                     word = words[word_index]
                     mapping[word.span_id] = (candidate.candidate_id,)
-                    cost += _assignment_cost(word.text, (candidate,))
-                cost += max(0, len(word_indices) - 1) * 2.0
-            results.append((mapping, cost, ("CONNECTED_WORD_GROUP",) if len(candidates) < len(words) else ()))
+            results.append((mapping, score, ("CONNECTED_WORD_GROUP",) if len(candidates) < len(words) else ()))
     else:
-        for partition in _bounded_partitions(len(candidates), len(words)):
+        def cost(bucket: int, start: int, end: int) -> float:
+            width = candidates[end - 1].right_px - candidates[start].left_px
+            # Whitespace projection gaps contribute as soft geometric cues;
+            # character counts are a layout prior, never letter recognition.
+            boundary_gap = (
+                max(0, candidates[end].left_px - candidates[end - 1].right_px) / total_width
+                if end < len(candidates) else 0.0
+            )
+            return (text_lengths[bucket] / total_text - width / total_width) ** 2 - boundary_gap * 0.05 + 0.05
+
+        for score, partition in _ranked_partitions(len(candidates), len(words), cost):
             mapping = {}
-            cost = 0.0
             for word, candidate_indices in zip(words, partition, strict=True):
                 assigned = tuple(candidates[index] for index in candidate_indices)
                 mapping[word.span_id] = tuple(candidate.candidate_id for candidate in assigned)
-                cost += _assignment_cost(word.text, assigned) + max(0, len(assigned) - 1) * 1.5
-            results.append((mapping, cost, ("POSSIBLE_FALSE_COMPONENT_BREAK",)))
+            results.append((mapping, score, ("POSSIBLE_FALSE_COMPONENT_BREAK",)))
+    if not results:
+        return ()  # The whole-line grouping is always evaluated separately.
     return tuple(results)
 
 
@@ -434,17 +534,30 @@ def align_reviewed_line(
 
     if review.revision.status not in {"edited", "accepted"}:
         raise ValueError("ALIGNMENT_REQUIRES_REVIEWED_TEXT")
+    if not 1 <= max_alternatives <= 16:
+        raise ValueError("ALIGNMENT_ALTERNATIVE_LIMIT")
     spans = split_text_spans(review.revision.reviewed_text)
     components = extract_ink_components(mask)
     grouped_variants = geometry_grouping_candidates(components)
     word_spans = tuple(span for span in spans if span.kind == "word")
+    if len(word_spans) > MAX_ALIGNMENT_WORDS:
+        raise ValueError("ALIGNMENT_WORD_LIMIT")
     candidates = tuple(candidate for variant in grouped_variants for candidate in variant)
     alternatives: list[tuple[float, int, dict[str, tuple[str, ...]], tuple[str, ...]]] = []
+    budget_exhausted = False
     for variant_index, grouped in enumerate(grouped_variants):
-        for mapping, cost, diagnostics in _word_assignments(word_spans, grouped):
+        assignments = _word_assignments(word_spans, grouped)
+        if not assignments:
+            budget_exhausted = True
+        for mapping, cost, diagnostics in assignments:
             alternatives.append((cost, variant_index, mapping, diagnostics))
     alternatives.sort(key=lambda item: (item[0], item[1], tuple(sorted(item[2].items()))))
-    selected = alternatives[:max(1, min(max_alternatives, 16))]
+    selected = alternatives[:max_alternatives]
+    # Truncation must never remove the honest coarse hypothesis for joined
+    # cursive. A one-result request explicitly chooses that conservative view.
+    coarse = next((item for item in alternatives if len(grouped_variants[item[1]]) == 1), None)
+    if coarse is not None and coarse not in selected:
+        selected = sorted([*selected[:-1], coarse], key=lambda item: (item[0], item[1], tuple(sorted(item[2].items()))))
     rendered: list[WordAlignmentAlternative] = []
     for rank, (cost, variant_index, mapping, diagnostics) in enumerate(selected, start=1):
         assignments: list[SpanGeometryAssignment] = []
@@ -457,7 +570,7 @@ def align_reviewed_line(
             elif not candidate_ids:
                 assignments.append(SpanGeometryAssignment(span_id=span.span_id, state="unresolved", diagnostics=("NO_GEOMETRY",)))
             else:
-                state: AlignmentState = "matched" if len(candidate_ids) == 1 and not diagnostics else "ambiguous"
+                state: AlignmentState = "ambiguous"
                 assignments.append(SpanGeometryAssignment(
                     span_id=span.span_id, state=state, geometry_candidate_ids=candidate_ids, diagnostics=diagnostics,
                 ))
@@ -473,7 +586,8 @@ def align_reviewed_line(
         reviewed_text_sha256=sha256(review.revision.reviewed_text.encode("utf-8")).hexdigest(),
         mask_width_px=mask.width_px, mask_height_px=mask.height_px, spans=spans,
         components=components, geometry_candidates=candidates, alternatives=tuple(rendered),
-        diagnostics=("NO_LETTER_BOUNDARIES_IN_TASK_12A", "OPTIMIZATION_COST_IS_NOT_CONFIDENCE"),
+        diagnostics=("NO_LETTER_BOUNDARIES_IN_TASK_12A", "OPTIMIZATION_COST_IS_NOT_CONFIDENCE")
+        + (("SEARCH_BUDGET_EXHAUSTED",) if budget_exhausted else ()),
     )
 
 
@@ -488,12 +602,23 @@ def align_photo_line(
     """Use the existing selected-mask and persisted line region exactly once."""
 
     context = prepare_line_alignment_context(photos=photos, source=source, review=review)
-    return align_reviewed_line(
+    if cropper.image_size(context.crop_png) != (context.crop_width_px, context.crop_height_px):
+        raise AlignmentStaleError("ALIGNMENT_CROP_DIMENSIONS_STALE")
+    if cropper.image_size(context.selected_mask_png) != (context.frame_width_px, context.frame_height_px):
+        raise AlignmentStaleError("ALIGNMENT_MASK_DIMENSIONS_STALE")
+    mask = cropper.crop(context.selected_mask_png, line_region=context.line_region)
+    if (mask.width_px, mask.height_px) != (context.crop_width_px, context.crop_height_px):
+        raise AlignmentStaleError("ALIGNMENT_MASK_CROP_DIMENSIONS_STALE")
+    alignment = align_reviewed_line(
         review=review,
-        mask=cropper.crop(context.selected_mask_png, line_region=context.line_region),
+        mask=mask,
         mask_sha256=context.mask_sha256,
         max_alternatives=max_alternatives,
     )
+    return WordAlignment.model_validate({
+        **alignment.model_dump(), "frame_id": context.frame_id,
+        "crop_left_px": context.crop_left_px, "crop_top_px": context.crop_top_px,
+    })
 
 
 class WordAlignmentRepository:
@@ -509,23 +634,17 @@ class WordAlignmentRepository:
 
     def path_for(self, digest: str) -> Path:
         self._digest(digest, "INVALID_WORD_ALIGNMENT_HASH")
-        return self.root / "word-alignments" / digest[:2] / f"{digest}.hp-word-alignment.json"
+        root = self.root.resolve()
+        target = (root / "word-alignments" / digest[:2] / f"{digest}.hp-word-alignment.json").resolve()
+        if root not in target.parents:
+            raise ValueError("ALIGNMENT_PATH_OUTSIDE_DATA_ROOT")
+        return target
 
     def store(self, alignment: WordAlignment) -> WordAlignmentRecord:
         content = canonical_json_bytes(alignment.model_dump(mode="json"))
         digest = sha256(content).hexdigest()
         target = self.path_for(digest)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            if target.read_bytes() != content:
-                raise ValueError("WORD_ALIGNMENT_HASH_MISMATCH")
-        else:
-            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-            try:
-                temporary.write_bytes(content)
-                os.replace(temporary, target)
-            finally:
-                temporary.unlink(missing_ok=True)
+        PhotoRepository._store_immutable(target, content, "WORD_ALIGNMENT_HASH_MISMATCH")
         return WordAlignmentRecord(digest, target, alignment)
 
     def load(self, digest: str) -> WordAlignmentRecord:
@@ -545,12 +664,15 @@ class WordAlignmentRepository:
         source_manifest_sha256: str,
         line_id: str,
         crop_sha256: str,
+        mask_sha256: str | None = None,
     ) -> None:
         alignment = record.alignment
         if (alignment.source_manifest_sha256, alignment.line_id, alignment.crop_sha256) != (
             source_manifest_sha256, line_id, crop_sha256,
         ):
             raise AlignmentStaleError("ALIGNMENT_CROP_OR_MANIFEST_STALE")
+        if mask_sha256 is not None and mask_sha256 != alignment.mask_sha256:
+            raise AlignmentStaleError("ALIGNMENT_MASK_STALE")
         latest = reviews.latest_for_line(source_manifest_sha256, line_id, crop_sha256)
         if latest is None or latest.sha256 != alignment.review_revision_sha256:
             raise AlignmentStaleError("ALIGNMENT_REVIEW_REVISION_STALE")

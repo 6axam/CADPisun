@@ -583,6 +583,15 @@ class OpenCvLineMaskCropper:
     box, preserving single-pixel dots and punctuation for TASK 12A.
     """
 
+    @staticmethod
+    def image_size(content: bytes) -> tuple[int, int]:
+        cv2, np = _cv_modules()
+        image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if image is None or image.size == 0:
+            raise ValueError("INVALID_ALIGNMENT_IMAGE")
+        OpenCvPageCorrector._validate_output_size(int(image.shape[1]), int(image.shape[0]))
+        return int(image.shape[1]), int(image.shape[0])
+
     def crop(self, mask_png: bytes, *, line_region: PhotoRegion) -> BinaryInkMask:
         cv2, np = _cv_modules()
         if line_region.kind != "line":
@@ -590,6 +599,8 @@ class OpenCvLineMaskCropper:
         mask = cv2.imdecode(np.frombuffer(mask_png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         if mask is None or mask.size == 0:
             raise ValueError("INVALID_INK_MASK")
+        if not bool(np.all((mask == 0) | (mask == 255))):
+            raise ValueError("ALIGNMENT_REQUIRES_BINARY_MASK")
         left = max(0, int(math.floor(min(point.x for point in line_region.polygon))))
         top = max(0, int(math.floor(min(point.y for point in line_region.polygon))))
         right = min(mask.shape[1], int(math.ceil(max(point.x for point in line_region.polygon))))

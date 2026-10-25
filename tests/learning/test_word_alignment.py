@@ -178,8 +178,9 @@ def test_existing_photo_mask_line_and_review_are_reused_without_parallel_pipelin
         manual_line_region(frame_id="source-pixels", region_id="line-001", left=1, top=1, right=11, bottom=5),
     ))
     reviews = TranscriptionReviewRepository(root)
+    crop_sha256, _ = photos.store_derivative(b"line-crop", suffix="png")
     review = reviews.append(
-        source_manifest_sha256=source.sha256, line_id="line-001", crop_sha256=CROP,
+        source_manifest_sha256=source.sha256, line_id="line-001", crop_sha256=crop_sha256,
         htr_run_sha256=None, original_prediction=None, reviewed_text="слово", status="accepted",
         expected_parent_revision_sha256=None,
     )
@@ -189,9 +190,12 @@ def test_existing_photo_mask_line_and_review_are_reused_without_parallel_pipelin
     assert context.line_region.region_id == "line-001"
 
     class StubCropper:
+        def image_size(self, content: bytes):
+            return (10, 4) if content == b"line-crop" else (12, 6)
+
         def crop(self, mask_png: bytes, *, line_region):  # noqa: ANN001
             assert mask_png == b"clean-mask" and line_region.region_id == "line-001"
-            return _mask(5, 3, {(1, 1), (2, 1)})
+            return _mask(10, 4, {(1, 1), (2, 1)})
 
     alignment = align_photo_line(photos=photos, source=source, review=review, cropper=StubCropper())
     assert alignment.source_manifest_sha256 == source.sha256
@@ -215,3 +219,46 @@ def test_opencv_cropper_preserves_single_pixel_diacritic() -> None:
         ),
     )
     assert sum(cropped.foreground) == 6
+
+
+def test_span_offsets_are_in_the_exact_input_even_when_not_nfc() -> None:
+    text = "і\u0308 і\u0308  п'ять п’ять пʼять\r\nсло-\nво"
+    spans = split_text_spans(text)
+    assert "".join(span.text for span in spans) == text
+    assert all(text[span.start:span.end] == span.text for span in spans)
+
+
+def test_search_ranks_partitions_before_capping_and_keeps_coarse_fallback(tmp_path: Path) -> None:
+    from handwriting_plotter.learning.word_alignment import WordGeometryCandidate, _word_assignments
+
+    words = tuple(span for span in split_text_spans("так так") if span.kind == "word")
+    candidates = tuple(WordGeometryCandidate(
+        candidate_id=f"geometry-0-{index}", grouping_variant=0,
+        component_ids=(f"component-{index}",), left_px=index * 4, right_px=index * 4 + 2,
+        top_px=1, bottom_px=3,
+    ) for index in range(40))
+    alternatives = _word_assignments(words, candidates)
+    best = min(alternatives, key=lambda item: item[1])[0]
+    assert len(best["span-0"]) == len(best["span-2"]) == 20
+
+    mask = _mask(50, 4, {(x, 2) for x in range(1, 48, 4)})
+    alignment = align_reviewed_line(
+        review=_review(tmp_path, "так так"), mask=mask, mask_sha256=MASK, max_alternatives=2,
+    )
+    assert len(alignment.alternatives) <= 2
+    assert any(
+        alternative.assignments[0].geometry_candidate_ids == alternative.assignments[2].geometry_candidate_ids
+        for alternative in alignment.alternatives
+    )
+
+
+def test_geometry_is_not_declared_resolved_from_component_count(tmp_path: Path) -> None:
+    alignment = align_reviewed_line(
+        review=_review(tmp_path, "так так"),
+        mask=_mask(20, 4, {(2, 2), (3, 2), (14, 2), (15, 2)}), mask_sha256=MASK,
+    )
+    assert all(
+        assignment.state == "ambiguous"
+        for alternative in alignment.alternatives for assignment in alternative.assignments
+        if alignment.spans[int(assignment.span_id[5:])].kind == "word"
+    )
