@@ -2,8 +2,9 @@
 
 This Qt-free API produces hypotheses for human inspection. It uses the existing
 TASK 07 mask, TASK 08 line region, TASK 10 immutable PNG crop and TASK 11 review
-store. It does not run a recognizer. The callable API is available to subsequent
-stages; a Studio overlay and grapheme alignment are not implemented here.
+store. It does not run a recognizer. TASK 12B consumes these records through
+[GRAPHEME_ALIGNMENT.md](GRAPHEME_ALIGNMENT.md) and provides a diagnostic SVG
+overlay. The callable APIs do not add a new Studio editing workflow.
 
 ## Verified photo entry point
 
@@ -104,5 +105,5 @@ by deleting dots or small components.
 Tests use generated data only. Actual photos, masks, crops, review strings and
 alignment results stay under the private user-data root, outside Git. The
 current evidence covers contract/geometry regressions, not measured alignment
-accuracy on a real handwriting corpus. TASK 12 remains incomplete until TASK
-12B supplies grapheme/join/ligature hypotheses and their review rules.
+accuracy on a real handwriting corpus. TASK 12B now supplies grapheme/join/ligature
+hypotheses and diagnostic overlays; inseparable clusters retain shared geometry.

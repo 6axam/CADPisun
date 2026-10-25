@@ -1,6 +1,6 @@
 # Photo-to-Handwriting progress
 
-Last updated: 2026-10-25
+Last updated: 2026-10-26
 
 ## Current checkpoint
 
@@ -8,16 +8,88 @@ Last updated: 2026-10-25
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 13 / 25 parent tasks + TASK 12A |
-| Last completed | TASK 12A — Word and text-span alignment |
-| Next | TASK 12B — Grapheme, joins and ligatures alignment; intentionally not started at the TASK 12A checkpoint |
+| Completed | 14 / 25 parent tasks (including TASK 12A + 12B) |
+| Last completed | TASK 12B — Grapheme, joins and ligatures alignment; closes parent TASK 12 |
+| Next | TASK 13 — Stroke skeleton extraction; intentionally not started in this run |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 12B — Grapheme, joins and ligatures alignment
+
+Status: `[x]` DONE. TASK 12 is now complete under the hypothesis/uncertainty
+contract; real-handwriting alignment accuracy is unmeasured. TASK 13 was not
+started.
+
+Completion commit: `948a0eca45b7cda6949c3da9abb550a3b1ec601c`.
+
+- Added Qt-free `GraphemeToken`, `GraphemeInkGroup`, `UnresolvedJoin`,
+  `GraphemeHypothesis`, `GraphemeAlignment` and resource-limit models. Unicode
+  `\X` partitions the exact TASK 12A text into extended grapheme clusters;
+  word-span references and code-point offsets remain unchanged. Only a saved
+  `accepted` human review can enter this stage.
+- Reused TASK 12A's verified source/crop/mask loading, `WordAlignment`,
+  `BinaryInkMask` and `InkComponent`. No second segmentation or HTR path was
+  added. The graph advances monotonically over graphemes and whole component
+  groups; overlapping X envelopes remain indivisible, protecting detached dots
+  above a body stroke. Separate atoms can be grouped with one grapheme, and
+  one connected cursive component can cover several graphemes or words.
+- Every parent word alternative keeps a coarse safe hypothesis. Bounded
+  refinements offer competing groupings, including an off-body dot assigned
+  to either adjacent grapheme or retained in a shared group. Joined graphemes
+  carry explicit unresolved joins. No shape recognizer, confidence or exact
+  letter cuts are invented. Punctuation without TASK 12A word geometry stays
+  unresolved; its ink is explicitly retained as residual components.
+- Limits apply globally across a run: at most 512 graphemes, 256 inherited
+  components, 4,096 graph nodes, 20,000 evaluated DP transitions by default
+  (hard maximum 50,000), 2,048 candidate edges by default, 16 output
+  hypotheses, three paths per node and eight items per local edge. Budget
+  exhaustion returns recorded coarse alternatives. Input/output limits
+  refuse explicitly if representing every parent alternative would be impossible.
+- Content-addressed `hp-grapheme-alignment/1.0` records link the parent word
+  record, source, crop, selected mask, binary-mask digest, accepted review,
+  algorithm, text and source-frame translation. Atomic immutable writes reuse
+  `PhotoRepository`; schema/reference/coverage checks run on write and read.
+  `load_current()` additionally verifies the current review/assets/word record.
+- Added diagnostic SVG with embedded exact crop, word boxes, grapheme/shared
+  group boxes, unresolved-join counts and a text/offset ledger. It is independent
+  of document production exports and G-code. Three synthetic overlays were
+  rendered and visually inspected; a headless Qt SVG regression also verifies
+  that the source ink remains visible.
+
+Focused Linux check:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_grapheme_alignment.py tests/gui/test_alignment_overlay.py \
+  tests/learning/test_word_alignment.py tests/learning/test_word_alignment_integrity.py \
+  tests/learning/test_transcription_review.py tests/learning/test_line_regions.py \
+  tests/learning/test_ink_masks.py tests/gui/test_photo_import_gui.py
+```
+
+Result: `72 passed`, including `26` new grapheme/overlay cases. Evidence covers
+fully synthetic connected cursive, multiple detached marks for `ї`, ambiguous
+dot ownership, repeated letters, false breaks, crossing ink, empty regions,
+Unicode/emoji clusters, budget refusals, immutable reopen and all stale inputs.
+It is not a quality evaluation on the user's photographs. Private data and
+model files were not read, changed or added to Git.
+
+API, examples, bounds and limitations: [GRAPHEME_ALIGNMENT.md](GRAPHEME_ALIGNMENT.md).
+
+Final verification: full Linux/headless Qt `361 passed in 24.98s`;
+`uv run python -m compileall -q src tests`, `uv lock --check` (26 packages),
+`git diff --check` and wheel/sdist builds passed. Windows was not run.
+
+Next-stage estimate: TASK 13 remains 12/12 complexity, approximately 18k–35k
+tokens. The difficult cases are topology-preserving thinning, collapsed
+crossing/junction regions, loops and short marks that must survive cleanup.
+Recommended planning model: GPT-6.1 Sol with `xhigh`; first establish graph
+invariants and synthetic fixtures, then adapter/diagnostics. This is an estimate
+for a future run, not an instruction to start it here.
 
 ## TASK 12A — Word and text-span alignment
 
 Status: `[x]` DONE — the first, deliberately non-letter-level half of TASK 12.
-TASK 12 itself remains `[>] IN_PROGRESS`; TASK 12B has not begun.
+Its original checkpoint left TASK 12 in progress; TASK 12B above now closes it.
 
 Completion commit: `5d8a29f9188506b7e91e60daa0ae18804bcc182f`
 
@@ -94,7 +166,8 @@ verify that this path imports no Qt, OpenCV, Torch or Transformers until its
 optional adapter is explicitly selected.
 
 The callable API and its current limitations are documented in
-[WORD_ALIGNMENT.md](WORD_ALIGNMENT.md). TASK 12B and TASK 13 remain unstarted.
+[WORD_ALIGNMENT.md](WORD_ALIGNMENT.md). TASK 13 remains unstarted; TASK 12B is
+recorded separately above.
 
 Verification checkpoint: focused `46 passed`; full Linux/headless Qt
 `335 passed in 25.02s`. `uv run python -m compileall -q src tests`,
@@ -770,7 +843,7 @@ full local Linux suite was `283 passed in 28.34s`. Visual QA used an offscreen
 1326×900 workspace and confirmed the disabled-until-geometry calibration row
 fits alongside the existing photo controls. Windows was not executed locally.
 
-## Next task estimate
+## Historical next-task estimate after TASK 06
 
 **TASK 07 — Paper/ink separation**
 
