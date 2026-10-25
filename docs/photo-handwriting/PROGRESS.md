@@ -8,17 +8,94 @@ Last updated: 2026-10-26
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 14 / 25 parent tasks (including TASK 12A + 12B) |
-| Last completed | TASK 12B — Grapheme, joins and ligatures alignment; closes parent TASK 12 |
-| Next | TASK 13 — Stroke skeleton extraction; intentionally not started in this run |
+| Completed | 14 / 25 parent tasks + TASK 13A |
+| Last completed | TASK 13A — Topology-preserving thinning and raw skeleton graph |
+| Next | TASK 13B — Graph cleanup, spur filtering and diagnostics; intentionally not started |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 13A — Topology-preserving thinning and raw graph extraction
+
+Status: `[x]` DONE. Parent TASK 13 remains `[>] IN_PROGRESS`; TASK 13B is
+`[ ] TODO`. TASK 14, traversal/direction, pen lifts and G-code were not started.
+
+Completion commit: `da1170242d74200413dda33e53542cd1ddfe91b4`.
+
+- Fixed foreground-8/background-4 semantics with virtual exterior background.
+  `guarded-zhang-suen/1` uses two directional candidate phases and sequential
+  simple-point/endpoint checks before actual deletion. The installed OpenCV
+  lacks ximgproc thinning; scikit-image is absent. No new optional/default
+  dependency was added. The variant is explicitly distinguished from parallel
+  Zhang–Suen. Before/after component identity and hole counts must agree.
+- Added Qt-free `SkeletonGraph`, `SkeletonNode`, `SkeletonEdge`,
+  `SkeletonComponent`, topology/provenance/resource models and immutable
+  persistence. Photo entry/reopen reuse TASK 12's verified line crop/mask,
+  source/review checks, binary-mask digest and source-frame offsets. Pure-mask
+  extraction is also available without transcription/HTR.
+- Graph links retain diagonal-only contacts but omit corner shortcuts with
+  an existing orthogonal route. Connected high-degree pixels and filled 2×2
+  cells form compact junction regions, whose complete pixels are retained.
+  Internal topology uses full-raster adjacency and excludes filled plaquette
+  faces from cycle counts. This avoids false triangles/square cycles and
+  double-counting loops at junction-region boundaries.
+- Every raw skeleton pixel belongs to a node region or an ordered chain.
+  Degree-two closed components get a canonical minimum-row/column anchor and
+  explicit self-loop edge. Junction regions can retain internal holes as typed
+  metadata plus exact pixels. Nodes, components, edges and chain orientations
+  have canonical IDs/order. Ordering an undirected edge for serialization
+  does not infer pen movement or traversal through an intersection.
+- Original masks remain immutable. All independent components, dots, tiny
+  strokes, endpoint branches and raw skeleton pixels survive without pruning
+  or smoothing. Filled junction regions may remain wider than a chain. This
+  is not guaranteed metric medial-axis geometry, letter segmentation or a
+  reconstruction of true stroke structure.
+- Limits bound raster/foreground sizes, component/node/edge/coordinate counts,
+  deletion rounds, work units, estimated workspace and record bytes. Budget or
+  cancellation refusal returns no partial successful graph and stores nothing.
+  Workspace admission is an allocation estimate, not an RSS/virtual-memory
+  metric or an OS hard limit.
+
+Focused Linux checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_skeleton.py tests/learning/test_skeleton_photo.py \
+  tests/learning/test_word_alignment.py tests/learning/test_word_alignment_integrity.py \
+  tests/learning/test_grapheme_alignment.py tests/gui/test_alignment_overlay.py
+```
+
+Result: `89 passed`, including `41` new TASK 13A tests. The tests independently
+flood-fill foreground/background and compare per-component holes, ordered
+geometry, pixel/link coverage and cycle rank; all 512 local 3×3 patterns and
+128 seeded 8×8 masks are included. Other cases cover exact straight/diagonal
+chains, T/X, single/double loops, thick rings/junctions, points above `і`/`ї`,
+boundary pixels, idempotence, deterministic IDs, immutable reopen, damaged
+records, input mutation refusal and resource/stale-reference failures. No
+private photos, masks, transcripts, model files or results were used/published.
+
+One isolated-process synthetic resource sample (Python 3.12.12): 800×100 pixels,
+9,120 input foreground pixels → 754 raw skeleton pixels, 2 nodes, 1 edge and
+0 cycles; 7 rounds, 1,226,200 work units, 0.484 seconds. Admission workspace
+estimate: 37,999,616 bytes; measured peak process RSS: 45,148 KiB. This sample
+is not a performance or quality guarantee for real handwriting.
+
+Detailed contract and limitations: [SKELETON_GRAPH.md](SKELETON_GRAPH.md).
+
+Final verification: full Linux/headless Qt `402 passed in 27.02s`;
+`uv run python -m compileall -q src tests`, `uv lock --check` (26 packages),
+`git diff --check` and wheel/sdist builds passed. Windows was not run.
+TASK 13A is complete; parent TASK 13 remains in progress because cleanup,
+spur filtering, dedicated diagnostics and final verification belong to TASK
+13B. Estimated next task: 9–10/12 complexity, approximately 10k–20k tokens;
+GPT-6.1 Sol `xhigh` is the recommended planning model. First specify conservative
+cleanup acceptance tests that distinguish real small marks from removable
+spurs while retaining the raw graph. No TASK 13B work was started here.
 
 ## TASK 12B — Grapheme, joins and ligatures alignment
 
 Status: `[x]` DONE. TASK 12 is now complete under the hypothesis/uncertainty
-contract; real-handwriting alignment accuracy is unmeasured. TASK 13 was not
-started.
+contract; real-handwriting alignment accuracy is unmeasured. TASK 13 had not
+started at that checkpoint; current TASK 13A status is recorded above.
 
 Completion commit: `948a0eca45b7cda6949c3da9abb550a3b1ec601c`.
 
