@@ -8,11 +8,58 @@ Last updated: 2026-10-24
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 13 / 25 tasks |
-| Last completed | TASK 11 — Transcription review UI |
-| Next | TASK 12 — Grapheme and word alignment; intentionally not started at the TASK 11 checkpoint |
+| Completed | 13 / 25 parent tasks + TASK 12A |
+| Last completed | TASK 12A — Word and text-span alignment |
+| Next | TASK 12B — Grapheme, joins and ligatures alignment; intentionally not started at the TASK 12A checkpoint |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 12A — Word and text-span alignment
+
+Status: `[x]` DONE — the first, deliberately non-letter-level half of TASK 12.
+TASK 12 itself remains `[>] IN_PROGRESS`; TASK 12B has not begun.
+
+Completion commit: `5d8a29f9188506b7e91e60daa0ae18804bcc182f`
+
+### Implemented behavior
+
+- `word-spans-components/1` partitions NFC text exactly into `word`,
+  `whitespace`, and `punctuation` spans, preserving offsets, repeated text,
+  Ukrainian apostrophes, hyphens, punctuation, spaces and line breaks.
+- The existing selected raw/cleaned ink-mask artifact and existing persisted
+  `line` region are verified and cropped through a narrow OpenCV adapter. It
+  performs no cleanup or morphology: one-pixel dots and small punctuation remain
+  foreground components.
+- The Qt-free core extracts 8-connected components and creates a bounded set of
+  horizontal-gap grouping variants. It aligns contiguous word spans and grouped
+  areas deterministically. Connected words and false component breaks become
+  alternatives or shared larger regions, not invented word/letter boundaries.
+- Each content-addressed `hp-word-alignment/1.0` record carries source manifest,
+  line ID, HTR crop SHA-256, selected mask SHA-256, human review revision,
+  reviewed-text hash, `line-crop-px-top-left` coordinates, all geometry
+  candidates and ranked optimization costs. Costs are explicitly not confidence.
+- An alignment refuses a changed source manifest/line/crop or a newer human
+  review revision. It neither changes originals, masks, HTR runs nor review
+  records. Alignment data, like all photo data, is local and excluded from Git.
+- A visual overlay is intentionally deferred: TASK 12A prioritizes the typed
+  immutable core; TASK 12B can render word candidates only after its grapheme
+  ambiguity model is defined.
+
+Focused Linux checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_word_alignment.py \
+  tests/learning/test_transcription_review.py \
+  tests/learning/test_line_regions.py \
+  tests/learning/test_ink_masks.py \
+  tests/gui/test_photo_import_gui.py
+```
+
+Result: `32 passed`. The suite covers span ranges, apostrophes/hyphens/newlines,
+repeated/connected words, absent ink, tiny diacritics, false visual breaks,
+immutable persistence, stale review/crop rejection and reuse of the existing
+photo/mask/line pipeline.
 
 ## TASK 11 — Transcription review UI
 
