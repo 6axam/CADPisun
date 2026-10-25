@@ -111,6 +111,11 @@ from .grapheme_alignment import (
     InkBounds, UnresolvedJoin, align_graphemes, align_photo_graphemes, split_graphemes,
 )
 from .alignment_overlay import render_alignment_overlay_svg
+from .skeleton import (
+    SkeletonComponent, SkeletonEdge, SkeletonGraph, SkeletonGraphRecord, SkeletonLimitError,
+    SkeletonLimits, SkeletonNode, SkeletonProvenance, SkeletonRepository, TopologyCounts,
+    extract_photo_skeleton, extract_skeleton, topology_counts,
+)
 
 __all__ = [
     "ConfidenceValue",
@@ -215,4 +220,17 @@ __all__ = [
     "align_photo_graphemes",
     "split_graphemes",
     "render_alignment_overlay_svg",
+    "SkeletonComponent",
+    "SkeletonEdge",
+    "SkeletonGraph",
+    "SkeletonGraphRecord",
+    "SkeletonLimitError",
+    "SkeletonLimits",
+    "SkeletonNode",
+    "SkeletonProvenance",
+    "SkeletonRepository",
+    "TopologyCounts",
+    "extract_photo_skeleton",
+    "extract_skeleton",
+    "topology_counts",
 ]
