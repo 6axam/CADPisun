@@ -601,6 +601,22 @@ def align_photo_line(
 ) -> WordAlignment:
     """Use the existing selected-mask and persisted line region exactly once."""
 
+    context, mask = verified_line_mask(photos=photos, source=source, review=review, cropper=cropper)
+    alignment = align_reviewed_line(
+        review=review, mask=mask, mask_sha256=context.mask_sha256, max_alternatives=max_alternatives,
+    )
+    return WordAlignment.model_validate({
+        **alignment.model_dump(), "frame_id": context.frame_id,
+        "crop_left_px": context.crop_left_px, "crop_top_px": context.crop_top_px,
+    })
+
+
+def verified_line_mask(
+    *, photos: PhotoRepository, source: PhotoRecord, review: TranscriptionReviewRecord,
+    cropper: LineMaskCropper,
+) -> tuple[LineAlignmentContext, BinaryInkMask]:
+    """Shared TASK 12A/12B asset and coordinate validation entry point."""
+
     context = prepare_line_alignment_context(photos=photos, source=source, review=review)
     if cropper.image_size(context.crop_png) != (context.crop_width_px, context.crop_height_px):
         raise AlignmentStaleError("ALIGNMENT_CROP_DIMENSIONS_STALE")
@@ -609,16 +625,7 @@ def align_photo_line(
     mask = cropper.crop(context.selected_mask_png, line_region=context.line_region)
     if (mask.width_px, mask.height_px) != (context.crop_width_px, context.crop_height_px):
         raise AlignmentStaleError("ALIGNMENT_MASK_CROP_DIMENSIONS_STALE")
-    alignment = align_reviewed_line(
-        review=review,
-        mask=mask,
-        mask_sha256=context.mask_sha256,
-        max_alternatives=max_alternatives,
-    )
-    return WordAlignment.model_validate({
-        **alignment.model_dump(), "frame_id": context.frame_id,
-        "crop_left_px": context.crop_left_px, "crop_top_px": context.crop_top_px,
-    })
+    return context, mask
 
 
 class WordAlignmentRepository:

@@ -105,6 +105,12 @@ from .word_alignment import (
     prepare_line_alignment_context,
     split_text_spans,
 )
+from .grapheme_alignment import (
+    GraphemeAlignment, GraphemeAlignmentRecord, GraphemeAlignmentRepository,
+    GraphemeHypothesis, GraphemeInkGroup, GraphemeSearchLimits, GraphemeToken,
+    InkBounds, UnresolvedJoin, align_graphemes, align_photo_graphemes, split_graphemes,
+)
+from .alignment_overlay import render_alignment_overlay_svg
 
 __all__ = [
     "ConfidenceValue",
@@ -196,4 +202,17 @@ __all__ = [
     "geometry_grouping_candidates",
     "prepare_line_alignment_context",
     "split_text_spans",
+    "GraphemeAlignment",
+    "GraphemeAlignmentRecord",
+    "GraphemeAlignmentRepository",
+    "GraphemeHypothesis",
+    "GraphemeInkGroup",
+    "GraphemeSearchLimits",
+    "GraphemeToken",
+    "InkBounds",
+    "UnresolvedJoin",
+    "align_graphemes",
+    "align_photo_graphemes",
+    "split_graphemes",
+    "render_alignment_overlay_svg",
 ]
