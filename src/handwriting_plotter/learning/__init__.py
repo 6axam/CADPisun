@@ -116,6 +116,11 @@ from .skeleton import (
     SkeletonLimits, SkeletonNode, SkeletonProvenance, SkeletonRepository, TopologyCounts,
     extract_photo_skeleton, extract_skeleton, topology_counts,
 )
+from .skeleton_cleanup import (
+    SkeletonCleanup, SkeletonCleanupLimits, SkeletonCleanupPolicy, SkeletonCleanupRecord,
+    SkeletonCleanupRepository, SpurCandidate, cleanup_skeleton,
+)
+from .skeleton_overlay import render_skeleton_overlay_svg
 
 __all__ = [
     "ConfidenceValue",
@@ -233,4 +238,12 @@ __all__ = [
     "extract_photo_skeleton",
     "extract_skeleton",
     "topology_counts",
+    "SkeletonCleanup",
+    "SkeletonCleanupLimits",
+    "SkeletonCleanupPolicy",
+    "SkeletonCleanupRecord",
+    "SkeletonCleanupRepository",
+    "SpurCandidate",
+    "cleanup_skeleton",
+    "render_skeleton_overlay_svg",
 ]

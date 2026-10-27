@@ -10,9 +10,9 @@ np = pytest.importorskip("numpy")
 
 from handwriting_plotter.adapters.images.opencv import OpenCvLineMaskCropper
 from handwriting_plotter.learning import (
-    AlignmentStaleError, SkeletonGraph, SkeletonLimitError, SkeletonRepository,
+    AlignmentStaleError, SkeletonCleanupRepository, SkeletonGraph, SkeletonLimitError, SkeletonRepository,
     TranscriptionReviewRepository, extract_photo_skeleton, manual_line_region,
-    persist_ink_mask, persist_line_regions, select_ink_mask_variant,
+    cleanup_skeleton, persist_ink_mask, persist_line_regions, render_skeleton_overlay_svg, select_ink_mask_variant,
 )
 from handwriting_plotter.learning.masks import InkMaskRaster
 from handwriting_plotter.learning.repository import DecodedImageInfo, PhotoRepository
@@ -72,6 +72,13 @@ def test_photo_source_mask_crop_review_coordinates_and_raw_raster_survive_reopen
     assert loaded.graph.skeleton_mask() == graph.skeleton_mask()
     assert photos.read_original(source.photo) == original
     assert TranscriptionReviewRepository(photos.root).load(review.sha256) == review
+    cleanup_repository = SkeletonCleanupRepository(photos.root)
+    cleanup = cleanup_repository.store(cleanup_skeleton(stored))
+    reopened = cleanup_repository.load_current(cleanup.sha256, photos=photos, source=source, review=review, cropper=cropper)
+    assert reopened == cleanup
+    assert reopened.cleanup.provenance == provenance
+    assert reopened.cleanup.skeleton_mask() == graph.skeleton_mask()
+    assert review.revision.reviewed_text not in render_skeleton_overlay_svg(stored, cleanup=cleanup.cleanup)
 
 
 @pytest.mark.parametrize("changed", ["review", "mask", "crop", "segmentation", "selected_variant"])
@@ -79,6 +86,8 @@ def test_stale_or_corrupt_photo_references_are_refused(photo, changed):
     photos, source, review, cropper = photo
     repository = SkeletonRepository(photos.root)
     stored = repository.store(extract_photo_skeleton(photos=photos, source=source, review=review, cropper=cropper))
+    cleanup_repository = SkeletonCleanupRepository(photos.root)
+    cleanup = cleanup_repository.store(cleanup_skeleton(stored))
     if changed == "review":
         review = TranscriptionReviewRepository(photos.root).append(
             source_manifest_sha256=source.sha256, line_id=review.revision.line_id, crop_sha256=review.revision.crop_sha256,
@@ -97,6 +106,8 @@ def test_stale_or_corrupt_photo_references_are_refused(photo, changed):
         source = select_ink_mask_variant(photos, source, "raw")
     with pytest.raises((AlignmentStaleError, ValueError), match="STALE|HASH_MISMATCH"):
         repository.load_current(stored.sha256, photos=photos, source=source, review=review, cropper=cropper)
+    with pytest.raises((AlignmentStaleError, ValueError), match="STALE|HASH_MISMATCH"):
+        cleanup_repository.load_current(cleanup.sha256, photos=photos, source=source, review=review, cropper=cropper)
 
 
 def test_unaccepted_review_is_refused_before_thinning(photo):
@@ -118,6 +129,10 @@ def test_stored_coordinate_shift_cannot_be_applied_to_current_crop(photo):
     stored = repository.store(altered)
     with pytest.raises(AlignmentStaleError, match="SKELETON_PROVENANCE_STALE"):
         repository.load_current(stored.sha256, photos=photos, source=source, review=review, cropper=cropper)
+    cleanups = SkeletonCleanupRepository(photos.root)
+    cleanup = cleanups.store(cleanup_skeleton(stored))
+    with pytest.raises(AlignmentStaleError, match="SKELETON_PROVENANCE_STALE"):
+        cleanups.load_current(cleanup.sha256, photos=photos, source=source, review=review, cropper=cropper)
 
 
 def test_inconsistent_geometry_and_resource_metadata_cannot_be_persisted(photo):

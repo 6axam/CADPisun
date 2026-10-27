@@ -1,4 +1,4 @@
-# TASK 13A: raw skeleton and topological graph
+# TASK 13: raw skeleton, conservative cleanup and diagnostics
 
 ## Algorithm and connectivity decision
 
@@ -32,8 +32,8 @@ References: [Zhang and Suen, 1984](https://doi.org/10.1145/357994.358023),
 Foreground pixels removed by thinning are recorded by the unchanged input-mask
 digest and pixel counts; the complete resulting raw skeleton is retained.
 Thinning is a topological representation, not a guarantee of a metric medial
-axis or faithful stroke width. TASK 13B owns pruning/cleanup; TASK 14 owns any
-future direction or traversal hypotheses.
+axis or faithful stroke width. The independently stored TASK 13B view below
+owns explicit pruning/cleanup; TASK 14 owns future direction/traversal hypotheses.
 
 ## Typed raw graph
 
@@ -151,6 +151,141 @@ axis. Sequential simple-point protection can bias the centerline or shift thick
 end caps; compact junction regions may retain filled cells. Diagonal contacts
 and junctions remain pixel interpretations with explicit ambiguity diagnostics.
 Very noisy/large masks can exceed admission limits. No short branch, isolated
-dot, loop or edge is automatically deleted. Graph cleanup, spur filtering,
-visual diagnostics and final parent TASK 13 verification belong to TASK 13B,
-which has not begun. Accuracy on real photographs remains unmeasured.
+dot, loop or edge is automatically deleted. TASK 13B adds the conservative
+derived view below. Accuracy on real photographs remains unmeasured.
+
+## TASK 13B: explicit conservative cleanup
+
+`explicit-terminal-filter/1` consumes the immutable TASK 13A record rather than
+running a new raster segmentation or thinning pipeline. The default is a
+lossless proposal: every raw pixel, node, edge, component and cycle survives.
+A short branch cannot be reliably classified as noise from geometry alone:
+it can be a real letter feature, attached diacritic, or ambiguous diagonal
+contact. Accordingly **no branch is automatically removed**.
+
+`SpurCandidate` identifies a raw endpoint-to-junction edge no longer than the
+configured `max_spur_length_px` (default 3, allowed 0–32 pixel-chain units).
+Candidates carry raw edge/endpoint/junction IDs, exact removable pixels,
+length, `ambiguous=true` and explicit evidence `semantic-role-unknown`.
+They have no probability or confidence. The threshold is in crop pixels, not
+millimetres or a writing-size-independent calibration.
+
+Removal requires an explicit tuple of candidate **raw** edge IDs. This is an
+acknowledged geometric edit, not a claim that the selected pixels are noise.
+Duplicate IDs, non-candidates and attempts to feed a cleanup back as a raw
+record are refused. Filtering is one pass over the original candidate set;
+there is no cascading erosion. A new decision starts again from the same raw
+record, so restoration consists of omitting a previous selection.
+
+Only the selected terminal chain and its endpoint may disappear from the
+derived view. All original junction-region pixels remain. Every affected raw
+junction must retain at least two incident links (a loop contributes two).
+Independent dots/short strokes, closed cycles and links between junctions are
+never removal candidates. Before returning a result, foreground-8 component
+identity, background-4 holes and every component's cycle rank must agree with
+the raw graph. Unsafe combinations refuse the entire operation; no partial
+success or partial record is published.
+
+Graph extraction reuses TASK 13A's adjacency, compact-region, chain and cycle
+implementation on retained pixels. New degree-two regions become exact chains;
+there is no smoothing, resampling, endpoint snapping, component merging or
+metric geometric simplification. Canonical derived IDs can change. They must
+not be mistaken for raw IDs; `removed_edge_ids` and `SpurCandidate.edge_id`
+always refer to the stored raw record. Original `InkComponent` ownership
+survives even when row-major component order changes after removal.
+
+### Typed results and immutable persistence
+
+| Model | Meaning |
+|---|---|
+| `SkeletonCleanupPolicy` | Pixel threshold, explicit selection and disabled cascading |
+| `SkeletonCleanupLimits` | Candidate/removal/work/workspace caps |
+| `SpurCandidate` | Ambiguous raw terminal branch and removable pixels |
+| `SkeletonCleanup` | Raw-record hash, source/crop/mask/review/frame provenance, canonical decisions, retained/removed pixels, regenerated typed nodes/edges/components and counters |
+| `SkeletonCleanupRecord` | Content hash, private path and checked result |
+
+`hp-skeleton-cleanup/1.0` records are canonical JSON under private
+`skeleton-cleanups/<hash-prefix>/<hash>.hp-skeleton-cleanup.json`. The raw record
+remains separately stored under `skeleton-graphs/`. Writes reuse the existing
+atomic, no-overwrite/fsync writer. Store and archival load resolve the raw
+hash, validate its complete geometry and recompute the cleanup from its
+policy/decisions; all derived metadata and geometry must match. Merely parsing
+a standalone `SkeletonCleanup` schema does not validate the parent reference:
+call `validate_raw()` or use the repository before consuming external data.
+
+`load_current()` additionally delegates to `SkeletonRepository.load_current()`
+for the existing active source, segmentation, latest accepted review, crop,
+selected mask and frame-offset checks. Historical records remain available
+via archival load, but cannot silently become active results for changed ink.
+An accepted transcription still does not certify mask pixel quality.
+
+```python
+from handwriting_plotter.learning import (
+    SkeletonCleanupRepository, cleanup_skeleton, render_skeleton_overlay_svg,
+)
+
+# raw is a checked SkeletonGraphRecord from the existing private repository.
+proposal = cleanup_skeleton(raw)  # all ink retained; inspect candidates first
+svg = render_skeleton_overlay_svg(raw, cleanup=proposal)
+
+# Only after an explicit geometric review, supply selected raw edge IDs:
+selected_raw_edge_ids = ()  # empty until actual review; never remove all blindly
+result = cleanup_skeleton(raw, remove_edge_ids=selected_raw_edge_ids)
+cleanups = SkeletonCleanupRepository(photo_repository.root)
+stored_cleanup = cleanups.store(result)
+restored = cleanups.load_current(
+    stored_cleanup.sha256, photos=photo_repository, source=source,
+    review=review, cropper=cropper,
+)
+retained_mask = restored.cleanup.skeleton_mask()
+```
+
+### Diagnostics and limits
+
+`render_skeleton_overlay_svg(raw, cleanup=..., input_mask=...)` is Qt-free.
+An optional input mask must pass the raw graph's actual input-digest and
+geometry checks. Without it, the gray background is the original raw skeleton.
+Blue chains, orange junction regions/dashed ambiguous candidates, green
+endpoints, cyan isolated marks, purple anchored cycles and red explicitly
+removed pixels share the exact crop coordinate frame. SVG titles/metadata
+identify components, canonical derived IDs, raw candidate IDs, source-frame
+offsets and internal junction holes. No transcript or ground truth is embedded.
+The SVG contains no direction arrows, inferred junction traversal, pen lifts or
+toolpath. It is not fed to PenPlan/G-code. This is a programmatic diagnostic
+API; a dedicated GUI correction workflow is not claimed here.
+
+The existing optional Qt SVG runtime can render it to PNG; headless integration
+tests assert visible colors/coordinates for retained chains, dots and removals.
+A synthetic before/after PNG was also visually inspected. These checks establish
+diagnostic rendering, not accuracy on real handwriting or new GUI controls.
+
+Cleanup defaults/hard caps: 8,192 candidates, 256 explicitly selected removals,
+20,000,000 work units (hard 50,000,000), 256 MiB workspace estimate. The existing
+raw graph limits still apply to graph reconstruction. Cleanup admission uses
+`8*raster_pixels + 4096*raw_skeleton_pixels + 8192` bytes, accounting for bounded
+validation/derived structures. This is an allocation estimate, not measured
+RSS, VMS or an OS-enforced memory quota. Cooperative cancellation and budget
+refusals return no successful partial view. Record parsing is capped at 16 MiB;
+duplicate JSON keys/non-finite values are rejected; SVG output is independently
+byte capped at 16 MiB. There are no new runtime dependencies.
+
+### TASK 13B verification and limitations
+
+Synthetic tests distinguish independent marks from terminal spurs; preserve
+T/X junction support, loops (including a loop with a short tail), thick/random
+junctions, border pixels, canonical ordering and exact node/edge coverage.
+Two sets of 32 seeded 8×8 masks test lossless proposals and independently
+flood-filled topology after admitted single-branch selections. Corrupt or
+forged derived geometry/provenance/counters, absent raw records, stale active
+photo references, resource exhaustion, cancellation and bounded SVG/JSON are
+covered. Prior TASK 13A's 512 exhaustive local patterns and 128 seeded masks
+remain part of regression. All fixtures are entirely synthetic.
+
+Filtering can refuse a short branch whose removal changes digital topology.
+Even an admitted removal may erase a meaningful attached letter feature if a
+human selects it incorrectly; topology cannot prove semantic correctness.
+No automatic noise classifier, true centerline/width claim or real-corpus
+cleanup accuracy is provided. Compact regions and diagonal contact ambiguity
+remain available for subsequent review. TASK 13 is complete under this raw +
+explicit-cleanup contract. TASK 14, direction hypotheses, stroke ordering,
+pen lifts and G-code generation from these graphs have not started.
