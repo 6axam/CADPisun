@@ -1,6 +1,6 @@
 # Photo-to-Handwriting progress
 
-Last updated: 2026-10-26
+Last updated: 2026-10-27
 
 ## Current checkpoint
 
@@ -8,16 +8,121 @@ Last updated: 2026-10-26
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 14 / 25 parent tasks + TASK 13A |
-| Last completed | TASK 13A — Topology-preserving thinning and raw skeleton graph |
-| Next | TASK 13B — Graph cleanup, spur filtering and diagnostics; intentionally not started |
+| Completed | 15 / 25 parent tasks |
+| Last completed | TASK 13B — Conservative graph cleanup, spur filtering and diagnostics; parent TASK 13 DONE |
+| Next | TASK 14 — Stroke direction and pen lifts; not started |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
 
+## TASK 13B — Conservative graph cleanup, spur filtering and diagnostics
+
+Status: `[x]` DONE. TASK 13A and 13B are complete; parent TASK 13 is `[x] DONE`
+under the raw-topology plus explicit-cleanup contract. TASK 14 was not started.
+
+Completion commit: `8ff041811e758c25c1df31c15a6717f89b439919`.
+
+- Added Qt-free, frozen `SkeletonCleanupPolicy`, `SkeletonCleanupLimits`,
+  `SpurCandidate`, `SkeletonCleanup` and content-addressed cleanup records.
+  The implementation reuses TASK 13A adjacency, component/topology and graph
+  extraction; it does not create a second thinning/segmentation pipeline.
+- Default cleanup preserves every raw pixel/node/edge/component and only
+  proposes short endpoint-to-junction branches as ambiguous. A short branch
+  can be a real letter feature or attached mark. No classifier, calibrated
+  confidence, automatic deletion or geometric smoothing is claimed.
+- Explicit raw-edge selections perform bounded single-pass filtering.
+  Independent dots, short components, loops and junction pixels cannot be
+  selected for deletion. Affected original junctions retain at least two
+  incident links. Whole-operation component identity, digital holes and
+  per-component cycle checks refuse unsafe selections. Regenerated canonical
+  chains remove redundant degree-two graph nodes while retaining exact pixels;
+  there is no cascading pruning or pen-order inference.
+- Derived IDs can differ from raw IDs; candidates/decisions always reference
+  the immutable raw record hash and raw edge IDs. Source/crop/mask/review/frame
+  provenance and original InkComponent ownership survive canonical reordering.
+  Store/reopen recompute the derived result; active reopen delegates existing
+  source, segmentation, review, crop, mask and offset invalidation checks.
+- Added bounded diagnostic SVG with raw-ink background, retained chains,
+  compact junctions/internal-hole metadata, isolated marks, anchored cycles,
+  ambiguous raw candidates and explicit removals. Optional actual input mask
+  must match raw input integrity checks. No review text is embedded. Qt SVG
+  integration verifies PNG pixel colors/positions; a synthetic before/after
+  PNG was separately rendered and visually inspected. No GUI controls were
+  added or claimed; the API prepares diagnostics for later manual correction.
+- Candidate/removal/work/workspace/record/SVG caps and cancellation refuse
+  partial success. Workspace values are admission estimates, distinct from
+  RSS, VMS and OS hard quotas. No dependencies, project formats, StylePacks,
+  HTR models, exports or private data were changed. No TASK 14 work, inferred
+  stroke directions, pen lifts or G-code from these graphs were implemented.
+
+Focused Linux/headless Qt checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_skeleton_cleanup.py tests/learning/test_skeleton.py \
+  tests/learning/test_skeleton_photo.py tests/gui/test_skeleton_overlay.py
+```
+
+Result: `72 passed in 3.91s`; `31` new cases (30 Qt-free cleanup + one Qt
+rendering), plus extended existing photo/stale-reference checks. Cases include
+T/X support, loop-tail removal and deterministic cycle anchoring, protected
+dots/short strokes, exact geometry/coverage, canonical component reordering,
+selection-order determinism, anti-cascade behavior, immutable reopen, forged
+geometry/provenance/counters, corrupt/missing raw records, strict bounded JSON,
+SVG limits, cancellation and resource refusal. Two sets of 32 fixed-seed masks
+check exact no-op geometry and independently flood-filled topology after
+admitted selections; prior TASK 13A exhaustive/seeded cases remain intact.
+These synthetic checks are not a real-handwriting accuracy measurement.
+
+One isolated Python 3.12.12 process reused the previous 800×100 synthetic
+rectangle: 9,120 input foreground pixels, 754 raw skeleton pixels, 2 nodes,
+1 edge, 0 candidates/removals. Cleanup (including raw integrity validation)
+took 0.042616 seconds and 85,191 work units. Cleanup workspace estimate:
+3,736,576 bytes. Measured **whole-process peak RSS** including preceding
+extraction/store: 45,552 KiB (~44.5 MiB); not cleanup-only RAM or virtual memory.
+This is one local sample, not a speed or memory guarantee for real pages.
+
+Final checks:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Result: `433 passed in 32.39s` on Linux, no failures/skips reported.
+
+```bash
+uv run python -m compileall -q src tests
+```
+
+```bash
+uv lock --check
+```
+
+```bash
+git diff --check
+```
+
+All passed; lock resolves 26 packages. Wheel and sdist built successfully with
+`uv build --out-dir /tmp/cadpisun-task13b-build`. Windows was not run. All new
+fixtures/artifacts are synthetic; no private photographs, masks, transcripts,
+predictions or model weights were read or published.
+
+Contract/API/limitations: [SKELETON_GRAPH.md](SKELETON_GRAPH.md).
+
+Next TASK 14 is estimated at 12/12 and approximately 18k–40k tokens, with high
+uncertainty. Begin with bounded competing traversal hypotheses and synthetic
+acceptance cases for crossings/loops, explicitly distinguishing inferred
+movement from observed pen trajectory. GPT-6.1 Sol at `xhigh` is a reasonable
+cost-conscious starting model for the combined graph/ambiguity work; this is
+an engineering recommendation, not a quota guarantee. Routine documentation
+edits can use Luna. See [OpenAI Docs model selection](https://developers.openai.com/api/docs/guides/model-selection).
+The percentage of the user's subscription quota cannot be inferred from a
+token estimate. Stop at this completed TASK 13 checkpoint.
+
 ## TASK 13A — Topology-preserving thinning and raw graph extraction
 
-Status: `[x]` DONE. Parent TASK 13 remains `[>] IN_PROGRESS`; TASK 13B is
-`[ ] TODO`. TASK 14, traversal/direction, pen lifts and G-code were not started.
+Status: `[x]` DONE. At this historical checkpoint parent TASK 13 was
+`[>] IN_PROGRESS` and TASK 13B `[ ] TODO`. Current completion is recorded above.
+TASK 14, traversal/direction, pen lifts and G-code were not started.
 
 Completion commit: `da1170242d74200413dda33e53542cd1ddfe91b4`.
 
@@ -84,9 +189,9 @@ Detailed contract and limitations: [SKELETON_GRAPH.md](SKELETON_GRAPH.md).
 Final verification: full Linux/headless Qt `402 passed in 27.02s`;
 `uv run python -m compileall -q src tests`, `uv lock --check` (26 packages),
 `git diff --check` and wheel/sdist builds passed. Windows was not run.
-TASK 13A is complete; parent TASK 13 remains in progress because cleanup,
-spur filtering, dedicated diagnostics and final verification belong to TASK
-13B. Estimated next task: 9–10/12 complexity, approximately 10k–20k tokens;
+At that checkpoint TASK 13A was complete; parent TASK 13 remained in progress
+because cleanup, spur filtering, dedicated diagnostics and final verification
+belonged to TASK 13B. Estimated next task then: 9–10/12, approximately 10k–20k tokens;
 GPT-6.1 Sol `xhigh` is the recommended planning model. First specify conservative
 cleanup acceptance tests that distinguish real small marks from removable
 spurs while retaining the raw graph. No TASK 13B work was started here.
