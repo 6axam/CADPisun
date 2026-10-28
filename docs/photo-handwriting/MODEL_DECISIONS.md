@@ -159,6 +159,22 @@ learned proportions or fit a chosen writing height/ruling. It must keep joins
 continuous, display physical dimensions, and report overflow instead of silently
 shrinking or applying nonuniform per-glyph stretches.
 
+## PH-ADR-013 — Bounded trail hypotheses without invented junction geometry
+
+**Status:** Accepted for TASK 14.
+
+Use bounded partial port matchings and a bounded order/orientation beam over
+the existing immutable skeleton graph. Keep multiple candidates, exact edge
+references, node regions and explicit unknowns. Do not duplicate edges to force
+an Euler path or interpolate straight bridges across compact junctions.
+Ranking constants are versioned provisional geometric heuristics; calibration
+on paired online/photo traces remains deferred. A search fallback preserves
+coverage with unresolved directions/order, no selected pen-lift sequence and
+null cost. Explicit human selection is append-only and remains
+`offline_inferred`; it never becomes `online_capture` or automatic publication.
+
+See [TRAJECTORY_HYPOTHESES.md](TRAJECTORY_HYPOTHESES.md).
+
 ## Deferred decisions
 
 | Decision | Earliest task | Required evidence |
@@ -167,7 +183,7 @@ shrinking or applying nonuniform per-glyph stretches.
 | Ink color/separation profiles | TASK 07 | Approved masks for representative pen/paper conditions |
 | Primary and fallback HTR provider | TASK 09 | Identical-corpus quality, latency, RAM, rights, and install report |
 | Alignment algorithm | TASK 12 | Ambiguous cursive/diacritic fixtures and alternative preservation |
-| Stroke-order scoring weights | TASK 14 | Paired online/photo subset plus manual correction time |
+| Calibrated stroke-order scoring weights | After TASK 14 heuristic foundation | Paired online/photo subset plus manual correction time; not provided by synthetic route tests |
 | Clustering/deduplication thresholds | TASK 15 | Repeated authentic variants with reviewer decisions |
 
 No deferred choice blocks TASK 06.

@@ -13,6 +13,7 @@ from handwriting_plotter.learning import (
     AlignmentStaleError, SkeletonCleanupRepository, SkeletonGraph, SkeletonLimitError, SkeletonRepository,
     TranscriptionReviewRepository, extract_photo_skeleton, manual_line_region,
     cleanup_skeleton, persist_ink_mask, persist_line_regions, render_skeleton_overlay_svg, select_ink_mask_variant,
+    TrajectoryRepository, infer_trajectories,
 )
 from handwriting_plotter.learning.masks import InkMaskRaster
 from handwriting_plotter.learning.repository import DecodedImageInfo, PhotoRepository
@@ -79,6 +80,13 @@ def test_photo_source_mask_crop_review_coordinates_and_raw_raster_survive_reopen
     assert reopened.cleanup.provenance == provenance
     assert reopened.cleanup.skeleton_mask() == graph.skeleton_mask()
     assert review.revision.reviewed_text not in render_skeleton_overlay_svg(stored, cleanup=cleanup.cleanup)
+    trajectories = TrajectoryRepository(photos.root)
+    inferred = trajectories.store(infer_trajectories(stored, cleanup=cleanup))
+    assert trajectories.load_current(inferred.sha256, raw_graph_sha256=stored.sha256, cleanup_sha256=cleanup.sha256,
+                                     photos=photos, source=source, review=review, cropper=cropper) == inferred
+    with pytest.raises(AlignmentStaleError, match="TRAJECTORY_SELECTION_STALE"):
+        trajectories.load_current(inferred.sha256, raw_graph_sha256=stored.sha256,
+                                  photos=photos, source=source, review=review, cropper=cropper)
 
 
 @pytest.mark.parametrize("changed", ["review", "mask", "crop", "segmentation", "selected_variant"])
@@ -88,6 +96,8 @@ def test_stale_or_corrupt_photo_references_are_refused(photo, changed):
     stored = repository.store(extract_photo_skeleton(photos=photos, source=source, review=review, cropper=cropper))
     cleanup_repository = SkeletonCleanupRepository(photos.root)
     cleanup = cleanup_repository.store(cleanup_skeleton(stored))
+    trajectories = TrajectoryRepository(photos.root)
+    inferred = trajectories.store(infer_trajectories(stored, cleanup=cleanup))
     if changed == "review":
         review = TranscriptionReviewRepository(photos.root).append(
             source_manifest_sha256=source.sha256, line_id=review.revision.line_id, crop_sha256=review.revision.crop_sha256,
@@ -108,6 +118,9 @@ def test_stale_or_corrupt_photo_references_are_refused(photo, changed):
         repository.load_current(stored.sha256, photos=photos, source=source, review=review, cropper=cropper)
     with pytest.raises((AlignmentStaleError, ValueError), match="STALE|HASH_MISMATCH"):
         cleanup_repository.load_current(cleanup.sha256, photos=photos, source=source, review=review, cropper=cropper)
+    with pytest.raises((AlignmentStaleError, ValueError), match="STALE|HASH_MISMATCH"):
+        trajectories.load_current(inferred.sha256, raw_graph_sha256=stored.sha256, cleanup_sha256=cleanup.sha256,
+                                  photos=photos, source=source, review=review, cropper=cropper)
 
 
 def test_unaccepted_review_is_refused_before_thinning(photo):

@@ -121,6 +121,14 @@ from .skeleton_cleanup import (
     SkeletonCleanupRepository, SpurCandidate, cleanup_skeleton,
 )
 from .skeleton_overlay import render_skeleton_overlay_svg
+from .trajectories import (
+    DirectedSkeletonEdge, EdgeDirectionConstraint, InferredPenLift, InferredStroke,
+    JunctionPassage, PortPair, TrajectoryConstraints, TrajectoryHypothesis,
+    TrajectoryLimitError, TrajectoryLimits, TrajectoryRecord, TrajectoryRepository,
+    TrajectoryRun, infer_trajectories,
+)
+from .trajectory_review import TrajectoryDecision, TrajectoryDecisionRecord, TrajectoryReviewRepository
+from .trajectory_overlay import render_trajectory_overlay_svg
 
 __all__ = [
     "ConfidenceValue",
@@ -246,4 +254,9 @@ __all__ = [
     "SpurCandidate",
     "cleanup_skeleton",
     "render_skeleton_overlay_svg",
+    "DirectedSkeletonEdge", "EdgeDirectionConstraint", "InferredPenLift", "InferredStroke",
+    "JunctionPassage", "PortPair", "TrajectoryConstraints", "TrajectoryHypothesis",
+    "TrajectoryLimitError", "TrajectoryLimits", "TrajectoryRecord", "TrajectoryRepository",
+    "TrajectoryRun", "infer_trajectories",
+    "TrajectoryDecision", "TrajectoryDecisionRecord", "TrajectoryReviewRepository", "render_trajectory_overlay_svg",
 ]

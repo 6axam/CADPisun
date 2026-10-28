@@ -17,8 +17,8 @@ not evidence for page- or writer-independent recognition quality.
 | Ink separation | NOT RUN — TASK 07 | — |
 | Line segmentation | NOT RUN — TASK 08 | — |
 | Ukrainian HTR comparison | PRIVATE SINGLE-PAGE PILOT — TASK 09 | 19 authorized real lines; select on 15 tuning lines, one frozen 4-line control run. Best tuning: 11.11% CER / 46.88% WER; control: 34.92% CER / 60.00% WER |
-| Skeleton geometry | NOT RUN — TASK 13 | — |
-| Direction/order inference | NOT RUN — TASK 14 | — |
+| Skeleton geometry | SYNTHETIC TOPOLOGY/CORRECTNESS ONLY — TASK 13 | Component/hole/geometry invariants and conservative explicit filtering; real-photo geometric accuracy not measured |
+| Direction/order inference | SYNTHETIC HYPOTHESES ONLY — TASK 14 | Bounded alternatives, coverage, constraints and review correctness; actual direction/order/pen-lift accuracy and DTW remain null without paired online traces |
 | End-to-end personal StylePack | NOT RUN — TASK 22 | — |
 
 ## Reproducibility record

@@ -287,5 +287,6 @@ human selects it incorrectly; topology cannot prove semantic correctness.
 No automatic noise classifier, true centerline/width claim or real-corpus
 cleanup accuracy is provided. Compact regions and diagonal contact ambiguity
 remain available for subsequent review. TASK 13 is complete under this raw +
-explicit-cleanup contract. TASK 14, direction hypotheses, stroke ordering,
-pen lifts and G-code generation from these graphs have not started.
+explicit-cleanup contract. TASK 14 now adds independently stored
+[offline trajectory hypotheses](TRAJECTORY_HYPOTHESES.md). It does not alter
+this raw/cleanup contract or enable G-code generation from these graphs.
