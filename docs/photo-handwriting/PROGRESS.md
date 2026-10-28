@@ -1,6 +1,6 @@
 # Photo-to-Handwriting progress
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 
 ## Current checkpoint
 
@@ -8,16 +8,143 @@ Last updated: 2026-10-27
 |---|---|
 | Branch | `feat/photo-to-handwriting` |
 | Base | `main` at `05cbc014fc6d97d052f55e56a00e32eeee942a59` |
-| Completed | 15 / 25 parent tasks |
-| Last completed | TASK 13B — Conservative graph cleanup, spur filtering and diagnostics; parent TASK 13 DONE |
-| Next | TASK 14 — Stroke direction and pen lifts; not started |
+| Completed | 16 / 25 parent tasks |
+| Last completed | TASK 14 — Bounded offline stroke-direction, order and pen-lift hypotheses |
+| Next | TASK 15 — Letter and ligature sample bank; not started |
 | Actual remaining Codex quota | Unknown; the runtime did not report it |
 
+
+## TASK 14 — Offline direction, trail and pen-lift hypotheses
+
+Status: `[x]` DONE under the bounded hypothesis/API contract. Actual pen-order
+accuracy remains unmeasured. TASK 15 and TASK 16 were not started.
+
+Completion commit: `cc292328029b676bddfffeb71e40acfa0d2ff65f`.
+
+- Added frozen Qt-free `TrajectoryRun`, `TrajectoryHypothesis`,
+  `DirectedSkeletonEdge`, `InferredStroke`, `JunctionPassage`, `InferredPenLift`,
+  constraints/resource models and private content-addressed persistence.
+  Every run and human decision stays `offline_inferred`; online captures are
+  neither modified nor silently reversed. No recognizer, transcript, ground
+  truth, model weight or new runtime dependency is involved.
+- Reused raw/selected-cleanup graph IDs, exact edge pixel chains, compact
+  junction regions, original component ownership and source/crop/mask/review/
+  frame provenance. Bounded partial port matchings explore possible junction
+  continuations/stroke breaks using angular-continuity heuristics. A bounded
+  beam explores trail directions/order and pen-up distance, retaining distinct
+  junction alternatives rather than only many copies of the best pairing.
+- Every edge is represented exactly once; all node regions and isolated marks
+  remain referenced. No retracing is invented to force an Euler route. Cycles
+  keep deterministic anchors and opposite directions with an explicit
+  unobserved-start warning. Short detached marks retain separate stroke/order
+  hypotheses. No interior path is interpolated across a compact junction.
+- User-required/forbidden port joins and fixed edge directions are validated
+  and enforced. Conflicts refuse; a search with no retained feasible route
+  reports `constraint_coverage`, not a false proof of infeasibility. Search/
+  complexity fallback retains complete coverage with unknown directions/
+  order, no selected lifts and null cost. Memory admission and cancellation
+  raise explicit errors; no partial successful record is stored.
+- Immutable `hp-trajectory-hypotheses/1.0` store/reopen resolves and recomputes
+  exact parents and all derived content. Even a correctly hashed forged record
+  with altered direction/cost/provenance is refused. Active reopening requires
+  current raw/cleanup selection hashes and existing source, latest review,
+  crop, selected mask, segmentation and coordinate integrity checks.
+- Added an explicit programmatic accept/reject boundary. Append-only decision
+  records retain UUID/time/revision/parent and uncertainty acknowledgement;
+  a per-parent immutable successor slot gives atomic optimistic concurrency.
+  Two-writer and interrupted-publication tests verify one published successor
+  and no silent acceptance of orphan records. The last valid review stays
+  readable at the 256-event cap. Unresolved fallback/empty/region-placeholder
+  routes cannot be accepted. Selection does not fill in unknown geometry or
+  authorize publication to a StylePack.
+- Added bounded SVG diagnostics for proposed directions/order and pen-up
+  transfers. A Qt regression reproduced red pen-up lines obscuring tiny dots;
+  painting transfers behind ink fixed it without weakening pixel assertions.
+  Fallback renders no selected arrows/order/lift route. Synthetic X alternatives
+  were rendered to PNG and visually inspected. New Studio controls, the sample
+  bank, expanded correction UI, StylePack publication and G-code are not part
+  of this checkpoint.
+
+Focused checks (Linux/headless Qt):
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q \
+  tests/learning/test_trajectories.py tests/learning/test_trajectory_review.py \
+  tests/learning/test_skeleton_photo.py tests/gui/test_trajectory_overlay.py \
+  tests/learning/test_skeleton.py tests/learning/test_skeleton_cleanup.py \
+  tests/gui/test_skeleton_overlay.py
+```
+
+Result: `116 passed` after the final integrity cases; includes `44` new TASK 14
+cases and extended existing photo/stale checks. Coverage includes ordered edge
+geometry and exact-once coverage, actual chosen port transitions, T/X pairing
+diversity, chains, cycles, dots, thick junctions/holes, empty/border regions,
+32 deterministic random masks, explicit constraints, budget/memory/cancellation,
+raw/cleanup selection, corrupt/forged content, review races/crashes/caps, no
+ML/CV/Qt imports in core, and optional Qt rendering. Entirely synthetic data.
+
+Final regression:
+
+```bash
+QT_QPA_PLATFORM=offscreen uv run pytest -q
+```
+
+Result: `477 passed in 31.02s`, no failures/skips reported. Also passed:
+
+```bash
+uv run python -m compileall -q src tests
+```
+
+```bash
+uv lock --check
+```
+
+```bash
+git diff --check
+```
+
+```bash
+uv build --out-dir /tmp/cadpisun-task14-build
+```
+
+Lock resolves 26 packages; wheel and sdist built. Windows was not run.
+No private photographs, masks, transcripts, predictions or model weights were
+read or published; synthetic diagnostics/profile records remained under `/tmp`.
+
+One Python 3.12.12 process on 2026-10-28 measured two single synthetic inference
+calls (including parent integrity validation; no warmup/repetition claim):
+
+| Input | Raw pixels / nodes / edges | Hypotheses / expansions | Inference | Workspace estimate |
+|---|---|---|---|---|
+| 800×100 rectangle (9,120 input ink pixels) | 754 / 2 / 1 | 2 / 3; no truncation | 0.013538 s | 4,065,280 bytes |
+| 24×24 X | 33 / 5 / 4 | 8 / 384; alternatives truncated | 0.004877 s | 550,400 bytes |
+
+Measured whole-process peak RSS, including previous extraction/store, was
+46,968 KiB (~45.9 MiB). This is not inference-only RAM, virtual memory or a
+real-photo performance/quality guarantee. Workspace includes parent data and
+expanded beam tuples; it is an admission estimate rather than an OS quota.
+Actual direction/order/pen-lift accuracy and DTW remain null until a paired
+online/photo corpus exists. Provisional ranking weights were not calibrated
+or presented as probabilities.
+
+Contract/API/limits: [TRAJECTORY_HYPOTHESES.md](TRAJECTORY_HYPOTHESES.md).
+PH-ADR-013 records the explicit hypothesis/fallback policy. The benchmark ledger
+now distinguishes synthetic correctness from unmeasured real trajectories.
+
+Next TASK 15: approximately 9/12 and 12k–24k tokens, high uncertainty. Begin with
+an immutable, provenance-linked sample index that preserves unresolved shared
+groups and authentic variants; similarity must not silently relabel or publish
+samples. GPT-6.1 Sol `high` is a reasonable cost-conscious starting model for
+the contracts/clustering work; Luna can handle later routine documentation.
+This recommendation follows [OpenAI Docs model selection](https://developers.openai.com/api/docs/guides/model-selection)
+as a starting point, not a measured quota claim. The user's subscription-limit
+percentage cannot be derived from token estimates. Stop after TASK 14.
 
 ## TASK 13B — Conservative graph cleanup, spur filtering and diagnostics
 
 Status: `[x]` DONE. TASK 13A and 13B are complete; parent TASK 13 is `[x] DONE`
-under the raw-topology plus explicit-cleanup contract. TASK 14 was not started.
+under the raw-topology plus explicit-cleanup contract. TASK 14 had not started
+at that historical checkpoint; its current completion is recorded above.
 
 Completion commit: `8ff041811e758c25c1df31c15a6717f89b439919`.
 
